@@ -337,7 +337,7 @@ namespace mox{
 
     template<typename T>
     requires GPUDataType<T>
-    std::span<T> translateToSpan(std::vector<T> data) noexcept{
+    std::span<T> translateToSpan(std::vector<T>& data) noexcept{
         return std::span<T>(data);
     }
 }
