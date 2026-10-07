@@ -1,10 +1,11 @@
 #pragma once
 
 #include "../Buffers/buffer.hpp"
-#include "../Image/RenderImage.hpp"
-#include "../Image/Skybox.hpp"
-#include "../Image/Textures.hpp"
+#include "../Image2/RenderImage2.hpp"
+#include "../Image2/Skybox2.hpp"
+#include "../Image2/Textures2.hpp"
 #include "../Sampler/Sampler.hpp"
+#include <variant>
 
 namespace mox{
 
@@ -15,7 +16,6 @@ namespace mox{
 
         VkImageView view= nullptr;
         
-        VkImageLayout layout;
     };
 
     struct DescriptorTypeSampler{
@@ -45,10 +45,9 @@ namespace mox{
 
     };
 
-    inline DescriptorData createDescriptorData(VkImageView view, VkImageLayout layout , VkDescriptorType descriptorType, const uint32_t index , const uint32_t arID) noexcept{
+    inline DescriptorData createDescriptorData(VkImageView view, VkDescriptorType descriptorType, const uint32_t index , const uint32_t arID) noexcept{
         
         DescriptorTypeImage image{};
-        image.layout = layout;
         image.view = view;
 
         DescriptorData data{};
@@ -104,6 +103,136 @@ namespace mox{
         data.samplerInfo = {};
         data.bindingIndex = index;
         data.indexInArray = arID;
+        return data;
+    }
+
+    inline DescriptorData createDescriptorData(const std::variant<Sampler* , VkDeviceAddress , Skybox2* , Texture2* , RenderImage2* , BufferBase*> input , VkDescriptorType type , const uint32_t index , const uint32_t arID){
+        DescriptorData data{};
+
+        if(std::holds_alternative<Sampler*>(input)){
+
+            const auto sampler = std::get<Sampler*>(input);
+            if(!sampler){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the sampler is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            } 
+            data = createDescriptorData(sampler , index , arID);
+
+        }else if(std::holds_alternative<Skybox2*>(input)){
+
+            const auto image = std::get<Skybox2*>(input);
+            if(!image){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the skybox2 is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            if(!image->view){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the skybox2 view is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            data = createDescriptorData(image->view , type , index , arID);
+
+        }else if(std::holds_alternative<RenderImage2*>(input)){
+
+            const auto image = std::get<RenderImage2*>(input);
+            if(!image){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the render image2 is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            if(!image->view){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the render image2 view is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            data = createDescriptorData(image->view , type , index , arID);
+
+        }else if(std::holds_alternative<Texture2*>(input)){
+
+            const auto image = std::get<Texture2*>(input);
+            if(!image){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the texture2 is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            if(!image->view){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the texture2 view is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            data = createDescriptorData(image->view , type , index , arID);
+
+        }else if(std::holds_alternative<BufferBase*>(input)){
+
+            const auto buffer = std::get<BufferBase*>(input);
+            if(!buffer){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the buffer is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            if(!buffer->buffer){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the buffers buffer is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            data = createDescriptorData(buffer , type , index , arID);
+
+        }else if(std::holds_alternative<VkDeviceAddress>(input)){
+
+            const auto AS = std::get<VkDeviceAddress>(input);
+            if(!AS){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data , since the AS address is nullptr , message Count {} " , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+                return {};
+            }
+            data = createDescriptorData(AS , index , AS);
+
+        }else{
+            return {};
+        }
+
         return data;
     }
 
@@ -280,7 +409,7 @@ namespace mox{
 
                 VkDescriptorImageInfo image{};
                 image.sampler = nullptr;
-                image.imageLayout = data.imageInfo.layout;
+                image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
                 image.imageView = data.imageInfo.view;
 
                 VkDescriptorGetInfoEXT info{};

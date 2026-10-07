@@ -1,17 +1,26 @@
 #pragma once
 
-#include "ImageBase.hpp"
+#include "ImageBase2.hpp"
 
 namespace mox{
 
     class RenderImage2;
-    using pRenderImage = std::shared_ptr<RenderImage2>;
+    using pRenderImage2 = std::shared_ptr<RenderImage2>;
 
-    // render image is designed for storage images
-    // that are used in shaders or pipelines
-    // instead of textures : this rely on extent of swapchain
+    // =============================== INFO ===============================
+    // RenderImage2 
+    // CHANGES:
+    // new render image has only one view, since other will be created per mip or layer
+    // now it has only 2 translates
+    // first is translateImage , basically works same as old one
+    // the only difference is the 2nd one
+    // the second one translate image from undefined to general
+    // the difference is that it can be used to reset image
+    // since in the prev one we didnt care about it 
+    // however basically nothing new tbh
+    // =============================== END ===============================
 
-    class RenderImage2 final : public ImageBase{
+    class RenderImage2 final : public ImageBase2{
     public:
 
         struct CreateInfo{
@@ -29,18 +38,15 @@ namespace mox{
             uint32_t layerCount = 1;
             uint32_t mipMapCount = 1;
 
-            bool viewPerLayer = false; // for CSM maybe idk
-            bool viewPerMip = false; // for frustum 
-
             VkClearColorValue clear{};
         };
 
         RenderImage2() = delete;
         RenderImage2(RenderImage2& input) = delete;
-        RenderImage2(RenderImage2&& input) noexcept : ImageBase(std::move(input)){
+        RenderImage2(RenderImage2&& input) noexcept : ImageBase2(std::move(input)){
             view = std::exchange(input.view , nullptr);
-            viewPerMip = std::move(input.viewPerMip);
-            viewPerLayer = std::move(input.viewPerLayer);
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
         }
 
 
@@ -48,8 +54,8 @@ namespace mox{
         RenderImage2& operator=(RenderImage2&& input) noexcept{
             performCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
-            viewPerMip = std::move(input.viewPerMip);
-            viewPerLayer = std::move(input.viewPerLayer);
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
             return *this;
         }
 
@@ -57,7 +63,7 @@ namespace mox{
             cleanRenderImage();
         }
 
-        explicit RenderImage2(const CreateInfo &data) : ImageBase(data.context){
+        explicit RenderImage2(const CreateInfo &data) : ImageBase2(data.context){
             {
                 const auto result = createTheRenderImage(data);
                 if(!result.has_value()){
@@ -69,7 +75,7 @@ namespace mox{
             }
 
             {
-                const auto result = translateToFinalLayout(data.finalLayout , data.clear);
+                const auto result = translateImageCreation(data);
                 if(!result.has_value()){
                     engineLogger(&result.error());
                     cleanRenderImage();
@@ -79,20 +85,82 @@ namespace mox{
         }
 
         VkImageView view = nullptr;
-        std::vector<VkImageView> viewPerMip{};
-        std::vector<VkImageView> viewPerLayer{};
+
+        // translate image
+
+        VkImageMemoryBarrier2 translateImage(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+            VkImageMemoryBarrier2 barrier{};
+
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.image = this->image;
+            barrier.pNext = nullptr;
+            barrier.srcAccessMask = currentAccess;
+            barrier.dstAccessMask = access;
+            barrier.srcStageMask = currentStage;
+            barrier.dstStageMask = stage;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.subresourceRange.aspectMask = generalImageData.aspect;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.layerCount = generalImageData.layerCount;
+            barrier.subresourceRange.levelCount = generalImageData.mipMapCount;
+
+            currentAccess = access;
+            currentStage = stage;
+
+            return barrier;
+        }
+
+        // translate from undefined
+
+        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+            VkImageMemoryBarrier2 barrier{};
+
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.image = this->image;
+            barrier.pNext = nullptr;
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = access;
+            barrier.srcStageMask = currentStage;
+            barrier.dstStageMask = stage;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.subresourceRange.aspectMask = generalImageData.aspect;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.layerCount = generalImageData.layerCount;
+            barrier.subresourceRange.levelCount = generalImageData.mipMapCount;
+
+            currentAccess = access;
+            currentStage = stage;
+
+            return barrier;
+        }
+
+
+        const VkAccessFlags acquireImageAccess() const noexcept{
+            return currentAccess;
+        }
+
+        const VkPipelineStageFlags acquireImageStage() const noexcept{
+            return currentStage;
+        }
 
     private:
+
+        VkAccessFlags currentAccess = VK_ACCESS_2_NONE;
+        VkPipelineStageFlags currentStage = VK_PIPELINE_STAGE_2_NONE;
 
         void cleanRenderImage() noexcept{
             if(device){
                 if(view) vkDestroyImageView(device , view , nullptr);
-                for(auto& v : viewPerMip) if(v) vkDestroyImageView(device , v , nullptr);
-                for(auto& v : viewPerLayer) if(v) vkDestroyImageView(device , v , nullptr);
             }
             view = nullptr;
-            viewPerMip.clear();
-            viewPerLayer.clear();
         }
 
         [[nodiscard]] ErrorDataOutput<void> createTheRenderImage(const CreateInfo &data) noexcept{
@@ -135,35 +203,19 @@ namespace mox{
                 }
             }
 
-            if(data.viewPerMip){
-                viewPerMip.resize(data.mipMapCount);
-                for(uint32_t i = 0 ; i < data.mipMapCount ; i++){
-                    const auto result = createImageView(viewPerMip[i] , data.layerCount , 0 , 1 , i);
-                    if(!result.has_value()){
-                        return std::unexpected(result.error());
-                    }
-                }
-            }
-
-            if(data.viewPerLayer){
-                viewPerLayer.resize(data.layerCount);
-                for(uint32_t i = 0 ; i < data.layerCount ; i++){
-                    const auto result = createImageView(viewPerLayer[i] , 1 , i , data.mipMapCount , 0);
-                    if(!result.has_value()){
-                        return std::unexpected(result.error());
-                    }
-                }
-            }
-
             return{};
         }
 
-        [[nodiscard]] ErrorDataOutput<void> translateToFinalLayout(VkImageLayout finalLayout , const VkClearColorValue value ){
+        ErrorDataOutput<void> translateImageCreation(const CreateInfo &input) noexcept{
 
-            cmdFunctionType recordFunction = [&] (VkCommandBuffer &cmd)  ->void{
-                // one barrier covers every mip and every layer , the per mip / per layer views only look at
-                // subresources of this image , so they are in the right layout as soon as the whole image is
-                auto barrier = translateUnified(VK_IMAGE_LAYOUT_UNDEFINED , VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL , generalImageData.layerCount , 0 , generalImageData.mipMapCount , 0);
+            currentAccess = 0;
+            currentStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+
+
+            cmdFunctionType function = [&](VkCommandBuffer &cmd) ->void {
+                if(!cmd) return;
+
+                auto barrier = translateImageUndefined(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
 
                 VkDependencyInfo info{};
                 info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -185,9 +237,10 @@ namespace mox{
                 range.baseMipLevel = 0;
                 range.layerCount = generalImageData.layerCount;
                 range.levelCount = generalImageData.mipMapCount;
-
+                // i will add later other formats
                 if(format != VK_FORMAT_D32_SFLOAT){
-                    vkCmdClearColorImage(cmd , image , VK_IMAGE_LAYOUT_GENERAL , &value , 1 , &range);
+
+                    vkCmdClearColorImage(cmd , image , VK_IMAGE_LAYOUT_GENERAL , &input.clear , 1 , &range);
                 }else{
                     VkClearDepthStencilValue depthValue{};
                     depthValue.depth = 1.0f;
@@ -196,16 +249,14 @@ namespace mox{
                     vkCmdClearDepthStencilImage(cmd , image , VK_IMAGE_LAYOUT_GENERAL , &depthValue , 1 , &range);
                 }
 
-                barrier =  translateUnified(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL , finalLayout , generalImageData.layerCount , 0 , generalImageData.mipMapCount , 0);
-
+                barrier = translateImage(VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
                 info.pImageMemoryBarriers = &barrier;
                 vkCmdPipelineBarrier2(cmd , &info);
             };
 
-            // the lambda captures finalLayout and value by reference , so it has to run before this function returns
             context->queueManager->Begin();
 
-            context->queueManager->recordCmd(recordFunction , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+            context->queueManager->recordCmd(function , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
             const auto result = context->queueManager->End();
             if(!result.has_value()){
@@ -214,7 +265,6 @@ namespace mox{
 
             return {};
         }
-
     };
 
     using pRenderImage = std::shared_ptr<RenderImage2>;

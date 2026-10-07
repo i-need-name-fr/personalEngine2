@@ -1,14 +1,22 @@
 #pragma once
 
-#include "ImageBase.hpp"
+#include "ImageBase2.hpp"
 #include "../Buffers/buffer.hpp"
 
 namespace mox{
 
     class Skybox2;
-    using pSkybox = std::shared_ptr<Skybox2>;
+    using pSkybox2 = std::shared_ptr<Skybox2>;
 
-    class Skybox2 final : public ImageBase{
+    // =============================== INFO ===============================
+    // Skybox2
+    // CHANGES:
+    // actually nothing has really changed , the only difference is that now it has personal translate
+    // and ImageBase2 support
+    // but its the same as always
+    // =============================== END ===============================
+
+    class Skybox2 final : public ImageBase2{
     public:
 
         Skybox2() = delete;
@@ -19,7 +27,7 @@ namespace mox{
             view = std::exchange(input.view , nullptr);
             return *this;
         }
-        Skybox2(Skybox2&& input) noexcept : ImageBase(std::move(input)){
+        Skybox2(Skybox2&& input) noexcept : ImageBase2(std::move(input)){
             view = std::exchange(input.view , nullptr);
         }
 
@@ -43,24 +51,14 @@ namespace mox{
             uint32_t resolution;
         };
 
-        Skybox2(const CreateInfo &info) : ImageBase(info.context){
-            if(!info.context){
-                const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the context has null data"};
-                engineLogger(&error);
-                THROW_MESSAGE;
+        Skybox2(const CreateInfo &info) : ImageBase2(info.context){
+            {
+                const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypeQueueManager , info.context);
+                if(!result.has_value()){
+                    engineLogger(result.error());
+                    THROW_MESSAGE;
+                }
             }
-            if(!info.context->logicalDevice){
-                const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the context has null data"};
-                engineLogger(&error);
-                THROW_MESSAGE;
-            }
-
-            if(!info.context->queueManager){
-                const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the context has null data"};
-                engineLogger(&error);
-                THROW_MESSAGE;
-            }   
-
             device = context->logicalDevice->device;
 
             const auto result = createSkybox(info);
@@ -74,22 +72,76 @@ namespace mox{
         }
 
         VkImageView view = nullptr;
+
+        VkImageMemoryBarrier2 translateImage(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+            VkImageMemoryBarrier2 barrier{};
+
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.image = this->image;
+            barrier.pNext = nullptr;
+            barrier.srcAccessMask = currentAccess;
+            barrier.dstAccessMask = access;
+            barrier.srcStageMask = currentStage;
+            barrier.dstStageMask = stage;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.subresourceRange.aspectMask = generalImageData.aspect;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.layerCount = 6;
+            barrier.subresourceRange.levelCount = 1;
+
+            currentAccess = access;
+            currentStage = stage;
+
+            return barrier;
+        }
+
+        // translate from undefined
+
+        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+            VkImageMemoryBarrier2 barrier{};
+
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.image = this->image;
+            barrier.pNext = nullptr;
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = access;
+            barrier.srcStageMask = currentStage;
+            barrier.dstStageMask = stage;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.subresourceRange.aspectMask = generalImageData.aspect;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.layerCount = 6;
+            barrier.subresourceRange.levelCount = 1;
+
+            currentAccess = access;
+            currentStage = stage;
+
+            return barrier;
+        }
+
+
+        const VkAccessFlags acquireImageAccess() const noexcept{
+            return currentAccess;
+        }
+
+        const VkPipelineStageFlags acquireImageStage() const noexcept{
+            return currentStage;
+        }
+
     private:
+    
+        VkAccessFlags currentAccess = VK_ACCESS_2_NONE;
+        VkPipelineStageFlags currentStage = VK_PIPELINE_STAGE_2_NONE;
 
         [[nodiscard]] ErrorDataOutput<void> createSkybox(const CreateInfo &data){
-            if(!data.context){
-                const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the context has null data"};
-                return std::unexpected(error);
-            }
-            if(!data.context->logicalDevice){
-                const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the context has null data"};
-                return std::unexpected(error);
-            }
-
-            if(!data.context->queueManager){
-                const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the context has null data"};
-                return std::unexpected(error);
-            }   
 
             if(data.isTexture){
                 const auto result = processTextureSkybox(data);
@@ -201,8 +253,7 @@ namespace mox{
 
                 cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
                     if(!cmd) return;
-
-                    auto barrier =  translateUnified(VK_IMAGE_LAYOUT_UNDEFINED , VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL , 6 , 0 , 1 , 0);
+                    auto barrier = translateImageUndefined(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
 
                     VkDependencyInfo dep{};
                     dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -219,7 +270,8 @@ namespace mox{
 
                     copySkybox(cmd , image , staging.buffer , data.resolution , static_cast<uint32_t>(width));
 
-                    barrier =  translateUnified(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL , VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL , 6 , 0 , 1 , 0);
+                    barrier = translateImage(VK_ACCESS_2_SHADER_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+
                     dep.pImageMemoryBarriers = &barrier;
                     vkCmdPipelineBarrier2(cmd , &dep);
                 };
@@ -275,8 +327,7 @@ namespace mox{
             // now we have to translate the cube
             cmdFunctionType recordBuffer = [&](VkCommandBuffer &cmd) -> void{
                 if(!cmd) return;
-
-                auto barrier =  translateUnified(VK_IMAGE_LAYOUT_UNDEFINED , data.finalLayout , 6 , 0 , 1 , 0);
+                auto barrier = translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
                 VkDependencyInfo dep{};
                 dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;

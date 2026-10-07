@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Textures.hpp"
+#include "Textures2.hpp"
 #include "../DescriptorBuffer/Descriptor_buffer.hpp"
 
 namespace mox{
@@ -12,7 +12,7 @@ namespace mox{
     class TextureManager2 final{
     private:
 
-        std::vector<pTexture> textures{};
+        std::vector<pTexture2> textures{};
         std::vector<int32_t> virtualToPhysical{};
         std::vector<int32_t> physicalToVirtual{};
 
@@ -125,7 +125,7 @@ namespace mox{
                 bind[1].stageFlags = VK_SHADER_STAGE_ALL;
 
                 bind[2].binding = 2;
-                bind[2].descriptorCount = MaxTextureCount;
+                bind[2].descriptorCount = Texture2::MaxTextureCount;
                 bind[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
                 bind[2].pImmutableSamplers = nullptr;
                 bind[2].stageFlags = VK_SHADER_STAGE_ALL;
@@ -174,7 +174,7 @@ namespace mox{
                 try{
                     HostBuffer::CreateInfo info{};
                     info.context = context;
-                    info.size = sizeof(uint32_t) * MaxTextureCount;
+                    info.size = sizeof(uint32_t) * Texture2::MaxTextureCount;
                     info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
                     virtualBuffer = std::make_shared<HostBuffer>(info);
@@ -260,7 +260,7 @@ namespace mox{
             }
         }
 
-        [[nodiscard]] ErrorDataOutput<int32_t> addTexture(Texture::CreateInfo info) noexcept{
+        [[nodiscard]] ErrorDataOutput<int32_t> addTexture(Texture2::CreateInfo info) noexcept{
 
             auto it = pathToVirtual.find(info.path);
             if(it != pathToVirtual.end()){
@@ -284,7 +284,7 @@ namespace mox{
                 physicalToVirtual.push_back(virtualIndex);
                 virtualToPhysical[virtualIndex] = physicalIndex;
 
-                textures.push_back(std::move(std::make_shared<Texture>(info)));
+                textures.push_back(std::move(std::make_shared<Texture2>(info)));
                 pathToVirtual.insert(std::pair<std::string , uint32_t>(info.path , virtualIndex));
 
                 auto result = updateData();
@@ -327,5 +327,5 @@ namespace mox{
         }
     };
 
-    using pTextureManager = std::shared_ptr<TextureManager2>;
+    using pTextureManager2 = std::shared_ptr<TextureManager2>;
 }
