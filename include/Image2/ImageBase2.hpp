@@ -63,12 +63,12 @@ namespace mox{
 
         VkDeviceMemory memory = nullptr;
 
-        VkExtent2D extent;
-        VkFormat format;
+        VkExtent2D extent = {0 ,0};
+        VkFormat format{VK_FORMAT_UNDEFINED};
 
     protected:
 
-        VulkanContext* context;
+        VulkanContext* context = nullptr;
         VkDevice device = nullptr;
 
         ImageInfo generalImageData{};

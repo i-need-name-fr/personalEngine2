@@ -120,11 +120,11 @@ namespace mox{
         }
 
 
-        const VkAccessFlags acquireImageAccess() const noexcept{
+        const VkAccessFlags2 acquireImageAccess() const noexcept{
             return currentAccess;
         }
 
-        const VkPipelineStageFlags acquireImageStage() const noexcept{
+        const VkPipelineStageFlags2 acquireImageStage() const noexcept{
             return currentStage;
         }
 
