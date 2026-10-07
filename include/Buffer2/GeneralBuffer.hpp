@@ -104,7 +104,6 @@ namespace mox{
                         data.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
                         BufferBase staging(data);
-                        
                         {
                             const auto result = vkMapMemory(info.context->logicalDevice->device , staging.memory , 0 , requiredSize , 0 , &staging.data);
                             if(result != VK_SUCCESS){
@@ -115,9 +114,7 @@ namespace mox{
 
                             std::memcpy(staging.data , inputData.data() , requiredSize );
                         }
-
-                        
-                        const auto result = copyBufferToBuffer(staging.buffer , buffer , requiredSize );
+                        const auto result = copyBufferToBuffer(staging.buffer , this->buffer , requiredSize );
                         if(!result.has_value()){
                             engineLogger(result.error());
                             THROW_MESSAGE;
@@ -128,6 +125,7 @@ namespace mox{
             catch(std::exception &e){
                 const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create general buffer , check the logs please"};
                 engineLogger(error);
+                cleanBuffer();
                 THROW_MESSAGE;
             }
         }
@@ -145,22 +143,22 @@ namespace mox{
                     data.size = info.size;
                     data.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
-                    BufferBase staging(data);
+                    pBufferBase staging = std::make_shared<BufferBase>(data);
 
-                    {
-                        const auto result = vkMapMemory(info.context->logicalDevice->device , staging.memory , 0 , info.size , 0 , &staging.data);
-                        if(result != VK_SUCCESS){
-                            const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create general buffer , since the vk map memory failed for staging buffer , error ID -> {}" , static_cast<int32_t>(result))};
-                            engineLogger(error);
-                            THROW_MESSAGE;
-                        }
-
-                        std::memcpy(staging.data , inputData , info.size );
+                    
+                    auto result = vkMapMemory(info.context->logicalDevice->device , staging->memory , 0 , info.size , 0 , &staging->data);
+                    if(result != VK_SUCCESS){
+                        const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create general buffer , since the vk map memory failed for staging buffer , error ID -> {}" , static_cast<int32_t>(result))};
+                        engineLogger(error);
+                        THROW_MESSAGE;
                     }
 
-                    const auto result = copyBufferToBuffer(staging.buffer , buffer , info.size );
-                    if(!result.has_value()){
-                        engineLogger(result.error());
+                    std::memcpy(staging->data , inputData , info.size );
+                    
+
+                    const auto result2 = copyBufferToBuffer(staging->buffer , buffer , info.size );
+                    if(!result2.has_value()){
+                        engineLogger(result2.error());
                         THROW_MESSAGE;
                     }
                 }
@@ -168,6 +166,7 @@ namespace mox{
             catch(std::exception &e){
                 const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create general buffer , check the logs please"};
                 engineLogger(error);
+                cleanBuffer();
                 THROW_MESSAGE;
             }
         }

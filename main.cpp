@@ -19,9 +19,8 @@ int main(){
         data.size = sizeof(uint32_t) * 10;
         data.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-        const auto temp = mox::translateToSpan<uint32_t>(inputData);
 
-        mox::GeneralBuffer2<mox::BufferType::Device ,true> buffer(data , temp);
+        mox::GeneralBuffer2<mox::BufferType::Device ,true> buffer(data , mox::translateToSpan<uint32_t>(inputData));
     }
     catch(std::exception &e){
         std::cerr << e.what() << '\n';

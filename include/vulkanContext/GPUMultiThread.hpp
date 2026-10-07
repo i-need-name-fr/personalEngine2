@@ -518,7 +518,7 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createAllQueues(const CreateInfo &info) noexcept{
 
             try{
-                for(uint32_t i = info.firstIndex ; i < info.threadsCount ; i++){
+                for(uint32_t i = info.firstIndex ; i < info.threadsCount + info.firstIndex ; i++){
                     threadQueue::CreateInfo data{};
                     data.index = i;
                     data.device = info.device;
