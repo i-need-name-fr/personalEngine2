@@ -13,17 +13,9 @@ namespace mox{
     // this buffer also adapts function based on the input parameters
     // =============================== END ===============================
 
-    template<typename T>
-    concept MassiveTypeData = requires(T t){
-        {t.size()};
-        {t.data()};
-    };
-
-    template<typename T>
-    concept GPUDataType = !std::is_pointer_v<T> && std::is_standard_layout_v<T> && !MassiveTypeData<T>;
 
     template<BufferType type , uint8_t readable>
-    class GeneralBuffer2 final : BufferBase{
+    class GeneralBuffer2 final : public BufferBase{
     public:
 
         GeneralBuffer2() = delete;

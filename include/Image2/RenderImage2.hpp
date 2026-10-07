@@ -153,8 +153,8 @@ namespace mox{
 
     private:
 
-        VkAccessFlags currentAccess = VK_ACCESS_2_NONE;
-        VkPipelineStageFlags currentStage = VK_PIPELINE_STAGE_2_NONE;
+        VkAccessFlags2 currentAccess = VK_ACCESS_2_NONE;
+        VkPipelineStageFlags2 currentStage = VK_PIPELINE_STAGE_2_NONE;
 
         void cleanRenderImage() noexcept{
             if(device){
@@ -267,5 +267,5 @@ namespace mox{
         }
     };
 
-    using pRenderImage = std::shared_ptr<RenderImage2>;
+    using pRenderImage2 = std::shared_ptr<RenderImage2>;
 }

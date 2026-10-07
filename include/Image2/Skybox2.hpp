@@ -138,8 +138,8 @@ namespace mox{
 
     private:
     
-        VkAccessFlags currentAccess = VK_ACCESS_2_NONE;
-        VkPipelineStageFlags currentStage = VK_PIPELINE_STAGE_2_NONE;
+        VkAccessFlags2 currentAccess = VK_ACCESS_2_NONE;
+        VkPipelineStageFlags2 currentStage = VK_PIPELINE_STAGE_2_NONE;
 
         [[nodiscard]] ErrorDataOutput<void> createSkybox(const CreateInfo &data){
 

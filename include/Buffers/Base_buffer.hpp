@@ -10,6 +10,15 @@ namespace mox{
         Undefined
     };
 
+    template<typename T>
+    concept MassiveTypeData = requires(T t){
+        {t.size()};
+        {t.data()};
+    };
+
+    template<typename T>
+    concept GPUDataType = !std::is_pointer_v<T> && std::is_standard_layout_v<T> && !MassiveTypeData<T>;
+
     class BufferBase;
     using pBufferBase = std::shared_ptr<BufferBase>;
 

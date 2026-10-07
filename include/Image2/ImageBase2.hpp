@@ -152,10 +152,6 @@ namespace mox{
             format = data.imageFormat;
             generalImageData = data;
 
-            {
-                const uint64_t layoutSize = generalImageData.mipMapCount * generalImageData.layerCount;
-            }
-
             return {};
         }
 

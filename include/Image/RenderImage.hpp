@@ -4,14 +4,14 @@
 
 namespace mox{
 
-    class RenderImage2;
-    using pRenderImage = std::shared_ptr<RenderImage2>;
+    class RenderImage;
+    using pRenderImage = std::shared_ptr<RenderImage>;
 
     // render image is designed for storage images
     // that are used in shaders or pipelines
     // instead of textures : this rely on extent of swapchain
 
-    class RenderImage2 final : public ImageBase{
+    class RenderImage final : public ImageBase{
     public:
 
         struct CreateInfo{
@@ -35,17 +35,17 @@ namespace mox{
             VkClearColorValue clear{};
         };
 
-        RenderImage2() = delete;
-        RenderImage2(RenderImage2& input) = delete;
-        RenderImage2(RenderImage2&& input) noexcept : ImageBase(std::move(input)){
+        RenderImage() = delete;
+        RenderImage(RenderImage& input) = delete;
+        RenderImage(RenderImage&& input) noexcept : ImageBase(std::move(input)){
             view = std::exchange(input.view , nullptr);
             viewPerMip = std::move(input.viewPerMip);
             viewPerLayer = std::move(input.viewPerLayer);
         }
 
 
-        RenderImage2& operator=(RenderImage2& input) = delete;
-        RenderImage2& operator=(RenderImage2&& input) noexcept{
+        RenderImage& operator=(RenderImage& input) = delete;
+        RenderImage& operator=(RenderImage&& input) noexcept{
             performCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
             viewPerMip = std::move(input.viewPerMip);
@@ -53,11 +53,11 @@ namespace mox{
             return *this;
         }
 
-        ~RenderImage2() override{
+        ~RenderImage() override{
             cleanRenderImage();
         }
 
-        explicit RenderImage2(const CreateInfo &data) : ImageBase(data.context){
+        explicit RenderImage(const CreateInfo &data) : ImageBase(data.context){
             {
                 const auto result = createTheRenderImage(data);
                 if(!result.has_value()){
@@ -217,5 +217,4 @@ namespace mox{
 
     };
 
-    using pRenderImage = std::shared_ptr<RenderImage2>;
 }

@@ -9,7 +9,7 @@ namespace mox{
     // two is sampler
     // three are textures
 
-    class TextureManager2 final{
+    class TextureManager final{
     private:
 
         std::vector<pTexture> textures{};
@@ -82,7 +82,7 @@ namespace mox{
             return result;
         }
 
-        void performCopy(TextureManager2&& input) noexcept{
+        void performCopy(TextureManager&& input) noexcept{
             textures = std::move(input.textures);
             virtualToPhysical = std::move(input.virtualToPhysical);
             physicalToVirtual = std::move(input.physicalToVirtual);
@@ -215,19 +215,19 @@ namespace mox{
             VulkanContext* context;
         };
 
-        TextureManager2() = delete;
-        TextureManager2& operator=(TextureManager2& input) = delete;
-        TextureManager2(TextureManager2& input) = delete;
-        TextureManager2& operator=(TextureManager2&& input) noexcept{
+        TextureManager() = delete;
+        TextureManager& operator=(TextureManager& input) = delete;
+        TextureManager(TextureManager& input) = delete;
+        TextureManager& operator=(TextureManager&& input) noexcept{
             performCopy(std::move(input));
             return *this;
         }
 
-        TextureManager2(TextureManager2&& input) noexcept{
+        TextureManager(TextureManager&& input) noexcept{
             performCopy(std::move(input));
         }
 
-        ~TextureManager2(){
+        ~TextureManager(){
             performDelete();
         }
 
@@ -237,7 +237,7 @@ namespace mox{
 
         VkDescriptorSetLayout layout = nullptr;
 
-        explicit TextureManager2(const CreateInfo &info){
+        explicit TextureManager(const CreateInfo &info){
             if(!info.context){
                 const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create texture manager , since the context is nullptr"};
                 engineLogger(&error);
@@ -327,5 +327,5 @@ namespace mox{
         }
     };
 
-    using pTextureManager = std::shared_ptr<TextureManager2>;
+    using pTextureManager = std::shared_ptr<TextureManager>;
 }

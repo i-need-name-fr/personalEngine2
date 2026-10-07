@@ -46,8 +46,10 @@ namespace mox{
 
             {
                 const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypeQueueManager , info.context);
-                engineLogger(&result.error());
-                THROW_MESSAGE;
+                if(!result.has_value()){
+                    engineLogger(&result.error());
+                    THROW_MESSAGE;
+                }
             }
 
             this->device = context->logicalDevice->device;
@@ -128,8 +130,8 @@ namespace mox{
 
     private:
     
-        VkAccessFlags currentAccess = VK_ACCESS_2_NONE;
-        VkPipelineStageFlags currentStage = VK_PIPELINE_STAGE_2_NONE;
+        VkAccessFlags2 currentAccess = VK_ACCESS_2_NONE;
+        VkPipelineStageFlags2 currentStage = VK_PIPELINE_STAGE_2_NONE;
 
         [[nodiscard]] ErrorDataOutput<void> processTexture(const CreateInfo &data) noexcept{
             if(!device){

@@ -227,7 +227,7 @@ namespace mox{
                 }
                 return {};
             }
-            data = createDescriptorData(AS , index , AS);
+            data = createDescriptorData(AS , index , arID);
 
         }else{
             return {};

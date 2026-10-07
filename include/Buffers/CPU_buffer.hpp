@@ -11,15 +11,6 @@ namespace mox{
     class HostBuffer;
     using pHostBuffer = std::shared_ptr<HostBuffer>;
 
-    template<typename T>
-    concept MassiveTypeData = requires(T t){
-        {t.size()};
-        {t.data()};
-    };
-
-    template<typename T>
-    concept GPUDataType = !std::is_pointer_v<T> && std::is_standard_layout_v<T> && !MassiveTypeData<T>;
-
     class HostBuffer final : public  BufferBase{
     public:
 

@@ -5,25 +5,25 @@
 
 namespace mox{
 
-    class Skybox2;
-    using pSkybox = std::shared_ptr<Skybox2>;
+    class Skybox;
+    using pSkybox = std::shared_ptr<Skybox>;
 
-    class Skybox2 final : public ImageBase{
+    class Skybox final : public ImageBase{
     public:
 
-        Skybox2() = delete;
-        Skybox2(Skybox2& input) = delete;
-        Skybox2& operator=(Skybox2& input) = delete;
-        Skybox2& operator=(Skybox2&& input) noexcept{
+        Skybox() = delete;
+        Skybox(Skybox& input) = delete;
+        Skybox& operator=(Skybox& input) = delete;
+        Skybox& operator=(Skybox&& input) noexcept{
             performCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
             return *this;
         }
-        Skybox2(Skybox2&& input) noexcept : ImageBase(std::move(input)){
+        Skybox(Skybox&& input) noexcept : ImageBase(std::move(input)){
             view = std::exchange(input.view , nullptr);
         }
 
-        ~Skybox2(){
+        ~Skybox(){
             if(view && device) vkDestroyImageView(device , view , nullptr);
             view = nullptr;
         }
@@ -43,7 +43,7 @@ namespace mox{
             uint32_t resolution;
         };
 
-        Skybox2(const CreateInfo &info) : ImageBase(info.context){
+        Skybox(const CreateInfo &info) : ImageBase(info.context){
             if(!info.context){
                 const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create skybox , since the context has null data"};
                 engineLogger(&error);
