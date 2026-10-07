@@ -52,6 +52,10 @@ namespace mox{
 
         RenderImage2& operator=(RenderImage2& input) = delete;
         RenderImage2& operator=(RenderImage2&& input) noexcept{
+            if(this == &input) return *this;
+            // the view and the image that this object held would leak
+            cleanRenderImage();
+            cleanImage();
             performCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
             currentAccess = input.currentAccess;
@@ -88,7 +92,7 @@ namespace mox{
 
         // translate image
 
-        VkImageMemoryBarrier2 translateImage(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+        VkImageMemoryBarrier2 translateImage(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
             VkImageMemoryBarrier2 barrier{};
 
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -116,7 +120,7 @@ namespace mox{
 
         // translate from undefined
 
-        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
             VkImageMemoryBarrier2 barrier{};
 
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;

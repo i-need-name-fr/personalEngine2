@@ -15,13 +15,22 @@ namespace mox{
         Texture2() = delete;
         Texture2(Texture2&& input) noexcept: ImageBase2(std::move(input)){
             view = std::exchange(input.view , nullptr);
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
         }
 
         Texture2(Texture2& input) = delete;
         Texture2& operator=(Texture2& input) = delete;
         Texture2& operator=(Texture2&& input) noexcept{
+            if(this == &input) return *this;
+            // the view and the image that this object held would leak
+            if(view && device) vkDestroyImageView(device , view , nullptr);
+            view = nullptr;
+            cleanImage();
             performCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
 
             return *this;
         }
@@ -65,7 +74,7 @@ namespace mox{
             }
         }
     
-        VkImageMemoryBarrier2 translateImage(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+        VkImageMemoryBarrier2 translateImage(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
             VkImageMemoryBarrier2 barrier{};
 
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -93,7 +102,7 @@ namespace mox{
 
         // translate from undefined
 
-        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
             VkImageMemoryBarrier2 barrier{};
 
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -339,6 +348,7 @@ namespace mox{
         [[nodiscard]] inline ErrorDataOutput<void> copyBufferToImage(VkCommandBuffer &cmd , VkBuffer &src , VkImage &dst ,const VkDeviceSize size , VkExtent2D extent) noexcept {
             if(!src || !dst || size <= 0 || !cmd){
                 const ErrorDataType error{MOX_ERROR_TYPE_WARNING , " in order to copy buffer to image , size has to be > 0 and valid variables"};
+                return std::unexpected(error);
             }
 
             VkBufferImageCopy copy{};

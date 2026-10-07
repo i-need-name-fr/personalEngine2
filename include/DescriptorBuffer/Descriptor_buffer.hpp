@@ -33,7 +33,9 @@ namespace mox{
     };
 
     struct DescriptorData{
-        VkDescriptorType descriptorType;
+        // an empty DescriptorData ( what the createDescriptorData functions return for a nullptr ) is not any real descriptor :
+        // with the value 0 it was a VK_DESCRIPTOR_TYPE_SAMPLER with a null sampler
+        VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_MAX_ENUM;
 
         uint32_t bindingIndex;
         uint32_t indexInArray = 0;
@@ -108,6 +110,20 @@ namespace mox{
 
     inline DescriptorData createDescriptorData(const std::variant<Sampler* , VkDeviceAddress , Skybox2* , Texture2* , RenderImage2* , BufferBase*> input , VkDescriptorType type , const uint32_t index , const uint32_t arID){
         DescriptorData data{};
+
+        // is there a nullptr ( or a 0 address ) inside the variant : std::visit looks at whatever the variant holds , and `!value` is
+        // valid for every one of the alternatives ( the pointers and the VkDeviceAddress )
+        const bool empty = std::visit([](const auto &value) -> bool{ return !value; } , input);
+        if(empty){
+            static uint32_t totalMessagesCount = 0;
+            if(totalMessagesCount < totalMessageCount){
+                const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("failed to create descriptor data for the binding {} , since the variant holds nullptr ( or a 0 address ) , message Count {} " , index , static_cast<uint32_t>(totalMessagesCount))};
+                engineLogger(error);
+                totalMessagesCount++;
+            }
+            // descriptorType is VK_DESCRIPTOR_TYPE_MAX_ENUM : DescriptorBuffer refuses it with a clear error
+            return data;
+        }
 
         if(std::holds_alternative<Sampler*>(input)){
 

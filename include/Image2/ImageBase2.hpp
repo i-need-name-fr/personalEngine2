@@ -35,6 +35,9 @@ namespace mox{
 
         ImageBase2& operator=(ImageBase2& input) = delete;
         ImageBase2& operator=(ImageBase2&& input) noexcept{
+            if(this == &input) return *this;
+            // what this object held would leak
+            cleanImage();
             performCopy(std::move(input));
             return *this;
         }

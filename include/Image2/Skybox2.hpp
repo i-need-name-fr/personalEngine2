@@ -23,12 +23,22 @@ namespace mox{
         Skybox2(Skybox2& input) = delete;
         Skybox2& operator=(Skybox2& input) = delete;
         Skybox2& operator=(Skybox2&& input) noexcept{
+            if(this == &input) return *this;
+            // the view and the image that this object held would leak
+            if(view && device) vkDestroyImageView(device , view , nullptr);
+            view = nullptr;
+            cleanImage();
             performCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
+            // the barrier of the next translate starts from where the image is now
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
             return *this;
         }
         Skybox2(Skybox2&& input) noexcept : ImageBase2(std::move(input)){
             view = std::exchange(input.view , nullptr);
+            currentAccess = input.currentAccess;
+            currentStage = input.currentStage;
         }
 
         ~Skybox2(){
@@ -73,7 +83,7 @@ namespace mox{
 
         VkImageView view = nullptr;
 
-        VkImageMemoryBarrier2 translateImage(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+        VkImageMemoryBarrier2 translateImage(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
             VkImageMemoryBarrier2 barrier{};
 
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -101,7 +111,7 @@ namespace mox{
 
         // translate from undefined
 
-        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags access ,const VkPipelineStageFlags stage) noexcept{
+        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
             VkImageMemoryBarrier2 barrier{};
 
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
