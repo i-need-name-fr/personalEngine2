@@ -2,6 +2,7 @@
 
 #include "ShaderObject.hpp"
 #include "../DescriptorBuffer/Descriptor_buffer.hpp"
+#include "../DescriptorLayout/DescriptorLayout.hpp"
 #include <stdfloat>
 
 namespace mox{
@@ -21,11 +22,20 @@ namespace mox{
             performCopy(std::move(input));
         }
 
-        std::vector<VkDescriptorSetLayout> descriptorLayouts{};
+        std::vector<pDescriptorLayout> descriptorLayouts{};
         std::vector<pShaderObject> shaders{};
         std::vector<pDescriptorBuffer> buffers{};
 
         VkPipelineLayout layout = nullptr;
+
+        std::vector<VkDescriptorSetLayout> getDescriptorLayoutData() const noexcept{
+            if(descriptorLayouts.empty()) return {};
+            std::vector<VkDescriptorSetLayout> data{};
+            for(auto& l : descriptorLayouts){
+                data.push_back(l->layout);
+            }
+            return data;
+        }
 
         ShaderPipe(VulkanContext* context){
             if(!context){
@@ -51,10 +61,6 @@ namespace mox{
 
         void cleanPipe() noexcept {
             if(device){
-                for(auto& d :descriptorLayouts){
-                    if(d) vkDestroyDescriptorSetLayout(device , d , nullptr);
-                }
-                
                 if(layout) vkDestroyPipelineLayout(device , layout , nullptr);
             }
 

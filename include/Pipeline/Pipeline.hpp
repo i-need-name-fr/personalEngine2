@@ -4,6 +4,7 @@
 #include <fstream>
 #include <filesystem>
 #include "../DescriptorBuffer/Descriptor_buffer.hpp"
+#include "../DescriptorLayout/DescriptorLayout.hpp"
 
 namespace mox{
 
@@ -32,7 +33,7 @@ namespace mox{
         VkRenderPass renderPass = nullptr;
         VkPipelineLayout layout = nullptr;
 
-        std::vector<VkDescriptorSetLayout> d_layouts{};
+        std::vector<pDescriptorLayout> descriptorLayouts{};
         std::vector<pDescriptorBuffer> buffers{};
 
 
@@ -63,21 +64,27 @@ namespace mox{
             }else return nullptr;
         }
 
+        std::vector<VkDescriptorSetLayout> getDescriptorLayoutData() const noexcept{
+            if(descriptorLayouts.empty()) return {};
+            std::vector<VkDescriptorSetLayout> data{};
+            for(auto& l : descriptorLayouts){
+                data.push_back(l->layout);
+            }
+            return data;
+        }
+
         ~Pipeline() noexcept {
             if(device){
                 if(pipeline) vkDestroyPipeline(device , pipeline , nullptr);
                 if(layout ) vkDestroyPipelineLayout(device , layout , nullptr);
                 if(renderPass) vkDestroyRenderPass(device , renderPass , nullptr);
-                for(auto& d : d_layouts){
-                    if(d) vkDestroyDescriptorSetLayout(device , d , nullptr);
-                }
                 if(cache){
                     saveTheCache();
                     vkDestroyPipelineCache(device , cache , nullptr);
                 }
             }
             buffers.clear();
-            d_layouts.clear();
+            descriptorLayouts.clear();
             cache = nullptr;
             layout = nullptr;
             pipeline = nullptr;
@@ -92,7 +99,7 @@ namespace mox{
             renderPass = std::exchange(input.renderPass , nullptr);
             layout = std::exchange(input.layout, nullptr);
 
-            d_layouts = std::move(input.d_layouts);
+            descriptorLayouts = std::move(input.descriptorLayouts);
             cache = std::exchange(input.cache , nullptr);
             cacheSaveFile = input.cacheSaveFile;
             device = std::exchange(input.device , nullptr);
