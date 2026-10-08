@@ -6,7 +6,7 @@ namespace mox{
 
     struct DescriptorLayoutData{
         VkDescriptorType type{};
-        uint32_t count;
+        uint32_t count = 1;
     };
 
 
@@ -20,9 +20,11 @@ namespace mox{
         DescriptorLayout& operator=(const DescriptorLayout& input) = delete;
 
         DescriptorLayout(DescriptorLayout&& input) noexcept{
+            if(layout == input.layout) return;
             processCopy(std::move(input));
         }
         DescriptorLayout& operator=(DescriptorLayout&& input) noexcept{
+            if(layout == input.layout) return *this;
             processCopy(std::move(input));
             return *this;
         }
