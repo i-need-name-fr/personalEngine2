@@ -1,3 +1,10 @@
+#define GLFW_INCLUDE_VULKAN
+#define GLFW_EXPOSE_NATIVE_WIN32
+#define VK_USE_PLATFORM_WIN32_KHR
+#define VMA_IMPLEMENTATION
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define STB_IMAGE_IMPLEMENTATION
+
 #include <iostream>
 #include "include/Buffer2/GeneralBuffer.hpp"
 #include "include/Image2/ViewPerLayer.hpp"
@@ -47,7 +54,6 @@ int main(){
             info.mipMapCount = count;
             image = std::make_shared<RenderImage2>(info);
         }
-
         {
             pViewPerLayer<5> views{nullptr};
             ViewPerLayer<5>::CreateInfo info{};
