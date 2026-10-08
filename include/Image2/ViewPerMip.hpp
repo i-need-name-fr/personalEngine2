@@ -64,9 +64,9 @@ namespace mox{
             }
         }
 
-        VkImageMemoryBarrier2 translateImage(const VkAccessFlagBits2 access ,const VkPipelineStageFlags2 stage , const uint32_t MipCount , const uint32_t MipIndex){
-            if(MipCount < 1) throw std::invalid_argument("couldnt create image barrier,  since the mip count is below minimum , which is 1");
+        VkImageMemoryBarrier2 translateImage(const VkAccessFlagBits2 access ,const VkPipelineStageFlags2 stage , const uint32_t MipIndex){
             if(MipIndex < 1) throw std::invalid_argument("couldnt create image barrier,  since the mip index is below minimum , which is 1 , mip 0 belongs to parent image view");
+            if(MipIndex > views.size()) throw std::invalid_argument("couldnt create image barrier,  since the mip index is bigger than the count of the views");
 
             VkImageMemoryBarrier2 barrier{};
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -84,23 +84,19 @@ namespace mox{
             barrier.subresourceRange.baseArrayLayer = 0;
             barrier.subresourceRange.baseMipLevel = MipIndex;
             barrier.subresourceRange.layerCount = 1;
-            barrier.subresourceRange.levelCount = MipCount;
+            barrier.subresourceRange.levelCount = 1;
 
 
-            for(uint32_t layer = 0 ; layer < MipCount ; layer++){
-                const uint32_t currentIndex = layer + MipIndex - 1;
-                if(currentIndex >= accesses.size()) break;
-                accesses[currentIndex] = access;
-                stages[currentIndex] = stage;
-            }
+            accesses[MipIndex - 1] = access;
+            stages[MipIndex - 1] = stage;
 
             return barrier;
         }
 
-        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlagBits2 access ,const VkPipelineStageFlags2 stage , const uint32_t MipCount , const uint32_t MipIndex){
+        VkImageMemoryBarrier2 translateImageUndefined(const VkAccessFlagBits2 access ,const VkPipelineStageFlags2 stage , const uint32_t MipIndex){
 
-            if(MipCount < 1) throw std::invalid_argument("couldnt create image barrier,  since the mip count is below minimum , which is 1");
             if(MipIndex < 1) throw std::invalid_argument("couldnt create image barrier,  since the mip index is below minimum , which is 1 , mip 0 belongs to parent image view");
+            if(MipIndex > views.size()) throw std::invalid_argument("couldnt create image barrier,  since the mip index is bigger than the count of the views");
 
             VkImageMemoryBarrier2 barrier{};
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -118,7 +114,43 @@ namespace mox{
             barrier.subresourceRange.baseArrayLayer = 0;
             barrier.subresourceRange.baseMipLevel = MipIndex;
             barrier.subresourceRange.layerCount = 1;
+            barrier.subresourceRange.levelCount = 1;
+
+            accesses[MipIndex - 1] = access;
+            stages[MipIndex - 1] = stage;
+
+            return barrier;
+        }
+
+        VkImageMemoryBarrier2 translateImageCombined(const VkAccessFlagBits2 access ,const VkPipelineStageFlags2 stage ,const uint32_t MipCount, const uint32_t MipIndex){
+            if(MipCount < 1) throw std::invalid_argument("couldnt create image barrier,  since the mip count is below minimum , which is 1");
+            if(MipIndex < 1) throw std::invalid_argument("couldnt create image barrier,  since the mip index is below minimum , which is 1 , mip 0 belongs to parent image view");
+            if(MipIndex - 1 + MipCount > views.size()) throw std::invalid_argument("... range is bigger than the count of the views");
+            VkImageMemoryBarrier2 barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.image = inputImage;
+            barrier.pNext = nullptr;
+            barrier.dstAccessMask = access;
+            barrier.dstStageMask = stage;
+
+            VkAccessFlags2 srcA = 0; VkPipelineStageFlags2 srcS = 0;
+            for(uint32_t k = 0 ; k < MipCount ; k++){
+                srcA |= accesses[MipIndex - 1 + k];
+                srcS |= stages  [MipIndex - 1 + k];
+            }
+            barrier.srcAccessMask = srcA; barrier.srcStageMask = srcS;
+
+
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.subresourceRange.aspectMask = aspect;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.baseMipLevel = MipIndex;
+            barrier.subresourceRange.layerCount = 1;
             barrier.subresourceRange.levelCount = MipCount;
+
 
             for(uint32_t layer = 0 ; layer < MipCount ; layer++){
                 const uint32_t currentIndex = layer + MipIndex - 1;
@@ -194,7 +226,7 @@ namespace mox{
             inputImage = input.image;
 
             cmdFunctionType function = [&](VkCommandBuffer& cmd) ->void {
-                auto barrier = translateImage(VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT , views.size() , 1 );
+                auto barrier = translateImageCombined(VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT , views.size() , 1 );
 
                 VkDependencyInfo dep{};
                 dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
