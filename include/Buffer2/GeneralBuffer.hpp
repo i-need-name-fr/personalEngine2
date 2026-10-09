@@ -24,10 +24,11 @@ namespace mox{
         GeneralBuffer2& operator=(GeneralBuffer2& input) = delete;
         GeneralBuffer2& operator=(const GeneralBuffer2& input) = delete;
 
-        GeneralBuffer2(GeneralBuffer2&& input) noexcept : BufferBase(std::move(input)){}
+        GeneralBuffer2(GeneralBuffer2&& input) noexcept : BufferBase(std::move(input)){currentAccess = input.currentAccess; currentStage= input.currentStage;}
 
         GeneralBuffer2& operator=(GeneralBuffer2&& input) noexcept{
             performCopy(std::move(input));
+            currentAccess = input.currentAccess; currentStage= input.currentStage;
             return *this;
         }
 
@@ -40,6 +41,7 @@ namespace mox{
         };
 
         explicit GeneralBuffer2(const CreateInfo &info) : BufferBase(info.context){
+            if(info.size == 0) throw std::runtime_error("failed to create generalBuffer , since the size is 0");
             {
                 const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypeQueueManager , info.context);
                 if(!result.has_value()){
@@ -228,7 +230,7 @@ namespace mox{
 
         // update buffer GPU
         
-        void updateBuffer(VkCommandBuffer &cmd) noexcept requires(BufferType::Device == type && !readable){
+        void fillBuffer(VkCommandBuffer &cmd) noexcept requires(BufferType::Device == type && !readable){
             [[unlikely]] if(!cmd){
 
                 static uint32_t totalMessagesCount = 0;
@@ -292,9 +294,67 @@ namespace mox{
             vkCmdUpdateBuffer(cmd , buffer , 0 , requiredSize , inputData);
         }
 
+        // add new functions
+        // update within cmd for readable
+        // translate buffer
+
+        VkBufferMemoryBarrier2 translateBuffer(const VkAccessFlags2 access , const VkPipelineStageFlags2 stage)noexcept{
+            VkBufferMemoryBarrier2 barrier{};
+
+            barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+            barrier.buffer = buffer;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.srcAccessMask = currentAccess;
+            barrier.srcStageMask = currentStage;
+            barrier.dstAccessMask = access;
+            barrier.dstStageMask = stage;
+            barrier.offset = 0;
+            barrier.size = bufferSize;
+            barrier.pNext = nullptr;
+
+            currentAccess = access;
+            currentStage = stage; 
+
+            return barrier;
+        }
+
+        template<typename T>
+        requires GPUDataType<T>
+        void updateBufferCmd(VkCommandBuffer& cmd , std::span<T> input , VkAccessFlags2 access , VkPipelineStageFlags2 stage)noexcept requires(readable == true){
+
+            if(!cmd) return;
+            if(input.empty()) return;
+            if(input.size_bytes() > 65536u) return;
+            auto barrier = translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+
+            VkDependencyInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            info.bufferMemoryBarrierCount = 1;
+            info.imageMemoryBarrierCount = 0;
+            info.pMemoryBarriers = nullptr;
+            info.pBufferMemoryBarriers = &barrier;
+            info.pImageMemoryBarriers = nullptr;
+            info.memoryBarrierCount = 0;
+            info.pNext = nullptr;
+            info.dependencyFlags = 0;
+
+            vkCmdPipelineBarrier2(cmd , &info);
+
+            uint32_t requiredSize = std::min(bufferSize , input.size_bytes());
+
+            vkCmdUpdateBuffer(cmd , buffer , 0 , requiredSize , input.data());
+
+            barrier = translateBuffer(access , stage);
+            vkCmdPipelineBarrier2(cmd , &info);
+        }
+
         ~GeneralBuffer2(){}
 
     private:
+
+        VkAccessFlags2 currentAccess{0};
+        VkPipelineStageFlags2 currentStage{VK_PIPELINE_STAGE_2_NONE};
 
         [[nodiscard]] ErrorDataOutput<void> createCPUTypeBuffer(const CreateInfo &input) noexcept{
 

@@ -33,8 +33,6 @@ namespace mox{
             VkImageViewType viewType;
             VkImageType imageType;
 
-            VkImageLayout finalLayout;
-
             uint32_t layerCount = 1;
             uint32_t mipMapCount = 1;
 

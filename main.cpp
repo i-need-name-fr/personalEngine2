@@ -52,7 +52,6 @@ int main(){
             info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
             info.layerCount = 6;
             info.extent = {2560 , 1440};
-            info.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
             info.mipMapCount = count;
             image = std::make_shared<RenderImage2>(info);
         }
