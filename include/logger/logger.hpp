@@ -47,47 +47,68 @@ namespace mox{
                 return;
             }
 
-            file << std::format("LOG MESSAGE : {}" , message);
+            file << std::format("{}" , message);
             file.close();
         } 
         
+        void printErrorType(const ErrorSignature type , const std::string message, std::source_location location) noexcept{
 
-        [[gnu::hot]] static inline void setupLogMessage(const mox::ErrorSignature errorType , const std::string message ,const std::string fileOutput = LOG_FILE_OUTPUT,  std::source_location location = std::source_location::current() ){
-            std::string error;
-            switch(errorType){
+            logAction("=========================== MESSAGE ===========================\n||\n||\n");
+
+            logAction("--------------------------- ERROR_TYPE ---------------------------\n||\n||\n");
+
+            switch(type){
                 case mox::ErrorSignature::ErrorTypeWARNING : {
-                    error = std::format("\n----------------------\nERROR_TYPE_WARNING :\n LOCATION -> FUCTION |{}| ,\n FILE |{}| ,\nLINE |{}|\n====================\nMESSAGE : {}\n====================\n\n" , location.function_name() , location.file_name() , location.line() , message);
+                    logAction("|| {{    ERROR_TYPE    }} : [[   WARNING   ]]\n||");
                     break;
                 }
                 case mox::ErrorSignature::ErrorTypeMEDIUM : {
-                    error = std::format("\n----------------------\nERROR_TYPE_MEDIUM :\n LOCATION -> FUCTION |{}| ,\n FILE |{}| ,\nLINE |{}|\n====================\nMESSAGE : {}\n====================\n\n" , location.function_name() , location.file_name() , location.line() , message);
+                    logAction("|| {{    ERROR_TYPE    }} : [[   MEDIUM   ]]\n||");
 
                     break;
                 }
                 case mox::ErrorSignature::ErrorTypeCRITICAL : {
-                    error = std::format("\n----------------------\nERROR_TYPE_CRITICAL :\n LOCATION -> FUCTION |{}| ,\n FILE |{}| ,\nLINE |{}|\n====================\nMESSAGE : {}\n====================\n\n" , location.function_name() , location.file_name() , location.line() , message);
+                    logAction("|| {{    ERROR_TYPE    }} : [[   CRITICAL   ]]\n||");
 
                     break;
                 }
                 case mox::ErrorSignature::ErrorTypeFAILED : {
-                    error = std::format("\n----------------------\nERROR_TYPE_FAILED :\n LOCATION -> FUCTION |{}| ,\n FILE |{}| ,\nLINE |{}|\n====================\nMESSAGE : {}\n====================\n\n" , location.function_name() , location.file_name() , location.line() , message);
+                    logAction("|| {{    ERROR_TYPE    }} : [[   FAILED   ]]\n||");
+
                     break;
                 }
                 case mox::ErrorSignature::ErrorTypeFAILED_CREATION : {
-                    error = std::format("\n----------------------\nERROR_TYPE_FAILED_CREATION : \nLOCATION -> FUCTION |{}| ,\n FILE |{}| ,\nLINE |{}|\n====================\nMESSAGE : {}\n====================\n\n" , location.function_name() , location.file_name() , location.line() , message);
+                    logAction("|| {{    ERROR_TYPE    }} : [[   FAILED_CREATION   ]]\n||");
+
                     break;
                 }
                 case mox::ErrorSignature::ErrorTypeSUCCESS : {
-                    error = std::format("\n----------------------\nERROR NONE : SUCCESS :\n====================\nMESSAGE -> {}\n====================\n\n" , message);
+                    logAction("|| {{    ERROR_TYPE    }} : [[[      SUCCESS     ]]]\n||");
+
                     break;
                 }
                 default: {
-                    error = std::format("\n----------------------\nERROR_TYPE_NONE :\n LOCATION -> FUCTION |{}| ,\n FILE |{}| ,\nLINE |{}|\n====================\nMESSAGE : {}\n====================\n\n" , location.function_name() , location.file_name() , location.line() , message);
+                    logAction("|| {{    ERROR_TYPE    }} : [[   UNDEFINED_ERROR   ]]\n||");
                     break;
                 }
             }
 
-            logAction(error , fileOutput);
+            logAction("\n||\n------------------------- SOURCE LOCATION -------------------------\n||\n");
+
+            logAction(std::format("|| {{    FILE_LOCATION   }} : {}\n||\n" , location.file_name()));
+            logAction(std::format("|| {{    FUNCTION_NAME   }} : {}\n||\n" , location.function_name()));
+            logAction(std::format("|| {{    LINE    }} : {}\n||\n" , location.line()));
+
+            logAction("--------------------------- INFORMATION ---------------------------\n||\n");
+
+            logAction(std::format("|| {{    Message    }} : {}\n||\n" , message));
+
+            logAction("=========================== END MESSAGE ===========================\n\n\n\n\n");
+
+        }
+
+        [[gnu::hot]] inline void setupLogMessage(const mox::ErrorSignature errorType , const std::string message ,const std::string fileOutput = LOG_FILE_OUTPUT,  std::source_location location = std::source_location::current() ){
+            printErrorType(errorType , message , location);
         }
     public:
         
