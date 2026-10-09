@@ -99,14 +99,14 @@ struct InstanceData{
     uint32_t LUT_index;
     uint32_t meshDataIndex;
     uint32_t needsToBeDraw;
-    float padding0;
+    uint32_t BLAS_index;
 
 #else
 
     uint LUT_index;
     uint meshDataIndex;
     uint needsToBeDraw;
-    float padding0;
+    uint BLAS_index;
 
 #endif
 };
@@ -160,7 +160,7 @@ struct LUT{
     int32_t depthTextureID = 0;
     int32_t roughnessTextureID = 0;
     int32_t metallicTextureID = 0;
-    int32_t flag = 0;
+    int32_t isLightSource = 0;
     
 #else
 
@@ -175,7 +175,7 @@ struct LUT{
     int depthID;
     int roughnessTextureID;
     int metallicTextureID;
-    int flag;
+    int isLightSource;
 
 #endif
 };

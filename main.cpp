@@ -9,6 +9,8 @@
 #include "include/Buffer2/GeneralBuffer.hpp"
 #include "include/Image2/ViewPerLayer.hpp"
 #include "include/Image2/ViewPerMip.hpp"
+#include "include/AS2/TLAS2.hpp"
+#include "include/Object2/cube.hpp"
 
 using namespace mox;
 
@@ -29,7 +31,7 @@ int main(){
         data.size = sizeof(uint32_t) * 10;
         data.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-
+        TextureManager2 manager{{&context}};
         mox::GeneralBuffer2<mox::BufferType::Device ,true> buffer(data , mox::translateToSpan<uint32_t>(inputData));
 
 
@@ -81,6 +83,45 @@ int main(){
 
             views = std::make_shared<ViewPerMip<11>>(info);
         }
+        {
+            // now lets test mesh
+
+            Mesh2::CreateInfo info{};
+            info.inputIndices = cube::indices;
+            info.inputVertices = cube::vertices;
+            info.roughness = 1.0f;
+            info.metallic = 0.0f;
+            info.roughnessPath = "3984983";
+            info.needsCalcTBN = true;
+            {
+                const auto result = Mesh2::Begin(&context , &manager);
+                if(!result.has_value()){
+                    std::cerr << "failed to begin mesh\n";
+                    return 1;
+                }
+            }
+
+            Mesh2 mesh(info);
+
+            {
+                const auto result = Mesh2::End();
+                if(!result.has_value()){
+                    std::cerr << result.error().second << '\n';
+                    return 1;
+                }
+            }
+
+            mesh.addMatrix(glm::mat4(0.5f));
+            Mesh2::updateMeshData();
+
+            TLAS2 tlas(&context);
+            std::cout << "BLAS count : " << Mesh2::BLAS_storage.size() << '\n';
+            std::cout << "instance count : " << Mesh2::totalInstanceLayouts.size() << '\n';
+            std::cout << "CMD count : " << Mesh2::totalCmdCount << '\n';
+
+        }
+
+        Mesh2::performDelete();
     }
     catch(std::exception &e){
         std::cerr << e.what() << '\n';
