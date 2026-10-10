@@ -9,6 +9,8 @@
 #include "include/Buffer2/GeneralBuffer.hpp"
 #include "include/Image2/ViewPerLayer.hpp"
 #include "include/Image2/ViewPerMip.hpp"
+#include "include/Image2/FrameTargets.hpp"
+
 #include "include/AS2/TLAS2.hpp"
 #include "include/Object2/cube.hpp"
 
@@ -118,6 +120,9 @@ int main(){
             std::cout << "instance count : " << Mesh2::totalInstanceLayouts.size() << '\n';
             std::cout << "CMD count : " << Mesh2::totalCmdCount << '\n';
 
+            {
+                FrameTargets targets(&context);
+            }
         }
 
         Mesh2::performDelete();

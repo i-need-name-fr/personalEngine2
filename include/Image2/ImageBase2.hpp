@@ -4,6 +4,14 @@
 
 namespace mox{
 
+    enum class ImageType{
+        RenderImage2,
+        Skybox2,
+        Texture2,
+        ViewPerLayer,
+        ViewPerMip
+    };
+
     class ImageBase2;
     using pImageBase2 = std::shared_ptr<ImageBase2>;
 

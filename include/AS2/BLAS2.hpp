@@ -19,8 +19,8 @@ namespace mox{
 
             VulkanContext* context;
 
-            BufferBase* vertexBuffer;
-            BufferBase* indicesBuffer;
+            BufferBase2* vertexBuffer;
+            BufferBase2* indicesBuffer;
 
             BLAS2_layout layout;
 
