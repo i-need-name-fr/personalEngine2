@@ -2,6 +2,9 @@
 
 #include "GraphPass2.hpp"
 #include "../Image2/FrameTargets.hpp"
+#include "../Image2/ViewPerLayer.hpp"
+#include "../Image2/ViewPerMip.hpp"
+
 
 namespace mox{
     // =================================== INFO ===================================
@@ -18,6 +21,11 @@ namespace mox{
         std::string name{"undefined"};
         void* data{nullptr};
     };
+
+    // CREATED 10.10.26
+    // 
+    // first update 10.10.26
+    // added viewPer shit as input
 
     class GraphRender2 final{
     public:
@@ -220,6 +228,52 @@ namespace mox{
 
             ParameterData data{};
             data.imageSpecification.type = ImageType::RenderImage2;
+            data.type = moxGraphTypeImage;
+            data.name = name;
+            data.data = image;
+
+            allAttachments.insert({name,  data});
+
+            return {};
+        }
+
+        template<uint32_t T>
+        requires(T >= 2)
+        [[nodiscard]] ErrorDataOutput<void> processInputParameter(ViewPerLayer<T>* image , const std::string name) noexcept{
+            if(!image){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("couldnt add the image as an input parameter , since its nullptr")});
+            }
+            if(name.empty()){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL ,"failed to add image , since the name for that image is nullptr"});
+            }
+
+            if(allAttachments.contains(name)) return {};
+
+            ParameterData data{};
+            data.imageSpecification.type = ImageType::ViewPerLayer;
+            data.type = moxGraphTypeImage;
+            data.name = name;
+            data.data = image;
+
+            allAttachments.insert({name,  data});
+
+            return {};
+        }
+
+        template<uint32_t T>
+        requires(T >= 2)
+        [[nodiscard]] ErrorDataOutput<void> processInputParameter(ViewPerMip<T>* image , const std::string name) noexcept{
+            if(!image){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("couldnt add the image as an input parameter , since its nullptr")});
+            }
+            if(name.empty()){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL ,"failed to add image , since the name for that image is nullptr"});
+            }
+
+            if(allAttachments.contains(name)) return {};
+
+            ParameterData data{};
+            data.imageSpecification.type = ImageType::ViewPerMip;
             data.type = moxGraphTypeImage;
             data.name = name;
             data.data = image;
