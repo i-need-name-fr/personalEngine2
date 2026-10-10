@@ -3,7 +3,7 @@
 #include "../vulkanContext/vulkanBase.hpp"
 #include <fstream>
 #include <filesystem>
-#include "../DescriptorBuffer/Descriptor_buffer.hpp"
+#include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../DescriptorLayout/DescriptorLayout.hpp"
 
 namespace mox{
@@ -34,12 +34,13 @@ namespace mox{
         VkPipelineLayout layout = nullptr;
 
         std::vector<pDescriptorLayout> descriptorLayouts{};
-        std::vector<pDescriptorBuffer> buffers{};
+        std::vector<pDescriptorBuffer2> buffers{};
 
 
         Pipeline(const CreateInfo &info){
             if(!info.context){
                 const ErrorDataType error{MOX_ERROR_TYPE_FAILED_CREATION , "Failed to create pipeline , since the context is nullptr"};
+                engineLogger(&error);
                 THROW_MESSAGE;
             }
 
@@ -74,6 +75,13 @@ namespace mox{
         }
 
         ~Pipeline() noexcept {
+            releaseResources();
+        }
+
+    protected:
+
+        // everything this object owns is destroyed ( the cache is saved first ) : the destructor and the move use it
+        void releaseResources() noexcept {
             if(device){
                 if(pipeline) vkDestroyPipeline(device , pipeline , nullptr);
                 if(layout ) vkDestroyPipelineLayout(device , layout , nullptr);
@@ -92,9 +100,11 @@ namespace mox{
             renderPass = nullptr;
         }
 
-    protected:
-
         void performCopy(Pipeline&& input) noexcept{
+            // a move assignment used to take the handles of the other pipeline and leave the ones of this pipeline alive for ever ,
+            // and a move of an object into itself emptied its descriptor layouts
+            if(this == &input) return;
+            releaseResources();
             pipeline = std::exchange(input.pipeline , nullptr);
             renderPass = std::exchange(input.renderPass , nullptr);
             layout = std::exchange(input.layout, nullptr);

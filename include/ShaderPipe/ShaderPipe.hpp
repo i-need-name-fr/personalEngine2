@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ShaderObject.hpp"
-#include "../DescriptorBuffer/Descriptor_buffer.hpp"
+#include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../DescriptorLayout/DescriptorLayout.hpp"
 #include <stdfloat>
 
@@ -24,7 +24,7 @@ namespace mox{
 
         std::vector<pDescriptorLayout> descriptorLayouts{};
         std::vector<pShaderObject> shaders{};
-        std::vector<pDescriptorBuffer> buffers{};
+        std::vector<pDescriptorBuffer2> buffers{};
 
         VkPipelineLayout layout = nullptr;
 
@@ -64,6 +64,8 @@ namespace mox{
                 if(layout) vkDestroyPipelineLayout(device , layout , nullptr);
             }
 
+            layout = nullptr;
+
             descriptorLayouts.clear();
             shaders.clear();
             buffers.clear();
@@ -71,6 +73,9 @@ namespace mox{
         }
 
         void performCopy(ShaderPipe&& input) noexcept{
+            // the pipeline layout and the shaders that this object held would stay alive for ever , and a move into itself emptied the vectors
+            if(this == &input) return;
+            cleanPipe();
             descriptorLayouts = std::move(input.descriptorLayouts);
             shaders = std::move(input.shaders);
             buffers = std::move(input.buffers);

@@ -3,6 +3,7 @@
 #include "../vulkanContext/vulkanBase.hpp"
 #include <fstream>
 #include <filesystem>
+#include "../DescriptorLayout/DescriptorLayout.hpp"
 
 namespace mox{
 
@@ -17,6 +18,10 @@ namespace mox{
         }
 
         ShaderObject& operator=(ShaderObject&& input) noexcept{
+            if(this == &input) return *this;
+            // performCopy only takes the handle of the other shader , the shader that this object held would stay alive for ever
+            if(device && shader) destroyShaderEXT(device , shader , nullptr);
+            shader = nullptr;
             performCopy(std::move(input));
 
             return *this;
@@ -25,7 +30,7 @@ namespace mox{
         struct CreateInfo{
             VulkanContext* context;
 
-            std::vector<VkDescriptorSetLayout> layouts;
+            std::vector<DescriptorLayout*> layouts;
             std::vector<VkPushConstantRange> pushes;
 
             VkShaderStageFlagBits currentStage;
@@ -34,7 +39,7 @@ namespace mox{
             std::string filePath{};
         };
 
-        ShaderObject(const CreateInfo info){
+        ShaderObject(const CreateInfo &info){
             const auto result = createShader(info);
             if(!result.has_value()){
                 engineLogger(&result.error());
@@ -80,6 +85,14 @@ namespace mox{
                 std::filesystem::create_directories("../ShaderModuleCache" , ec);
             }
 
+            std::vector<VkDescriptorSetLayout> layouts{};
+            for(auto& layout : data.layouts){
+                if(!layout) continue;
+                layouts.push_back(layout->layout);
+            }   
+
+            if(layouts.size() != data.layouts.size()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create shader object , due to some descriptor layouts being nullptr"});
+
             if(checkValidTemp(data.filePath)){
 
                 auto buffer = getCacheData(data.filePath);
@@ -98,7 +111,8 @@ namespace mox{
                 info.pCode= buffer.data();
                 info.stage = data.currentStage;
                 info.setLayoutCount = static_cast<uint32_t>(data.layouts.size());
-                info.pSetLayouts = data.layouts.data();
+
+                info.pSetLayouts = layouts.data();
                 info.pushConstantRangeCount = static_cast<uint32_t>(data.pushes.size());
                 info.pPushConstantRanges = data.pushes.data();
                 info.pName ="main";
@@ -126,7 +140,7 @@ namespace mox{
                 info.pCode= buffer.data();
                 info.stage = data.currentStage;
                 info.setLayoutCount = static_cast<uint32_t>(data.layouts.size());
-                info.pSetLayouts = data.layouts.data();
+                info.pSetLayouts = layouts.data();
                 info.pushConstantRangeCount = static_cast<uint32_t>(data.pushes.size());
                 info.pPushConstantRanges = data.pushes.data();
                 info.pName ="main";

@@ -14,6 +14,8 @@
 #include "include/AS2/TLAS2.hpp"
 #include "include/Object2/cube.hpp"
 
+#include "include/Image2/MultiViewImage2.hpp"
+
 using namespace mox;
 
 int main(){
