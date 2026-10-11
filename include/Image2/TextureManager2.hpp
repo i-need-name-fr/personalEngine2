@@ -1,7 +1,8 @@
 #pragma once
 
 #include "Textures2.hpp"
-#include "../DescriptorBuffer/Descriptor_buffer.hpp"
+#include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
+#include "../DescriptorLayout/DescriptorLayout.hpp"
 
 namespace mox{
 
@@ -11,6 +12,7 @@ namespace mox{
 
     class TextureManager2 final{
     private:
+        const uint32_t MaxTextureCount = 9999u;
 
         std::vector<pTexture2> textures{};
         std::vector<int32_t> virtualToPhysical{};
@@ -21,65 +23,36 @@ namespace mox{
         VkDevice device = nullptr;
         VulkanContext* context = nullptr;
 
-        std::vector<DescriptorData> getDescriptorData() const noexcept{
-            std::vector<DescriptorData> datas{};
-            // buffer
-            {   
-                DescriptorData info{};
-                info.ASinfo = {};
-                info.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                info.imageInfo = {};
-                info.bindingIndex = 0;
-                info.indexInArray = 0;
-                info.bufferInfo= {virtualBuffer->pBuffer , virtualBuffer->getBufferSize()};
-                info.samplerInfo = {};
+        std::vector<DescriptorData2> getDescriptorData() const noexcept{
 
-                datas.push_back(info);
-            }
-
-            // sampler
+            std::vector<DescriptorData2> data;
             {
-                DescriptorData info{};
-                info.ASinfo = {};
-                info.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-                info.imageInfo = {};
-                info.bindingIndex = 1;
-                info.indexInArray = 0;
-                info.bufferInfo= {};
-                info.samplerInfo = {typicalSampler->sampler};
-
-                datas.push_back(info);
+                const auto temp = DescriptorData2::createData(virtualBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0);
+                data.push_back(temp);
             }
-            uint32_t i = 0;
+
+            {
+                const auto temp = DescriptorData2::createData(typicalSampler.get() , 1 , 0);
+                data.push_back(temp);
+            }
+
+            uint32_t i = 0 ;
             for(auto& texture : textures){
-
-                if(!texture) continue;
-
-                DescriptorTypeImage image{};
-                image.view = texture->view;
-
-                DescriptorData info{};
-                info.ASinfo = {};
-                info.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                info.imageInfo = {image};
-                info.bindingIndex = 2;
-                info.indexInArray = i;
-                info.bufferInfo= {};
-                info.samplerInfo = {};
+                const auto temp = DescriptorData2::createData(texture.get() , 2 , i);
+                data.push_back(temp);
                 i++;
-                datas.push_back(info);
             }
-            return datas;
+            
+            return data;
         }
 
         ErrorDataOutput<void> updateData() noexcept {
             if(!virtualBuffer) return {};
-            virtualBuffer->recordData(virtualToPhysical);
+            virtualBuffer->recordData(translateToSpan(virtualToPhysical));
 
             auto datas = getDescriptorData();
 
-            auto result = dbuffer->updateDescriptorBuffer(layout , datas);
-            return result;
+            return dbuffer->updateDescriptorSet(datas);
         }
 
         void performCopy(TextureManager2&& input) noexcept{
@@ -87,7 +60,7 @@ namespace mox{
             virtualToPhysical = std::move(input.virtualToPhysical);
             physicalToVirtual = std::move(input.physicalToVirtual);
 
-            layout = std::exchange(input.layout, nullptr);
+            layout = std::move(input.layout);
             dbuffer = std::move(input.dbuffer);
             virtualBuffer = std::move(input.virtualBuffer);
             typicalSampler = std::move(input.typicalSampler);
@@ -98,7 +71,7 @@ namespace mox{
         }
 
         void performDelete() noexcept{
-            if(device && layout) vkDestroyDescriptorSetLayout(device , layout , nullptr);
+            layout = nullptr;
             virtualBuffer = nullptr;
             dbuffer = nullptr;
             typicalSampler = nullptr;
@@ -110,51 +83,19 @@ namespace mox{
         [[nodiscard]] [[gnu::cold]] ErrorDataOutput<void> init() noexcept{
 
             {
-                std::vector<VkDescriptorSetLayoutBinding> bind(3);
+                std::vector<DescriptorLayoutData> data(3);
+                data[0] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
+                data[1] = {.type = VK_DESCRIPTOR_TYPE_SAMPLER , .count = 1};
+                data[2] = {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , .count = MaxTextureCount};
 
-                bind[0].binding = 0;
-                bind[0].descriptorCount = 1;
-                bind[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                bind[0].pImmutableSamplers = nullptr;
-                bind[0].stageFlags = VK_SHADER_STAGE_ALL;
-
-                bind[1].binding = 1;
-                bind[1].descriptorCount = 1;
-                bind[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-                bind[1].pImmutableSamplers = nullptr;
-                bind[1].stageFlags = VK_SHADER_STAGE_ALL;
-
-                bind[2].binding = 2;
-                bind[2].descriptorCount = Texture2::MaxTextureCount;
-                bind[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                bind[2].pImmutableSamplers = nullptr;
-                bind[2].stageFlags = VK_SHADER_STAGE_ALL;
-
-                // descriptor buffers have no pool and no allocation of a set : UPDATE_AFTER_BIND needs the
-                // UPDATE_AFTER_BIND_POOL layout flag , which a DESCRIPTOR_BUFFER layout must not have ( 08002 ) ,
-                // and a variable count has nowhere to be given. only PARTIALLY_BOUND is needed : the slots of
-                // textures that were not added yet are never written and never read.
-                std::vector<VkDescriptorBindingFlags> flags = {0 , 0 , VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT};
-                
-                VkDescriptorSetLayoutBindingFlagsCreateInfo ext{};
-                ext.pBindingFlags = flags.data();
-                ext.bindingCount = 3;
-                ext.pNext = nullptr;
-                ext.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-
-                VkDescriptorSetLayoutCreateInfo info{};
-                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-                info.pNext = &ext;
-                info.bindingCount = 3;
-                info.pBindings = bind.data();
-                // NOT a push descriptor layout : a push layout has an opaque size ( vkGetDescriptorSetLayoutSizeEXT
-                // is invalid for it and returned 0 ) and is capped at maxPushDescriptors ( 32 ) descriptors
+                DescriptorLayout::CreateInfo info{};
+                info.context = context;
+                info.data = data;
                 info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+                info.pNext = nullptr;
+                info.stage = VK_SHADER_STAGE_ALL;
 
-                const auto result = vkCreateDescriptorSetLayout(device , &info , nullptr , &layout);
-                if(result != VK_SUCCESS){
-                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create descriptor set layout for texture manager , error ID -> {}" , static_cast<int32_t>(result))});
-                }
+                layout = std::make_shared<DescriptorLayout>(info);
             }
 
             {
@@ -162,7 +103,7 @@ namespace mox{
                     Sampler::CreateInfo info{};
                     info.requiredComparingSampler = false;
                     info.requiredTypicalSampler = false;
-                    info.textureSampler = true;
+                    info.textureSampler = true; 
                     info.borderColorIsWhite = true;
                     info.context = context;
                     typicalSampler = std::make_shared<Sampler>(info);
@@ -172,12 +113,12 @@ namespace mox{
                 }
 
                 try{
-                    HostBuffer::CreateInfo info{};
+                    GeneralBuffer2<BufferType::Device , true>::CreateInfo info{};
                     info.context = context;
                     info.size = sizeof(uint32_t) * Texture2::MaxTextureCount;
                     info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
-                    virtualBuffer = std::make_shared<HostBuffer>(info);
+                    virtualBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
                 }
                 catch(std::exception& e){
                     return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION,"failed to create host buffer for texture manager"});
@@ -185,13 +126,12 @@ namespace mox{
 
                 try{
                     auto datas = getDescriptorData();
-
-                    DescriptorBuffer::CreateInfo info{};
-                    info.layout = layout;
+                    DescriptorBuffer2::CreateInfo info{};
+                    info.data = datas;
                     info.context = context;
-                    info.descriptorInfo = datas;
+                    info.layout = layout.get();
 
-                    dbuffer = std::make_shared<DescriptorBuffer>(info);
+                    dbuffer = std::make_shared<DescriptorBuffer2>(info);
                 }
                 catch(std::exception& e){
                     return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION,"failed to create descriptor buffer for texture manager"});
@@ -231,11 +171,11 @@ namespace mox{
             performDelete();
         }
 
-        pDescriptorBuffer dbuffer = nullptr;
-        pHostBuffer virtualBuffer = nullptr;
+        pDescriptorBuffer2 dbuffer = nullptr;
+        pGeneralBuffer2<BufferType::Device , true> virtualBuffer = nullptr;
         pSampler typicalSampler = nullptr;
 
-        VkDescriptorSetLayout layout = nullptr;
+        pDescriptorLayout layout = nullptr;
 
         explicit TextureManager2(const CreateInfo &info){
             if(!info.context){

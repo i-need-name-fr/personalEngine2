@@ -196,6 +196,19 @@ namespace mox{
             return processBinding(layout , data);
         }
 
+        [[nodiscard]] ErrorDataOutput<void> updateDescriptorSet(const std::vector<DescriptorData2> &data){
+
+            if(!layout) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_WARNING , "couldnt update the descriptor buffer2 , since the layout is empty"});
+            if(data.empty()) return {};
+            
+            for(auto& input : data){
+                const auto result = processBinding(layout , input);
+                if(!result.has_value()) return result;            
+            }
+
+            return {};
+        }
+
         ~DescriptorBuffer2()noexcept{
             inputData.clear();
             layout = nullptr;

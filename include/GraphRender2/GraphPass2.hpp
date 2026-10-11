@@ -46,6 +46,7 @@ namespace mox{
     // 
     // first is requestExectution() is it a function that defines whether we should execute this graph or not
     // postProcessGraphRenderLocations - function that provides pointer to the required data parameters 
+    // that function also creates the pipelines and so on 
     // 
     // each graph Pass will translate the image to its required Access and so on , there is literally no need for graph Render to do anything
     // since now the Image2 and Buffer2 do it automatically
@@ -78,7 +79,9 @@ namespace mox{
         [[nodiscard]] [[gnu::hot]] virtual const ErrorDataOutput<void> translateBarriers(VkCommandBuffer& cmd) noexcept = 0;
 
         virtual ~GraphPass2(){}
+    protected:
 
+        uint8_t completedInit = false;
     };
 
     using pGraphPass2 = std::shared_ptr<GraphPass2>;

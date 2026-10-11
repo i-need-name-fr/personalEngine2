@@ -3,7 +3,7 @@
 #include "ShaderObject.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../DescriptorLayout/DescriptorLayout.hpp"
-#include <stdfloat>
+#include "../PipelineLayout/PipelineLayout.hpp"
 
 namespace mox{
 
@@ -26,7 +26,7 @@ namespace mox{
         std::vector<pShaderObject> shaders{};
         std::vector<pDescriptorBuffer2> buffers{};
 
-        VkPipelineLayout layout = nullptr;
+        pPipelineLayout layout = nullptr;
 
         std::vector<VkDescriptorSetLayout> getDescriptorLayoutData() const noexcept{
             if(descriptorLayouts.empty()) return {};
@@ -60,12 +60,7 @@ namespace mox{
     private:
 
         void cleanPipe() noexcept {
-            if(device){
-                if(layout) vkDestroyPipelineLayout(device , layout , nullptr);
-            }
-
             layout = nullptr;
-
             descriptorLayouts.clear();
             shaders.clear();
             buffers.clear();
@@ -79,7 +74,7 @@ namespace mox{
             descriptorLayouts = std::move(input.descriptorLayouts);
             shaders = std::move(input.shaders);
             buffers = std::move(input.buffers);
-            layout = std::exchange(input.layout , nullptr);
+            layout = std::move(input.layout);
             device = std::exchange(input.device , nullptr);
         }
 

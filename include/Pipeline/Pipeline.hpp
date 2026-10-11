@@ -5,6 +5,7 @@
 #include <filesystem>
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../DescriptorLayout/DescriptorLayout.hpp"
+#include "../PipelineLayout/PipelineLayout.hpp"
 
 namespace mox{
 
@@ -31,7 +32,7 @@ namespace mox{
 
         VkPipeline pipeline = nullptr;
         VkRenderPass renderPass = nullptr;
-        VkPipelineLayout layout = nullptr;
+        pPipelineLayout layout = nullptr;
 
         std::vector<pDescriptorLayout> descriptorLayouts{};
         std::vector<pDescriptorBuffer2> buffers{};
@@ -84,7 +85,6 @@ namespace mox{
         void releaseResources() noexcept {
             if(device){
                 if(pipeline) vkDestroyPipeline(device , pipeline , nullptr);
-                if(layout ) vkDestroyPipelineLayout(device , layout , nullptr);
                 if(renderPass) vkDestroyRenderPass(device , renderPass , nullptr);
                 if(cache){
                     saveTheCache();
@@ -98,6 +98,7 @@ namespace mox{
             pipeline = nullptr;
             device = nullptr;
             renderPass = nullptr;
+            layout = nullptr;
         }
 
         void performCopy(Pipeline&& input) noexcept{
@@ -107,7 +108,7 @@ namespace mox{
             releaseResources();
             pipeline = std::exchange(input.pipeline , nullptr);
             renderPass = std::exchange(input.renderPass , nullptr);
-            layout = std::exchange(input.layout, nullptr);
+            layout =std::move(input.layout);
 
             descriptorLayouts = std::move(input.descriptorLayouts);
             cache = std::exchange(input.cache , nullptr);
