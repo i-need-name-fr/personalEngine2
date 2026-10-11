@@ -208,6 +208,7 @@ struct GeneralInfo{
 
     float playerFar;
     float playerNear;
+    float exposure;
 
     // what the picture shows : DEFAULT_MODE , ALBEDO_MODE , NORMAL_MODE , DEPTH_MODE , INDIRECT_MODE
     uint32_t viewMode;
@@ -243,6 +244,7 @@ struct GeneralInfo{
 
     float playerFar;
     float playerNear;
+    float exposure;
 
     uint viewMode;
 
@@ -434,8 +436,11 @@ struct ForwardPlusInfo{
 #define ALBEDO_MODE 1
 #define NORMAL_MODE 2
 #define DEPTH_MODE 3
+#define METALLIC_MODE 4
+#define ROUGHNESS_MODE 5
+
 // the indirect light alone ( SSDO / SSGI / DDGI / SSR ) , without the direct light
-#define INDIRECT_MODE 4
+#define INDIRECT_MODE 6
 
 struct GeneralFeatures{
 #ifdef __cplusplus
@@ -459,6 +464,7 @@ struct GeneralFeatures{
     uint32_t volumentricFog;
 
     float IndirectShare;
+    float maxDepth;
 #else
 
     uint AO;
@@ -480,6 +486,7 @@ struct GeneralFeatures{
     uint volumentricFog;
 
     float IndirectShare;
+    float maxDepth;
 
 #endif
 };

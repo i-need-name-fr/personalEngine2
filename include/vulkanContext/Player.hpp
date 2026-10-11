@@ -185,7 +185,6 @@ namespace mox{
                                  user->openedMenu ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
                 user->resetMouseAnchor();
             }
-            if(key == GLFW_KEY_G && action == GLFW_PRESS) user->PT_required = !user->PT_required;
             if(key == GLFW_KEY_R && action == GLFW_PRESS) user->currentMode = (user->currentMode + 1) % user->totalModes;
         }
     };
