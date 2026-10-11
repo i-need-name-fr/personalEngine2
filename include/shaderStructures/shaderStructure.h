@@ -212,11 +212,6 @@ struct GeneralInfo{
     // what the picture shows : DEFAULT_MODE , ALBEDO_MODE , NORMAL_MODE , DEPTH_MODE , INDIRECT_MODE
     uint32_t viewMode;
 
-    // the screen space shadows ( copied from GeneralFeatures )
-    uint32_t screenShadow;
-    uint32_t shadowSteps;
-    float shadowThickness;
-    float shadowBias;
 
     // the balance : the direct light ( lamps , sun ) is multiplied by directWeight , the indirect ( bounces , reflections , the ambient ) by indirectWeight
     float directWeight;
@@ -224,9 +219,6 @@ struct GeneralInfo{
     // SSDO / SSGI are on : the ambient light is a part of their rays ( the rays that escape bring it ) , PostProcess does not add it again
     uint32_t ambientInIndirect;
 
-    // the cone of the shadow rays ( copied from GeneralFeatures , the angle in radians )
-    uint32_t shadowSamples;
-    float shadowConeAngle;
 
 #else
 
@@ -254,42 +246,14 @@ struct GeneralInfo{
 
     uint viewMode;
 
-    uint screenShadow;
-    uint shadowSteps;
-    float shadowThickness;
-    float shadowBias;
-
     float directWeight;
     float indirectWeight;
     uint ambientInIndirect;
 
-    uint shadowSamples;
-    float shadowConeAngle;
 
 #endif
 };
 
-struct LensParams{
-#ifdef __cplusplus
-    glm::vec2 outputSize;
-    uint32_t ghostCount;
-    float ghostDispersal;
-    float chromaticAberration;
-    float lightVisibility;
-    // only the pixels brighter than this ( luminance of the final picture , 0..1 ) make ghosts
-    float brightThreshold;
-    // pads the struct to 32 bytes ( a uniform buffer is read in blocks of 16 )
-    float padding;
-#else
-    float2 outputSize;
-    uint ghostCount;
-    float ghostDispersal;
-    float chromaticAberration;
-    float lightVisibility;
-    float brightThreshold;
-    float padding;
-#endif
-};
 
 struct LightSource{
 #ifdef __cplusplus
@@ -457,12 +421,12 @@ struct ForwardPlusInfo{
 
 #define SSAO_REQUIRED 1
 #define HBAO_REQUIRED 2
+#define RTAO_REQUIRED 3
 #define AO_NOT_REQUIRED 0
 
 #define SSR_REQUIRED 1
 
 #define NON_REQUIRED 0
-#define SSDO_REQUIRED 1
 #define SSGI_REQUIRED 2
 #define DDGI_REQUIRED 3
 
@@ -482,31 +446,19 @@ struct GeneralFeatures{
 
     uint32_t SSR;
     uint32_t DDGI;
-    uint32_t SSDO;
     uint32_t SSGI;    
 
     uint32_t VSM;
-    uint32_t PCSS;
 
     uint32_t RT;
     uint32_t PT;
 
     uint32_t currentMode;
-    uint32_t Bloom;
-    // the screen space lens flare ( SSLens ) , optional
-    uint32_t Lens;
 
-    // screen space shadows of the lamps ( LightPass ) : a ray from the pixel to the lamp is marched through the depth of the screen
-    uint32_t ScreenShadow;
-    uint32_t ShadowSteps;
-    float ShadowThickness;     // how far behind a visible surface a ray still counts as hidden by it
-    float ShadowBias;          // the start of the ray is moved along the normal by this
-    uint32_t ShadowSamples;    // how many times the shadow is cast : the rays of the cone around the direction to the lamp
-    float ShadowConeAngle;     // the half angle of that cone ( degrees ) : the size of the lamp , the width of the soft edge
+    uint32_t randomValues;
+    uint32_t volumentricFog;
 
-    // the share of the indirect light in the picture ( 0.6 : 60% indirect , 40% direct )
     float IndirectShare;
-
 #else
 
     uint AO;
@@ -515,55 +467,23 @@ struct GeneralFeatures{
 
     uint SSR;
     uint DDGI;
-    uint SSDO;
     uint SSGI;    
 
     uint VSM;
-    uint PCSS;
 
     uint RT;
     uint PT;
 
     uint currentMode;
-    uint Bloom;
-    uint Lens;
 
-    uint ScreenShadow;
-    uint ShadowSteps;
-    float ShadowThickness;
-    float ShadowBias;
-    uint ShadowSamples;
-    float ShadowConeAngle;
+    uint randomValues;
+    uint volumentricFog;
 
     float IndirectShare;
 
 #endif
 };
 
-struct BloomParameters{
-
-#ifdef __cplusplus
-    float thresHold;
-    float radius;
-    float intensity;
-    uint32_t mipCount;
-
-    uint32_t bloomRequired;
-    float gamma;
-    float exposure;
-    float dt;
-#else
-    float thresHold;
-    float radius;
-    float intensity;
-    int mipCount;
-
-    bool bloomRequired;
-    float gamma;
-    float exposure;
-    float dt;
-#endif
-};
 
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;
