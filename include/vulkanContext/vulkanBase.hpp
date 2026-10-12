@@ -27,6 +27,10 @@
 #include "Queue.hpp"
 #include "GPUMultiThread.hpp"
 
+#define SetTypicalOperators(type) type() = delete ;type(const type& input) = delete; type(type& input) = delete; type& operator=(type& input) = delete; type& operator=(const type& input) = delete;
+#define SetTypicalTransferOperators(type) type(type&& input) noexcept{if(this == &input)return; processCopy(std::move(input));} type& operator=(type&& input) noexcept{if(this == &input)return *this; processCopy(std::move(input)); return *this;}
+
+
 namespace mox{
 
     using pPlayer = std::shared_ptr<Player>;
@@ -176,10 +180,7 @@ namespace mox{
             init(info.multithreadQueueCount , info.asyncMultiThreadQueueCount);
         }
 
-        VulkanContext(const VulkanContext&) = delete;
-        VulkanContext& operator=(const VulkanContext&) = delete;
-        VulkanContext(VulkanContext&& input) noexcept = default;
-        VulkanContext& operator=(VulkanContext&& input) noexcept = default;
+        SetTypicalOperators(VulkanContext)
         ~VulkanContext() = default;
         
         pPlayer user = nullptr;

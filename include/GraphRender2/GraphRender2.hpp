@@ -4,7 +4,7 @@
 #include "../Image2/FrameTargets.hpp"
 #include "../Image2/ViewPerLayer.hpp"
 #include "../Image2/ViewPerMip.hpp"
-
+#include "../Buffer2/SourceBuffers.hpp"
 
 namespace mox{
     // =================================== INFO ===================================
@@ -50,6 +50,41 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<void> execute(VkCommandBuffer &cmd , const std::string name) noexcept{
             return processExecution(cmd , name);
+        }
+
+        [[nodiscard]] ErrorDataOutput<void> processInputParameter(SourceBuffers* data) noexcept{
+
+            if(!data) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("couldnt add the source buffers as an input parameter , since its nullptr")});
+            // general 
+            {
+                const auto result = processInputParameter(data->generalBuffer.get() , "generalBuffer");
+                if(!result.has_value()) return result;
+            }
+
+            // features
+            {
+                const auto result = processInputParameter(data->features.get() , "generalFeatures");
+                if(!result.has_value()) return result;
+            }
+
+            // sun
+            {
+                const auto result = processInputParameter(data->sunBuffer.get() , "sunBuffer");
+                if(!result.has_value()) return result;
+            }
+
+            // lights
+            {
+                const auto result = processInputParameter(data->lightBuffer.get() , "lightBuffer");
+                if(!result.has_value()) return result;
+            }
+
+            // luminanceHistory
+            {
+                const auto result = processInputParameter(data->luminanceHistory.get() , "luminanceHistory");
+                if(!result.has_value()) return result;
+            }
+            return {};
         }
 
         [[nodiscard]] ErrorDataOutput<void> processInputParameter(FrameTargets* data) noexcept{
