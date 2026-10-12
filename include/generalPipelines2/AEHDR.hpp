@@ -100,6 +100,7 @@ namespace mox{
         }
 
         [[nodiscard]] [[gnu::cold]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
+            if(completedInit) return {};
             const auto bound = bindSources(sources ,
                 GraphSlot<RenderImage2>{"HDRImage_0" , &HDRImage[0]} , GraphSlot<RenderImage2>{"HDRImage_1" , &HDRImage[1]} ,
                 GraphSlot<BufferBase2>{"luminanceHistory" , &history});

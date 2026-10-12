@@ -86,6 +86,13 @@ namespace mox{
         [[nodiscard]] [[gnu::hot]] virtual const ErrorDataOutput<void> translateBarriers(VkCommandBuffer& cmd) noexcept = 0;
 
         virtual ~GraphPass2(){}
+
+        // true when the pass has got its resources and has created its pipeline : the graph does not link such a pass again ,
+        // so a pass that is added to several paths is not created several times
+        [[nodiscard]] bool isInitialized() const noexcept{
+            return completedInit;
+        }
+
     protected:
 
         uint8_t completedInit = false;

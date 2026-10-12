@@ -391,8 +391,8 @@ namespace mox{
             return {};
         }
 
-        [[nodiscard]] ErrorDataOutput<void> addGraphPass2(GraphPass2* pass , const std::string pathName) noexcept{
-            return processInputGraphPass(pathName , pass);
+        [[nodiscard]] ErrorDataOutput<void> addGraphPass2(GraphPass2* input , const std::string pathName) noexcept{
+            return processInputGraphPass(pathName , input);
         }
 
     private:
@@ -412,6 +412,25 @@ namespace mox{
         }
 
         [[nodiscard]] ErrorDataOutput<void> processInputGraphPass(const std::string name , GraphPass2* pass) noexcept {
+
+            if(!pass){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("couldnt add graph pass to the path [[  {}  ]] , since the pass is nullptr" , name)});
+            }
+
+            // the same pass twice in the same path would be executed twice in a frame : the second add changes nothing
+            {
+                const auto path = graphPasses.find(name);
+                if(path != graphPasses.end() && std::find(path->second.begin() , path->second.end() , pass) != path->second.end()){
+                    engineLogger(ErrorDataType{MOX_ERROR_TYPE_WARNING , std::format("the graph pass is already in the path [[  {}  ]] , it was not added again" , name)});
+                    return {};
+                }
+            }
+
+            // a pass that already has its pipeline ( it was added to another path ) is only put in this path
+            if(pass->isInitialized()){
+                graphPasses[name].push_back(pass);
+                return {};
+            }
 
             const auto reqs = pass->acquireRequirements();
             std::vector<GraphParameterSource> sources{};
@@ -437,11 +456,7 @@ namespace mox{
             const auto result = pass->postProcessGraphRenderLocations(sources);
             if(!result.has_value()) return result;
 
-            if(graphPasses.contains(name)){
-                graphPasses[name].push_back(pass);
-            }else{
-                graphPasses.insert({name , {pass}});
-            }
+            graphPasses[name].push_back(pass);
 
             return {};
         }
