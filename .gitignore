@@ -2,3 +2,4 @@ build/*
 log.txt
 .cache/
 task.txt
+ShaderModuleCache/
