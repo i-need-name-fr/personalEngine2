@@ -201,6 +201,11 @@ namespace mox{
                     const auto result = processInputParameter(data->metallicImage.get() , "metallicImage");
                     if(!result.has_value()) return result;
                 }
+
+                {
+                    const auto result = processInputParameter(data->finalImage.get() , "finalImage");
+                    if(!result.has_value()) return result;
+                }
             }
 
 
