@@ -58,6 +58,7 @@ namespace mox{
         pRenderImage2 filteredAmbientOcclusion{};
 
         pRenderImage2 HDRImage[2]{};
+        pRenderImage2 finalImage{nullptr};
 
         ~FrameTargets() noexcept{
             processDelete();
@@ -106,6 +107,9 @@ namespace mox{
                 HDRImage[0] = std::make_shared<RenderImage2>(info);
                 HDRImage[1] = std::make_shared<RenderImage2>(info);
 
+                info.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+                finalImage = std::make_shared<RenderImage2>(info);
+                
                 // depth
                 info.imageFormat = VK_FORMAT_R32_SFLOAT;
                 depthImage[0]=  std::make_shared<RenderImage2>(info);

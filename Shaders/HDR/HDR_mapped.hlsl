@@ -94,7 +94,8 @@ void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
     // would only change it . ( after the average above , the barriers in it need every thread of the group )
 
     if(features.currentMode == ALBEDO_MODE){
-        finalImage[id.xy] = float4( albedoImage[id.xy].xyz , 1.0f);
+        // albedo image is surely rgba8 , since its diretly from textures
+        finalImage[id.xy] = float4( albedoImage[id.xy].xyz, 1.0f);
         pixelCheck[id.xy] = UNDEFINED_PIXEL;
         return;
     }else if(features.currentMode == NORMAL_MODE){
