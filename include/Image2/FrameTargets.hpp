@@ -43,22 +43,24 @@ namespace mox{
         pRenderImage2 normalImage[2]{};
         pRenderImage2 diffuseImage[2]{};
         pRenderImage2 specularImage[2]{};
-
+        // 10
         pRenderImage2 indirectImage[2]{};
         pRenderImage2 ambientImage{};
-
+        // 13
         pRenderImage2 roughnessImage{};
         pRenderImage2 metallicImage{};
         pRenderImage2 albedoImage{};
-
+        // 16
         
         pRenderImage2 shadowImage[2]{};
         pRenderImage2 ambientOcclusionImage[2]{};
+        // 20
         pRenderImage2 filteredShadowImage{};
         pRenderImage2 filteredAmbientOcclusion{};
-
+        // 22
         pRenderImage2 HDRImage[2]{};
         pRenderImage2 finalImage{nullptr};
+        // 25
         // the fragment shader of the deferred render marks the pixels that it drew , the HDR pass reads them
         pRenderImage2 pixelCheck{nullptr};
 
@@ -66,7 +68,72 @@ namespace mox{
             processDelete();
         }
 
+        void cleanImages(VkCommandBuffer &cmd) noexcept{
+            // we need to clean
+            translateAllImages(cmd , VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+            fillImages(cmd);
+            translateAllImages(cmd , VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        }
+
     private:
+
+        void translateAllImages(VkCommandBuffer &cmd, const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
+            std::array<VkImageMemoryBarrier2, 25> barriers;
+            for(auto& id : { 0 ,1}){
+                barriers[0 + id] = positionImage[id]->translateImageUndefined(access , stage);
+                barriers[2 + id] = normalImage[id]->translateImageUndefined(access , stage);
+                barriers[4 + id] = depthImage[id]->translateImageUndefined(access , stage);
+                barriers[6 + id] = diffuseImage[id]->translateImageUndefined(access , stage);
+                barriers[8 + id] = specularImage[id]->translateImageUndefined(access , stage);
+                barriers[10 + id] = indirectImage[id]->translateImageUndefined(access , stage);
+                barriers[12 + id] = shadowImage[id]->translateImageUndefined(access , stage);
+                barriers[14 + id] = ambientOcclusionImage[id]->translateImageUndefined(access , stage);
+                barriers[16 + id] = HDRImage[id]->translateImageUndefined(access , stage);
+            }
+            barriers[18] = ambientImage->translateImageUndefined(access , stage);
+            barriers[19] = roughnessImage->translateImageUndefined(access , stage);
+            barriers[20] = metallicImage->translateImageUndefined(access , stage);
+            barriers[21] = albedoImage->translateImageUndefined(access , stage);
+            barriers[22] = filteredShadowImage->translateImageUndefined(access , stage);
+            barriers[23] = filteredAmbientOcclusion->translateImageUndefined(access , stage);
+            barriers[24] = finalImage->translateImageUndefined(access , stage);
+
+            VkDependencyInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            info.bufferMemoryBarrierCount = 0;
+            info.imageMemoryBarrierCount = 25;
+            info.pMemoryBarriers = nullptr;
+            info.pImageMemoryBarriers = barriers.data();
+            info.pBufferMemoryBarriers = nullptr;
+            info.memoryBarrierCount = 0;
+            info.pNext = nullptr;
+            info.dependencyFlags = 0;
+
+            vkCmdPipelineBarrier2(cmd , &info);
+        }
+
+
+        void fillImages(VkCommandBuffer& cmd) noexcept{
+            for(auto& id : { 0 ,1}){
+                positionImage[id]->cleanTheImage(cmd);
+                depthImage[id]->cleanTheImage(cmd);
+                diffuseImage[id]->cleanTheImage(cmd);
+                shadowImage[id]->cleanTheImage(cmd);
+                ambientOcclusionImage[id]->cleanTheImage(cmd);
+                normalImage[id]->cleanTheImage(cmd);
+                specularImage[id]->cleanTheImage(cmd);
+                HDRImage[id]->cleanTheImage(cmd);
+                indirectImage[id]->cleanTheImage(cmd);
+            }
+
+            albedoImage->cleanTheImage(cmd);
+            filteredShadowImage->cleanTheImage(cmd);
+            filteredAmbientOcclusion->cleanTheImage(cmd);
+            roughnessImage->cleanTheImage(cmd);
+            metallicImage->cleanTheImage(cmd);
+            finalImage->cleanTheImage(cmd);
+            ambientImage->cleanTheImage(cmd);
+        }
 
         [[nodiscard]] ErrorDataOutput<void> createImages(VulkanContext* context) noexcept{
             try{

@@ -15,13 +15,16 @@
 #include "include/Object2/cube.hpp"
 
 #include "include/Image2/MultiViewImage2.hpp"
+#include "tempCore.hpp"
+
 
 using namespace mox;
 
 int main(){
     std::cout << "hello world\n";
     try{
-
+        TempCore core;
+        core.run();
     }
     catch(std::exception &e){
         std::cerr << e.what() << '\n';

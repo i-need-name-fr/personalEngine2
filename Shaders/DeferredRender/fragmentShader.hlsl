@@ -9,41 +9,29 @@ struct VsOutput{
 
 #include "../../include/ShaderStructures/ShaderStructure.h"
 
-[[vk::image_format("r32f")]]
-[[vk::binding(0 , 0)]] RWTexture2D<float> pixelCheck;
-[[vk::binding(1 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
-[[vk::binding(2, 0)]] RWStructuredBuffer<InstanceData> instanceLayoutBuffer;
-[[vk::binding(3 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
-[[vk::binding(4 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
-[[vk::binding(5 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
+// set 0 of the deferred render : only buffers , the g buffer is not here any more , it is written through the color attachments
+[[vk::binding(0 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
+[[vk::binding(4 , 0)]] StructuredBuffer<LUT> LUT_Buffer;
 
-[[vk::image_format("rgba16f")]]
-[[vk::binding(6 , 0)]] RWTexture2D<float4> albedoImage;
-
-[[vk::image_format("rgba32f")]]
-[[vk::binding(7 , 0)]] RWTexture2D<float4> positionImage;
-
-[[vk::image_format("rgba16f")]]
-[[vk::binding(8 , 0)]] RWTexture2D<float4> normalImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(9 , 0)]] RWTexture2D<float> depthImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(10 , 0)]] RWTexture2D<float> roughnessImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(11 , 0)]] RWTexture2D<float> metallicImage;
-
-[[vk::binding(0 , 1)]] RWStructuredBuffer<uint> virtualTextureIndex;
+[[vk::binding(0 , 1)]] StructuredBuffer<uint> virtualTextureIndex;
 [[vk::binding(1 , 1)]] SamplerState samp;
 [[vk::binding(2 , 1)]] Texture2D allTextures[];
 
+// the order of the SV_Target is the order of the color attachments in DeferredRender::executePass
+struct PsOutput{
+    float4 albedo     : SV_Target0;   // rgba16f
+    float4 position   : SV_Target1;   // rgba32f
+    float4 normal     : SV_Target2;   // rgba16f
+    float  depth      : SV_Target3;   // r32f , linear
+    float  roughness  : SV_Target4;   // r32f
+    float  metallic   : SV_Target5;   // r32f
+    float  pixelCheck : SV_Target6;   // r32f , COLOR_PIXEL where something was drawn
+};
 
 // true : the normal maps are OpenGL style ( green up ) , false : DirectX style ( green down )
 static const bool NORMAL_MAP_OPENGL = true;
 
-float2 calculateParallax(float2 currentUV , float3 V , int depthID){  
+float2 calculateParallax(float2 currentUV , float3 V , int depthID){
     if(depthID == NON_VALID_SLOT) return currentUV;
     const uint physicalIndex = virtualTextureIndex[depthID];
     const float depth = allTextures[physicalIndex].SampleLevel(samp , currentUV , 0).x;
@@ -53,16 +41,18 @@ float2 calculateParallax(float2 currentUV , float3 V , int depthID){
     return currentUV - float2(p.x , -p.y);
 }
 
+// the shader has no side effects and does not change the depth , so the depth test may run before it
+[earlydepthstencil]
 [shader("pixel")]
-void main(VsOutput input){
+PsOutput main(VsOutput input){
 
-    uint2 pixel = uint2(input.clipPos.xy);
+    PsOutput output;
 
     // depth & position
-    positionImage[pixel] = float4(input.fragPos, 1.0f);
-    depthImage[pixel] = LinearizeDepth(input.clipPos.z , generalBuffer.playerNear , generalBuffer.playerFar);
+    output.position = float4(input.fragPos, 1.0f);
+    output.depth = LinearizeDepth(input.clipPos.z , generalBuffer.playerNear , generalBuffer.playerFar);
 
-    // current LUT 
+    // current LUT
     LUT lut = LUT_Buffer[input.LUTindex];
 
     const float3 V = normalize(generalBuffer.playerPosition - input.fragPos);
@@ -70,7 +60,7 @@ void main(VsOutput input){
     const float3 V_TBN = mul(TBN , V);
     // parallax
     const float2 uv = calculateParallax(input.uv , V_TBN , lut.depthID);
-    // normal  
+    // normal
     if(lut.normalID != NON_VALID_SLOT){
         const uint nID = virtualTextureIndex[lut.normalID];
         float3 n;
@@ -78,31 +68,32 @@ void main(VsOutput input){
         n.z = sqrt(saturate(1.0f - dot(n.xy , n.xy)));
         n.y = NORMAL_MAP_OPENGL ? -n.y : n.y;
         n = normalize(mul(n , TBN));
-        normalImage[pixel] = float4(n , 1.0f);
+        output.normal = float4(n , 1.0f);
     }else{
-        normalImage[pixel] = float4(input.normal , 1.0f);
+        output.normal = float4(input.normal , 1.0f);
     }
 
     if(lut.diffuseID != NON_VALID_SLOT){
         const uint id = virtualTextureIndex[lut.diffuseID];
-        albedoImage[pixel] = allTextures[id].Sample(samp , uv);
+        output.albedo = allTextures[id].Sample(samp , uv);
     }else{
-        albedoImage[pixel] = float4(lut.color , 1.0f);
+        output.albedo = float4(lut.color , 1.0f);
     }
 
     if(lut.metallicTextureID != NON_VALID_SLOT){
         const uint id = virtualTextureIndex[lut.metallicTextureID];
-        metallicImage[pixel] = allTextures[id].Sample(samp , uv).x;
+        output.metallic = allTextures[id].Sample(samp , uv).x;
     }else{
-        metallicImage[pixel] = lut.metallic;
+        output.metallic = lut.metallic;
     }
 
     if(lut.roughnessTextureID != NON_VALID_SLOT){
         const uint id = virtualTextureIndex[lut.roughnessTextureID];
-        roughnessImage[pixel] = allTextures[id].Sample(samp , uv).x;
+        output.roughness = allTextures[id].Sample(samp , uv).x;
     }else{
-        roughnessImage[pixel] = lut.roughness;
+        output.roughness = lut.roughness;
     }
 
-    pixelCheck[uint2(input.clipPos.xy)] = COLOR_PIXEL;
+    output.pixelCheck = COLOR_PIXEL;
+    return output;
 }

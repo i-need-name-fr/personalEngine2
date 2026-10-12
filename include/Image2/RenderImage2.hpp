@@ -45,6 +45,7 @@ namespace mox{
             view = std::exchange(input.view , nullptr);
             currentAccess = input.currentAccess;
             currentStage = input.currentStage;
+            valueToClear = input.valueToClear;
         }
 
 
@@ -58,6 +59,7 @@ namespace mox{
             view = std::exchange(input.view , nullptr);
             currentAccess = input.currentAccess;
             currentStage = input.currentStage;
+            valueToClear = input.valueToClear;
             return *this;
         }
 
@@ -84,6 +86,7 @@ namespace mox{
                     THROW_MESSAGE;
                 }
             }
+            valueToClear = data.clear;
         }
 
         VkImageView view = nullptr;
@@ -153,10 +156,31 @@ namespace mox{
             return currentStage;
         }
 
+        // image should already have the barrier used on it 
+        void cleanTheImage(VkCommandBuffer &cmd) noexcept {
+            VkImageSubresourceRange range{};
+            range.aspectMask = generalImageData.aspect;
+            range.baseArrayLayer = 0;
+            range.baseMipLevel = 0;
+            range.layerCount = generalImageData.layerCount;
+            range.levelCount = generalImageData.mipMapCount;
+
+            if(generalImageData.aspect == VK_IMAGE_ASPECT_COLOR_BIT){
+                vkCmdClearColorImage(cmd , image , VK_IMAGE_LAYOUT_GENERAL , &valueToClear , 1 , &range );
+            }else{
+
+                VkClearDepthStencilValue value{};
+                value.depth = 1.0f;
+                value.stencil = 0;
+                vkCmdClearDepthStencilImage(cmd , image , VK_IMAGE_LAYOUT_GENERAL ,&value , 1, &range);
+            }
+        }
+
     private:
 
         VkAccessFlags2 currentAccess = VK_ACCESS_2_NONE;
         VkPipelineStageFlags2 currentStage = VK_PIPELINE_STAGE_2_NONE;
+        VkClearColorValue valueToClear{};
 
         void cleanRenderImage() noexcept{
             if(device){

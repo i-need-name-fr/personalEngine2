@@ -19,35 +19,12 @@ struct VS_OUTPUT{
     [[vk::location(6)]] nointerpolation uint LUTindex     : TEXCOORD6;
 };
 
-[[vk::image_format("r32f")]]
-[[vk::binding(0 , 0)]] RWTexture2D<float> pixelCheck;
-[[vk::binding(1 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
-[[vk::binding(2, 0)]] RWStructuredBuffer<InstanceData> instanceLayoutBuffer;
-[[vk::binding(3 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
-[[vk::binding(4 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
-[[vk::binding(5 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
-
-[[vk::image_format("rgba16f")]]
-[[vk::binding(6 , 0)]] RWTexture2D<float4> albedoImage;
-
-[[vk::image_format("rgba32f")]]
-[[vk::binding(7 , 0)]] RWTexture2D<float4> positionImage;
-
-[[vk::image_format("rgba16f")]]
-[[vk::binding(8 , 0)]] RWTexture2D<float4> normalImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(9 , 0)]] RWTexture2D<float> depthImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(10 , 0)]] RWTexture2D<float> roughnessImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(11 , 0)]] RWTexture2D<float> metallicImage;
-
-[[vk::binding(0 , 1)]] RWStructuredBuffer<uint> virtualTextureIndex;
-[[vk::binding(1 , 1)]] SamplerState samp;
-[[vk::binding(2 , 1)]] Texture2D allTextures[];
+// set 0 of the deferred render : the bindings are the same in the fragment shader
+// the vertex stage only reads them , so they are not writable here ( no vertexPipelineStoresAndAtomics needed )
+[[vk::binding(0 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
+[[vk::binding(1 , 0)]] StructuredBuffer<InstanceData> instanceLayoutBuffer;
+[[vk::binding(2 , 0)]] StructuredBuffer<MeshData> meshBuffer;
+[[vk::binding(3 , 0)]] StructuredBuffer<float4x4> instanceBuffer;
 
 
 [shader("vertex")]

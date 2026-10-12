@@ -122,16 +122,18 @@ namespace mox{
             if(!completedInit) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translateBarriers , since the pipeline wasnt created [DeferredRender]"});
             const uint8_t currentImage = context->sc->frameIndex %2;
 
+            // the g buffer is written through the color attachments of the dynamic rendering : the load op clears them ,
+            // so the old contents are not needed , and the images stay in GENERAL ( the next passes read them as storage images )
             std::array<VkImageMemoryBarrier2 , 7> barriers{};
-            barriers[0] = pixelCheck->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[1] = albedoImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[2] = metallicImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[3] = roughnessImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[4] = positionImage[currentImage]->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[5] = normalImage[currentImage]->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[6] = depthImage[currentImage]->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[0] = albedoImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[1] = positionImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[2] = normalImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[3] = depthImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[4] = roughnessImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[5] = metallicImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[6] = pixelCheck->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             VkBufferMemoryBarrier2 buffer{};
-            buffer = generalBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT ,VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT );
+            buffer = generalBuffer->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -216,6 +218,22 @@ namespace mox{
             cmdSetSampleMaskEXT(cmd , VK_SAMPLE_COUNT_1_BIT , &sampleMask);
             cmdSetAlphaToCoverageEnableEXT(cmd , VK_FALSE);
 
+            // the seven color attachments : no blending , everything is written
+            {
+                const VkBool32 blend[7] = {VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE};
+                const VkColorComponentFlags mask[7] = {
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+
+                cmdSetColorBlendEnableEXT(cmd , 0 , 7 , blend);
+                cmdSetColorWriteMaskEXT(cmd , 0 , 7 , mask);
+            }
+
             // the vertex shader writes SV_ShadingRate , so the primitive rate replaces the pipeline one
             const VkExtent2D shadingRate = {1 , 1};
             const VkFragmentShadingRateCombinerOpKHR combiners[2] = {VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR , VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR};
@@ -232,7 +250,7 @@ namespace mox{
             {
                 std::array<VkDescriptorBufferBindingInfoEXT, 2> info;
                 info[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
-                info[0].address = pipe->buffers[currentImage]->pBuffer;
+                info[0].address = pipe->buffers[0]->pBuffer;
                 info[0].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
                 info[0].pNext = nullptr;
 
@@ -249,17 +267,24 @@ namespace mox{
             }
 
             {
-                VkImageMemoryBarrier2 barrier = depthBuffer->translateImageUndefined(VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT ,VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT );
-
+                VkImageMemoryBarrier2 barrier = depthBuffer->translateImage(VK_ACCESS_2_TRANSFER_WRITE_BIT ,VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT );
                 VkDependencyInfo dep{};
                 dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
                 dep.pNext = nullptr;
                 dep.imageMemoryBarrierCount = 1;
                 dep.pImageMemoryBarriers = &barrier;
                 vkCmdPipelineBarrier2(cmd , &dep);
+
+                depthBuffer->cleanTheImage(cmd);
+
+                barrier = depthBuffer->translateImage(VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT ,VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT );
+                vkCmdPipelineBarrier2(cmd , &dep);
+                
             }
 
             // dynamic rendering setup
+
+
             {
                 VkRenderingAttachmentInfo depthInfo{};
                 depthInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -273,10 +298,27 @@ namespace mox{
                 depthInfo.resolveImageView = nullptr;
                 depthInfo.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
+                // the g buffer : the order is the order of SV_Target in the fragment shader
+                RenderImage2* targets[7] = {albedoImage , positionImage[currentImage] , normalImage[currentImage] , depthImage[currentImage] , roughnessImage , metallicImage , pixelCheck};
+                std::array<VkRenderingAttachmentInfo , 7> colorInfo{};
+                for(uint32_t i = 0 ; i < 7 ; i++){
+                    colorInfo[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+                    colorInfo[i].pNext = nullptr;
+                    colorInfo[i].imageView = targets[i]->view;
+                    colorInfo[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    colorInfo[i].resolveMode = VK_RESOLVE_MODE_NONE;
+                    colorInfo[i].resolveImageView = nullptr;
+                    colorInfo[i].resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                    // the pixels that no triangle covers have to be empty ( 0 , and pixelCheck = UNDEFINED_PIXEL )
+                    colorInfo[i].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    colorInfo[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    colorInfo[i].clearValue.color = {};
+                }
+
                 VkRenderingInfo info{};
                 info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-                info.colorAttachmentCount = 0;
-                info.pColorAttachments = nullptr;
+                info.colorAttachmentCount = static_cast<uint32_t>(colorInfo.size());
+                info.pColorAttachments = colorInfo.data();
                 info.pDepthAttachment = &depthInfo;
                 info.flags = 0;
                 info.layerCount = 1;
@@ -370,19 +412,13 @@ namespace mox{
 
                 // descriptor sets first
                 {   
-                    std::vector<DescriptorLayoutData> data(12);
-                    data[0] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
-                    data[1] = {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ,.count = 1};
-                    data[2] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};
-                    data[3] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};
-                    data[4] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};
-                    data[5] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};
-                    data[6] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
-                    data[7] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
-                    data[8] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
-                    data[9] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
-                    data[10] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
-                    data[11] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
+                    // set 0 : only the buffers , the images of the g buffer are the color attachments
+                    std::vector<DescriptorLayoutData> data(5);
+                    data[0] = {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ,.count = 1};   // general buffer
+                    data[1] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // instance layout
+                    data[2] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // mesh data
+                    data[3] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // instances ( the matrices )
+                    data[4] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // LUT
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -404,31 +440,22 @@ namespace mox{
                     pipe->layout = std::make_shared<PipelineLayout>(info);
                 }
 
-                // we need to create 2 d buffers
+                // the buffers do not depend on the frame , one descriptor buffer is enough
                 {
-                    pipe->buffers.resize(2);
-                    for(uint8_t i = 0 ; i < 2 ; i ++){
-                        std::vector<DescriptorData2> data(12);
-                        data[0] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
-                        data[1] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1,0 );
-                        data[2] = DescriptorData2::createData(Mesh2::instanceLayoutBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0);
-                        data[3] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);
-                        data[4] = DescriptorData2::createData(Mesh2::instanceBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
-                        data[5] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 5 , 0);
-                        data[6] = DescriptorData2::createData(albedoImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 6 , 0);
-                        data[7] = DescriptorData2::createData( positionImage[i], VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 7 , 0);
-                        data[8] = DescriptorData2::createData(normalImage[i] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0);
-                        data[9] = DescriptorData2::createData(depthImage[i] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 9 , 0);
-                        data[10] = DescriptorData2::createData(roughnessImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 10 , 0);
-                        data[11] = DescriptorData2::createData(metallicImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 11 , 0);
-                        
-                        DescriptorBuffer2::CreateInfo info{};
-                        info.context = context;
-                        info.data = data;
-                        info.layout = pipe->descriptorLayouts[0].get();
+                    std::vector<DescriptorData2> data(5);
+                    data[0] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
+                    data[1] = DescriptorData2::createData(Mesh2::instanceLayoutBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0);
+                    data[2] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0);
+                    data[3] = DescriptorData2::createData(Mesh2::instanceBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);
+                    data[4] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
 
-                        pipe->buffers[i] = std::make_shared<DescriptorBuffer2>(info);
-                    }
+                    DescriptorBuffer2::CreateInfo info{};
+                    info.context = context;
+                    info.data = data;
+                    info.layout = pipe->descriptorLayouts[0].get();
+
+                    pipe->buffers.resize(1);
+                    pipe->buffers[0] = std::make_shared<DescriptorBuffer2>(info);
                 }
                 pipe->shaders.resize(2);
                 {
