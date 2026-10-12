@@ -123,13 +123,13 @@ namespace mox{
             const uint8_t currentImage = context->sc->frameIndex %2;
 
             std::array<VkImageMemoryBarrier2 , 7> barriers{};
-            barriers[0] = pixelCheck->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[1] = albedoImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[2] = metallicImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[3] = roughnessImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[4] = positionImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[5] = normalImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-            barriers[6] = depthImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[0] = pixelCheck->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[1] = albedoImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[2] = metallicImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[3] = roughnessImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[4] = positionImage[currentImage]->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[5] = normalImage[currentImage]->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+            barriers[6] = depthImage[currentImage]->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
             VkBufferMemoryBarrier2 buffer{};
             buffer = generalBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT ,VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT );
 

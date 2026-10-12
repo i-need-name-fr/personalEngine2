@@ -37,6 +37,7 @@ namespace mox{
     using pLogicalDevice = std::shared_ptr<LogicalDevice>;
     using pSwapchain = std::shared_ptr<Swapchain>;
 
+    using QueueRecordTypeFunction = std::function<ErrorDataOutput<void>(VkCommandBuffer& , const uint32_t)>;
 
     class VulkanContext final{
     private:
@@ -162,6 +163,8 @@ namespace mox{
 
         }
 
+        
+
     public:
 
         struct CreateInfo{
@@ -192,6 +195,76 @@ namespace mox{
         pQueueManager queueManager = nullptr;
         pQueue graphicsQueue = nullptr;
         pQueueLane VirtualShadowQueue = nullptr;
+
+        [[gnu::hot]] [[nodiscard]] ErrorDataOutput<void> processQueueLoop(const QueueRecordTypeFunction &function) noexcept{
+
+            if(!function) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to process Queue loop , since the function is nullptr"});
+
+            VkQueue queue = graphicsQueue->queue;
+            uint32_t& id = sc->currentImage;
+
+            vkWaitForFences(logicalDevice->device , 1 , &sc->fences[sc->currentImage] , VK_TRUE , UINT64_MAX);
+            vkResetFences(logicalDevice->device , 1 , &sc->fences[id]);
+            uint32_t nextId;
+            vkAcquireNextImageKHR(logicalDevice->device , sc->sc , UINT64_MAX , sc->waitSemaphore[id] , nullptr , &nextId);
+            VkCommandBuffer& cmd = graphicsQueue->cmds[nextId];
+            vkResetCommandBuffer(cmd , 0);
+            const auto result = function(cmd , nextId);
+            if(!result.has_value()) return result;
+
+            VkSemaphore& wait = sc->waitSemaphore[id];
+            VkSemaphore& signal = sc->signalSemaphore[nextId];
+            {   
+
+                VkSemaphoreSubmitInfo wait{};
+                wait.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                wait.semaphore = sc->waitSemaphore[id];
+                wait.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+                VkSemaphoreSubmitInfo signal{};
+                signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+                // one per swapchain image , the presentation engine holds it until the image is shown again
+                signal.semaphore = sc->signalSemaphore[nextId];
+                signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+                VkCommandBufferSubmitInfo command{};
+                command.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+                command.commandBuffer = cmd;
+
+                VkSubmitInfo2 submit{};
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+                submit.waitSemaphoreInfoCount = 1;
+                submit.pWaitSemaphoreInfos = &wait;
+                submit.commandBufferInfoCount = 1;
+                submit.pCommandBufferInfos = &command;
+                submit.signalSemaphoreInfoCount = 1;
+                submit.pSignalSemaphoreInfos = &signal;
+
+                const VkResult result = vkQueueSubmit2(queue , 1 , &submit , sc->fences[id]);
+                if(result != VK_SUCCESS){
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to draw the frame , failed to submit , error ID -> {}" , static_cast<int32_t>(result))});
+                }
+            }
+
+            {
+                VkPresentInfoKHR info{};
+                info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+                info.pWaitSemaphores = &signal;
+                info.swapchainCount = 1;
+                info.pSwapchains = &sc->sc;
+                info.pNext = nullptr;
+                info.waitSemaphoreCount= 1;
+                info.pImageIndices = &nextId;
+
+                const VkResult result = vkQueuePresentKHR(queue , &info);
+                if(result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR && result != VK_ERROR_OUT_OF_DATE_KHR){
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to draw the frame , failed to present , error ID -> {}" , static_cast<int32_t>(result))});
+                }
+            }
+            id = (id + 1 ) % sc->frames_in_flight;
+            sc->frameIndex++;
+            return {};
+        }
         
     };
 

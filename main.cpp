@@ -22,12 +22,6 @@ int main(){
     std::cout << "hello world\n";
     try{
 
-        mox::VulkanContext::CreateInfo info{};
-        info.asyncMultiThreadQueueCount = 4;
-        info.multithreadQueueCount = 1;
-
-        mox::VulkanContext context(info);
-        
     }
     catch(std::exception &e){
         std::cerr << e.what() << '\n';

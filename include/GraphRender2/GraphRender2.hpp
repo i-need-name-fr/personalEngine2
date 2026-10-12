@@ -206,6 +206,11 @@ namespace mox{
                     const auto result = processInputParameter(data->finalImage.get() , "finalImage");
                     if(!result.has_value()) return result;
                 }
+
+                {
+                    const auto result = processInputParameter(data->pixelCheck.get() , "pixelCheck");
+                    if(!result.has_value()) return result;
+                }
             }
 
 
@@ -406,7 +411,7 @@ namespace mox{
             return {};
         }
 
-        [[nodiscard]] ErrorDataOutput<void> processExecution(VkCommandBuffer &cmd,  const std::string_view name){
+        [[nodiscard]] ErrorDataOutput<void> processExecution(VkCommandBuffer &cmd,  const std::string name){
 
             if(!graphPasses.contains(name)) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to execute Render -> {} , since it doesnt exist in graph render" , name)});
 
@@ -436,6 +441,8 @@ namespace mox{
 
 
         std::unordered_map<std::string , ParameterData> allAttachments{};
-        std::unordered_map<std::string_view , std::vector<GraphPass2*>> graphPasses;
+        std::unordered_map<std::string , std::vector<GraphPass2*>> graphPasses;
     };
+
+    using pGraphRender2 = std::shared_ptr<GraphRender2>;
 }

@@ -120,6 +120,7 @@ namespace mox{
             // gFragment.hlsl writes the G buffer through storage images and storage
             // buffers , which the fragment stage may not do without this
             features.fragmentStoresAndAtomics = VK_TRUE;
+            features.vertexPipelineStoresAndAtomics = VK_TRUE;
             // the cull shader writes a non zero firstInstance into every indirect
             // draw , and that is only legal with this feature on. The value lives in
             // a GPU buffer , so the validation layer never sees it - without this the

@@ -59,6 +59,8 @@ namespace mox{
 
         pRenderImage2 HDRImage[2]{};
         pRenderImage2 finalImage{nullptr};
+        // the fragment shader of the deferred render marks the pixels that it drew , the HDR pass reads them
+        pRenderImage2 pixelCheck{nullptr};
 
         ~FrameTargets() noexcept{
             processDelete();
@@ -117,6 +119,7 @@ namespace mox{
 
                 roughnessImage=  std::make_shared<RenderImage2>(info);
                 metallicImage=  std::make_shared<RenderImage2>(info);
+                pixelCheck=  std::make_shared<RenderImage2>(info);
 
                 info.clear.float32[0] = 1.0f;
                 shadowImage[0] =  std::make_shared<RenderImage2>(info);
@@ -152,6 +155,8 @@ namespace mox{
             roughnessImage = std::move(input.roughnessImage);
             metallicImage  = std::move(input.metallicImage);
             albedoImage    = std::move(input.albedoImage);
+            finalImage     = std::move(input.finalImage);
+            pixelCheck     = std::move(input.pixelCheck);
 
             std::move(std::begin(input.shadowImage),           std::end(input.shadowImage),           std::begin(shadowImage));
             std::move(std::begin(input.ambientOcclusionImage), std::end(input.ambientOcclusionImage), std::begin(ambientOcclusionImage));
@@ -174,6 +179,8 @@ namespace mox{
             roughnessImage = nullptr;
             metallicImage  = nullptr;
             albedoImage    = nullptr;
+            finalImage     = nullptr;
+            pixelCheck     = nullptr;
 
             std::fill(std::begin(shadowImage),           std::end(shadowImage),           nullptr);
             std::fill(std::begin(ambientOcclusionImage), std::end(ambientOcclusionImage), nullptr);

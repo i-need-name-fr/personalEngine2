@@ -356,6 +356,61 @@ namespace mox{
             vkCmdPipelineBarrier2(cmd , &info);
         }
 
+        template<typename T>
+        requires GPUDataType<T>
+        void updateBufferCmd(VkCommandBuffer& cmd , const T& input , VkAccessFlags2 access , VkPipelineStageFlags2 stage)noexcept requires(readable == true){
+
+            if(!cmd) return;
+
+            constexpr VkDeviceSize chunkSize = 65536u;
+
+            const VkDeviceSize wanted = static_cast<VkDeviceSize>(sizeof(T));
+            // the size of the whole write : not more than the buffer , and a multiple of 4
+            const VkDeviceSize total = std::min(wanted , bufferSize) & ~static_cast<VkDeviceSize>(3u);
+
+            if(total != wanted){
+                static uint32_t totalMessagesCount = 0;
+                if(totalMessagesCount < totalMessageCount){
+                    const ErrorDataType error{MOX_ERROR_TYPE_WARNING , std::format("updateBufferCmd writes {} bytes of {} : the buffer has {} bytes and the size has to be a multiple of 4 , message Count {} " , total , wanted , bufferSize , static_cast<uint32_t>(totalMessagesCount))};
+                    engineLogger(error);
+                    totalMessagesCount++;
+                }
+            }
+            if(total == 0) return;
+
+            // the chunks : the start of every one of them ( the size of every chunk is chunkSize , the last one is what is left )
+            const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&input);
+            std::vector<const uint8_t*> chunks{};
+            chunks.reserve(static_cast<size_t>((total + chunkSize - 1) / chunkSize));
+            for(VkDeviceSize offset = 0 ; offset < total ; offset += chunkSize){
+                chunks.push_back(bytes + offset);
+            }
+
+            auto barrier = translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+
+            VkDependencyInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            info.bufferMemoryBarrierCount = 1;
+            info.imageMemoryBarrierCount = 0;
+            info.pMemoryBarriers = nullptr;
+            info.pBufferMemoryBarriers = &barrier;
+            info.pImageMemoryBarriers = nullptr;
+            info.memoryBarrierCount = 0;
+            info.pNext = nullptr;
+            info.dependencyFlags = 0;
+
+            vkCmdPipelineBarrier2(cmd , &info);
+
+            for(size_t i = 0 ; i < chunks.size() ; i++){
+                const VkDeviceSize offset = static_cast<VkDeviceSize>(i) * chunkSize;
+                const VkDeviceSize size = std::min(chunkSize , total - offset);
+                vkCmdUpdateBuffer(cmd , buffer , offset , size , chunks[i]);
+            }
+
+            barrier = translateBuffer(access , stage);
+            vkCmdPipelineBarrier2(cmd , &info);
+        }
+
         ~GeneralBuffer2(){}
 
     private:
