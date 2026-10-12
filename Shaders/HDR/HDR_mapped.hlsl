@@ -28,6 +28,10 @@
 [[vk::image_format("rgba8")]]
 [[vk::binding(10 , 0)]] RWTexture2D<float4> finalImage;
 
+// the AO after the bilateral filter : only the AO_MODE shows it
+[[vk::image_format("r32f")]]
+[[vk::binding(11 , 0)]] RWTexture2D<float> filteredAOImage;
+
 
 float3 ACESFilm(float3 x)
 {
@@ -121,6 +125,11 @@ void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
     }else if(features.currentMode == ROUGHNESS_MODE){
         const float rough = roughnessImage[id.xy].x;
         finalImage[id.xy] = float4(rough , rough , rough , 1.0f);
+        pixelCheck[id.xy] = UNDEFINED_PIXEL;
+        return;
+    }else if(features.currentMode == AO_MODE){
+        const float ao = filteredAOImage[id.xy].x;
+        finalImage[id.xy] = float4(ao , ao , ao , 1.0f);
         pixelCheck[id.xy] = UNDEFINED_PIXEL;
         return;
     }

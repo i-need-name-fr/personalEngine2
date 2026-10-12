@@ -49,7 +49,7 @@ namespace mox{
 
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
-            std::vector<GraphParameterInfo> reqs(14);
+            std::vector<GraphParameterInfo> reqs(15);
 
             reqs[0]= {moxGraphTypeImage , ImageType::RenderImage2 , "normalImage_0"};
             reqs[1]= {moxGraphTypeImage , ImageType::RenderImage2 , "normalImage_1"};
@@ -74,6 +74,9 @@ namespace mox{
 
             reqs[13].type = moxGraphTypeBuffer;
             reqs[13].name = "luminanceHistory";
+
+            // the AO_MODE shows it
+            reqs[14]= {moxGraphTypeImage , ImageType::RenderImage2 , "filteredAmbientOcclusion"};
 
             return reqs;
         }
@@ -125,6 +128,7 @@ namespace mox{
                 GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} , GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} ,
                 GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} , GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
                 GraphSlot<RenderImage2>{"finalImage" , &finalImage} ,
+                GraphSlot<RenderImage2>{"filteredAmbientOcclusion" , &filteredAmbientOcclusionImage} ,
                 GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"generalFeatures" , &generalFeatures} ,
                 GraphSlot<BufferBase2>{"luminanceHistory" , &luminanceHistory});
             if(!bound.has_value()) return bound;
@@ -137,7 +141,7 @@ namespace mox{
             const uint8_t currentImage = context->sc->frameIndex %2;
 
             std::array<VkBufferMemoryBarrier2 , 3> bufBar;
-            std::array<VkImageMemoryBarrier2 , 8> imageBar;
+            std::array<VkImageMemoryBarrier2 , 9> imageBar;
 
             bufBar[0] = luminanceHistory->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             bufBar[1] = generalBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
@@ -151,11 +155,12 @@ namespace mox{
             imageBar[5] = roughnessImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             imageBar[6] = metallicImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             imageBar[7] = finalImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[8] = filteredAmbientOcclusionImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             info.bufferMemoryBarrierCount = 3;
-            info.imageMemoryBarrierCount = 8;
+            info.imageMemoryBarrierCount = static_cast<uint32_t>(imageBar.size());
             info.pMemoryBarriers = nullptr;
             info.pBufferMemoryBarriers = bufBar.data();
             info.pImageMemoryBarriers = imageBar.data();
@@ -183,11 +188,12 @@ namespace mox{
         RenderImage2* pixelCheck{nullptr};
         RenderImage2* finalImage{nullptr};
         RenderImage2* albedoImage{nullptr};
-        // 11
+        RenderImage2* filteredAmbientOcclusionImage{nullptr};
+        // 12
         BufferBase2* luminanceHistory{nullptr};
         BufferBase2* generalBuffer{nullptr};
         BufferBase2* generalFeatures{nullptr};
-        // 14
+        // 15
         void processCopy(HDR&& input) noexcept{
             if(this == &input) return;
             processDelete();
@@ -205,6 +211,7 @@ namespace mox{
             pixelCheck = std::exchange(input.pixelCheck , nullptr);
             finalImage = std::exchange(input.finalImage , nullptr);
             albedoImage = std::exchange(input.albedoImage , nullptr);
+            filteredAmbientOcclusionImage = std::exchange(input.filteredAmbientOcclusionImage , nullptr);
             luminanceHistory = std::exchange(input.luminanceHistory , nullptr);
             generalBuffer = std::exchange(input.generalBuffer , nullptr);
             generalFeatures = std::exchange(input.generalFeatures , nullptr);
@@ -225,6 +232,7 @@ namespace mox{
             pixelCheck = nullptr;
             finalImage = nullptr;
             albedoImage = nullptr;
+            filteredAmbientOcclusionImage = nullptr;
             luminanceHistory = nullptr;
             generalBuffer = nullptr;
             generalFeatures = nullptr;
@@ -236,7 +244,7 @@ namespace mox{
                 pipe = std::make_shared<ShaderPipe>(context);
 
                 {
-                    std::vector<DescriptorLayoutData> data(11);
+                    std::vector<DescriptorLayoutData> data(12);
                     data[0] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
@@ -249,6 +257,7 @@ namespace mox{
                     data[8] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[9] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[10] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+                    data[11] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -271,7 +280,7 @@ namespace mox{
 
                 {
                     for(auto& id : {0 , 1}){
-                        std::vector<DescriptorData2> data(11);
+                        std::vector<DescriptorData2> data(12);
                         data[0] = DescriptorData2::createData(luminanceHistory , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0);
                         data[1] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
                         data[2] = DescriptorData2::createData(generalFeatures , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
@@ -284,6 +293,7 @@ namespace mox{
                         data[8] = DescriptorData2::createData(roughnessImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0);
                         data[9] = DescriptorData2::createData(metallicImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 9 , 0);
                         data[10] = DescriptorData2::createData(finalImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 10 , 0);
+                        data[11] = DescriptorData2::createData(filteredAmbientOcclusionImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 11 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

@@ -442,12 +442,19 @@ struct ForwardPlusInfo{
 // the indirect light alone ( SSDO / SSGI / DDGI / SSR ) , without the direct light
 #define INDIRECT_MODE 6
 
+// the ambient occlusion after the bilateral filter ( 1 = nothing covers the pixel , darker = more covered )
+#define AO_MODE 7
+
+// how many modes the R key cycles through ( 0 .. AO_MODE )
+#define TOTAL_VIEW_MODES 8
+
 struct GeneralFeatures{
 #ifdef __cplusplus
 
     uint32_t AO;
     uint32_t AO_iteration;
     float AOradius;
+    float AO_intens;
 
     uint32_t SSR;
     uint32_t DDGI;
@@ -470,6 +477,7 @@ struct GeneralFeatures{
     uint AO;
     uint AO_iteration;
     float AOradius;
+    float AO_intens;
 
     uint SSR;
     uint DDGI;

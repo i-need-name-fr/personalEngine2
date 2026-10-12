@@ -67,8 +67,8 @@ namespace mox{
         bool PT_required = false;
 
         uint32_t currentMode = 0;
-        // default , albedo , normal , depth , indirect light ( DEFAULT_MODE .. INDIRECT_MODE ) , the R key cycles through all of them
-        const uint32_t totalModes = 5;
+        // default , albedo , normal , depth , metallic , roughness , indirect light , filtered AO ( DEFAULT_MODE .. AO_MODE ) , the R key cycles through all of them
+        const uint32_t totalModes = TOTAL_VIEW_MODES;
 
         glm::vec3 calcRight() const noexcept{
             return glm::normalize(glm::cross(glm::vec3(direction) , glm::vec3(0.0f , 1.0f , 0.0f)));

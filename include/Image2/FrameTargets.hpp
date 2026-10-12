@@ -36,6 +36,8 @@ namespace mox{
                 processDelete();
                 THROW_MESSAGE;
             }
+
+            this->context = context;
         }
 
         pRenderImage2 positionImage[2]{};
@@ -68,40 +70,53 @@ namespace mox{
             processDelete();
         }
 
+        // cleans the images of the frame : the ones that are written in this frame ( the current half of every ping-pong pair and the
+        // images that have no pair ) . the other half is the previous frame , it is the history of the temporal passes and has to stay
         void cleanImages(VkCommandBuffer &cmd) noexcept{
-            // we need to clean
-            translateAllImages(cmd , VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
-            fillImages(cmd);
-            translateAllImages(cmd , VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+            if(!context) return;
+
+            // the same index that every pass takes
+            const uint8_t currentImage = context->sc->frameIndex % 2;
+
+            // the old contents are not needed : the transition from UNDEFINED , and the clear after it
+            translateAllImages(cmd , currentImage , VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT , true);
+            fillImages(cmd , currentImage);
+            // the clear has to stay : from here it is an ordinary transition
+            translateAllImages(cmd , currentImage , VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT , false);
         }
 
     private:
 
-        void translateAllImages(VkCommandBuffer &cmd, const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
-            std::array<VkImageMemoryBarrier2, 25> barriers;
-            for(auto& id : { 0 ,1}){
-                barriers[0 + id] = positionImage[id]->translateImageUndefined(access , stage);
-                barriers[2 + id] = normalImage[id]->translateImageUndefined(access , stage);
-                barriers[4 + id] = depthImage[id]->translateImageUndefined(access , stage);
-                barriers[6 + id] = diffuseImage[id]->translateImageUndefined(access , stage);
-                barriers[8 + id] = specularImage[id]->translateImageUndefined(access , stage);
-                barriers[10 + id] = indirectImage[id]->translateImageUndefined(access , stage);
-                barriers[12 + id] = shadowImage[id]->translateImageUndefined(access , stage);
-                barriers[14 + id] = ambientOcclusionImage[id]->translateImageUndefined(access , stage);
-                barriers[16 + id] = HDRImage[id]->translateImageUndefined(access , stage);
-            }
-            barriers[18] = ambientImage->translateImageUndefined(access , stage);
-            barriers[19] = roughnessImage->translateImageUndefined(access , stage);
-            barriers[20] = metallicImage->translateImageUndefined(access , stage);
-            barriers[21] = albedoImage->translateImageUndefined(access , stage);
-            barriers[22] = filteredShadowImage->translateImageUndefined(access , stage);
-            barriers[23] = filteredAmbientOcclusion->translateImageUndefined(access , stage);
-            barriers[24] = finalImage->translateImageUndefined(access , stage);
+        VulkanContext* context{nullptr};
+
+        void translateAllImages(VkCommandBuffer &cmd , const uint8_t id , const VkAccessFlags2 access , const VkPipelineStageFlags2 stage , const bool fromUndefined) noexcept{
+            const auto translate = [&](RenderImage2* image){
+                return fromUndefined ? image->translateImageUndefined(access , stage) : image->translateImage(access , stage);
+            };
+
+            std::array<VkImageMemoryBarrier2 , 16> barriers;
+            barriers[0] = translate(positionImage[id].get());
+            barriers[1] = translate(normalImage[id].get());
+            barriers[2] = translate(depthImage[id].get());
+            barriers[3] = translate(diffuseImage[id].get());
+            barriers[4] = translate(specularImage[id].get());
+            barriers[5] = translate(indirectImage[id].get());
+            barriers[6] = translate(shadowImage[id].get());
+            barriers[7] = translate(ambientOcclusionImage[id].get());
+            barriers[8] = translate(HDRImage[id].get());
+
+            barriers[9] = translate(ambientImage.get());
+            barriers[10] = translate(roughnessImage.get());
+            barriers[11] = translate(metallicImage.get());
+            barriers[12] = translate(albedoImage.get());
+            barriers[13] = translate(filteredShadowImage.get());
+            barriers[14] = translate(filteredAmbientOcclusion.get());
+            barriers[15] = translate(finalImage.get());
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             info.bufferMemoryBarrierCount = 0;
-            info.imageMemoryBarrierCount = 25;
+            info.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
             info.pMemoryBarriers = nullptr;
             info.pImageMemoryBarriers = barriers.data();
             info.pBufferMemoryBarriers = nullptr;
@@ -113,18 +128,16 @@ namespace mox{
         }
 
 
-        void fillImages(VkCommandBuffer& cmd) noexcept{
-            for(auto& id : { 0 ,1}){
-                positionImage[id]->cleanTheImage(cmd);
-                depthImage[id]->cleanTheImage(cmd);
-                diffuseImage[id]->cleanTheImage(cmd);
-                shadowImage[id]->cleanTheImage(cmd);
-                ambientOcclusionImage[id]->cleanTheImage(cmd);
-                normalImage[id]->cleanTheImage(cmd);
-                specularImage[id]->cleanTheImage(cmd);
-                HDRImage[id]->cleanTheImage(cmd);
-                indirectImage[id]->cleanTheImage(cmd);
-            }
+        void fillImages(VkCommandBuffer& cmd , const uint8_t id) noexcept{
+            positionImage[id]->cleanTheImage(cmd);
+            depthImage[id]->cleanTheImage(cmd);
+            diffuseImage[id]->cleanTheImage(cmd);
+            shadowImage[id]->cleanTheImage(cmd);
+            ambientOcclusionImage[id]->cleanTheImage(cmd);
+            normalImage[id]->cleanTheImage(cmd);
+            specularImage[id]->cleanTheImage(cmd);
+            HDRImage[id]->cleanTheImage(cmd);
+            indirectImage[id]->cleanTheImage(cmd);
 
             albedoImage->cleanTheImage(cmd);
             filteredShadowImage->cleanTheImage(cmd);
@@ -210,6 +223,7 @@ namespace mox{
             // we can check only one image , since they are all similar
             if(albedoImage == input.albedoImage) return;
             processDelete();
+            context = std::exchange(input.context , nullptr);
             std::move(std::begin(input.positionImage), std::end(input.positionImage), std::begin(positionImage));
             std::move(std::begin(input.depthImage),    std::end(input.depthImage),    std::begin(depthImage));
             std::move(std::begin(input.normalImage),   std::end(input.normalImage),   std::begin(normalImage));
@@ -234,6 +248,7 @@ namespace mox{
         }
 
         void processDelete() noexcept {
+            context = nullptr;
             std::fill(std::begin(positionImage), std::end(positionImage), nullptr);
             std::fill(std::begin(depthImage),    std::end(depthImage),    nullptr);
             std::fill(std::begin(normalImage),   std::end(normalImage),   nullptr);
