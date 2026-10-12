@@ -138,6 +138,10 @@ namespace mox{
             setupLogMessage(info.first , info.second , path , location);
         }
 
+        void operator()(const ErrorDataOutput<void> &info, const std::string &path = LOG_FILE_OUTPUT , std::source_location location = std::source_location::current()){
+            if(info.has_value()) return;
+            setupLogMessage(info.error().first , info.error().second , path , location);
+        }
     };
 
     inline EngineLogger_T engineLogger{};

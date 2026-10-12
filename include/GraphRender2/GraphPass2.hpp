@@ -33,6 +33,13 @@ namespace mox{
         void* location{nullptr};
     };
 
+    // the address of a field of the pass : bindSources fills the field itself
+    template<typename T>
+    struct GraphSlot{
+        std::string_view name;
+        T** target;
+    };
+
     // =================================== INFO ===================================
     // GraphPass2 UPDATE:
     // 10.10.2026
@@ -82,6 +89,43 @@ namespace mox{
     protected:
 
         uint8_t completedInit = false;
+
+        // gives the pointers that the graph found to the fields of the pass ( the slots hold the ADDRESS of a field ) .
+        // every slot has to be filled : a source that wasnt requested , a null location and a slot that got nothing are errors
+        template<typename... Ts>
+        [[nodiscard]] ErrorDataOutput<void> bindSources(const std::vector<GraphParameterSource>& sources , const GraphSlot<Ts>&... slots) noexcept{
+            // a second call ( the graph was built again ) must not keep the old pointers
+            ((*slots.target = nullptr) , ...);
+
+            for(const auto& source : sources){
+                if(!source.location){
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process graph source named -> {} , since its location is nullptr" , source.name)});
+                }
+                if(!(bindSlot(source , slots) || ...)){
+                    return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process graph source named -> {} , since it wasnt requested" , source.name)});
+                }
+            }
+
+            std::string_view missing{};
+            const auto checkSlot = [&missing](const auto& slot){
+                if(!*slot.target && missing.empty()) missing = slot.name;
+            };
+            (checkSlot(slots) , ...);
+
+            if(!missing.empty()){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("failed to process graph sources , since the source named -> {} wasnt given" , missing)});
+            }
+            return {};
+        }
+
+    private:
+
+        template<typename T>
+        static bool bindSlot(const GraphParameterSource& source , const GraphSlot<T>& slot) noexcept{
+            if(source.name != slot.name) return false;
+            *slot.target = std::bit_cast<T*>(source.location);
+            return true;
+        }
     };
 
     using pGraphPass2 = std::shared_ptr<GraphPass2>;

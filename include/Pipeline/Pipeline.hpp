@@ -75,6 +75,20 @@ namespace mox{
             return data;
         }
 
+        void addDescriptorBuffer2(const DescriptorBuffer2::CreateInfo &info){
+            try{
+                buffers.push_back(std::move(std::make_shared<DescriptorBuffer2>(info)));
+            }
+            catch(std::exception &e){throw std::runtime_error("failed to create descriptor buffer");}
+        }
+
+        void addDescriptorLayout(const DescriptorLayout::CreateInfo &info){
+            try{
+                descriptorLayouts.push_back(std::move(std::make_shared<DescriptorLayout>(info)));
+            }
+            catch(std::exception &e){throw std::runtime_error("failed to create descriptor layout");}
+        }
+
         ~Pipeline() noexcept {
             releaseResources();
         }

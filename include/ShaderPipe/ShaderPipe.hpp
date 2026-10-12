@@ -53,6 +53,27 @@ namespace mox{
             device = context->logicalDevice->device;
         }
 
+        void addDescriptorBuffer2(const DescriptorBuffer2::CreateInfo &info){
+            try{
+                buffers.push_back(std::move(std::make_shared<DescriptorBuffer2>(info)));
+            }
+            catch(std::exception &e){throw std::runtime_error("failed to create descriptor buffer");}
+        }
+
+        void addDescriptorLayout(const DescriptorLayout::CreateInfo &info){
+            try{
+                descriptorLayouts.push_back(std::move(std::make_shared<DescriptorLayout>(info)));
+            }
+            catch(std::exception &e){throw std::runtime_error("failed to create descriptor layout");}
+        }
+
+        void addShader(const ShaderObject::CreateInfo &info){
+            try{
+                shaders.push_back(std::move(std::make_shared<ShaderObject>(info)));
+            }
+            catch(std::exception &e){throw std::runtime_error("failed to create shader");}
+        }
+
         ~ShaderPipe(){
             cleanPipe();
         }

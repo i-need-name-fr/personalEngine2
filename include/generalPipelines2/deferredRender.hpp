@@ -106,58 +106,14 @@ namespace mox{
         } 
 
         [[nodiscard]]  const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
-            if(sources.size() != 11) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create pipeline , since the attachment count is less then required , some of the attachments are missing"});
-            for(auto& data : sources){
-                if(data.name == "positionImage_0"){
-
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    positionImage[0] = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "positionImage_1"){
-
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    positionImage[1] = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "normalImage_0"){
-
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    normalImage[0] = std::bit_cast<RenderImage2*>(data.location);
-                    
-                }else if(data.name == "normalImage_1"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    normalImage[1] = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "depthImage_0"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-
-                    depthImage[0] = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "depthImage_1"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    depthImage[1] = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "albedoImage"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    albedoImage = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "pixelCheck"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    pixelCheck = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "metallicImage"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    metallicImage = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "roughnessImage"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    roughnessImage = std::bit_cast<RenderImage2*>(data.location);
-
-                }else if(data.name == "generalBuffer"){
-                    if(!data.location) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DeferredRender , since the attachment {} is nullptr" , data.name)});
-                    generalBuffer = std::bit_cast<BufferBase2*>(data.location);
-
-                }
-            }
+            const auto bound = bindSources(sources ,
+                GraphSlot<RenderImage2>{"positionImage_0" , &positionImage[0]} , GraphSlot<RenderImage2>{"positionImage_1" , &positionImage[1]} ,
+                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
+                GraphSlot<RenderImage2>{"depthImage_0" , &depthImage[0]} , GraphSlot<RenderImage2>{"depthImage_1" , &depthImage[1]} ,
+                GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} , GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
+                GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} , GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} ,
+                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer});
+            if(!bound.has_value()) return bound;
 
             return processInit(inputData);
         } 
