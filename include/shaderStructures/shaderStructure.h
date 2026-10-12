@@ -424,6 +424,8 @@ struct ForwardPlusInfo{
 #define SSAO_REQUIRED 1
 #define HBAO_REQUIRED 2
 #define RTAO_REQUIRED 3
+#define RSSAO_REQUIRED 4
+#define RHBAO_REQUIRED 5
 #define AO_NOT_REQUIRED 0
 
 #define SSR_REQUIRED 1
