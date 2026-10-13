@@ -26,9 +26,7 @@
 #include "SwapChain.hpp"
 #include "Queue.hpp"
 #include "GPUMultiThread.hpp"
-
-#define SetTypicalOperators(type) type() = delete ;type(const type& input) = delete; type(type& input) = delete; type& operator=(type& input) = delete; type& operator=(const type& input) = delete;
-#define SetTypicalTransferOperators(type) type(type&& input) noexcept{if(this == &input)return; processCopy(std::move(input));} type& operator=(type&& input) noexcept{if(this == &input)return *this; processCopy(std::move(input)); return *this;}
+#include "vmaAllocator.hpp"
 
 
 namespace mox{
@@ -40,6 +38,7 @@ namespace mox{
     using pPhysicalDevice = std::shared_ptr<PhysicalDevice>;
     using pLogicalDevice = std::shared_ptr<LogicalDevice>;
     using pSwapchain = std::shared_ptr<Swapchain>;
+    using pMemoryAllocator = std::shared_ptr<MemoryAllocator>;
 
     using QueueRecordTypeFunction = std::function<ErrorDataOutput<void>(VkCommandBuffer& , const uint32_t)>;
 
@@ -80,6 +79,15 @@ namespace mox{
                 logicalInfo.requiredForMultiThread = m + am;
 
                 logicalDevice = std::make_shared<LogicalDevice>(logicalInfo);
+
+                {
+                    MemoryAllocator::CreateInfo info{};
+                    info.instance = instance->instance;
+                    info.logicalDevice = logicalDevice->device;
+                    info.pDevice = physicalDevice->device;
+
+                    allocator = std::make_shared<MemoryAllocator>(info);
+                }
 
                 // now the init for queues
                 {
@@ -196,6 +204,8 @@ namespace mox{
         pQueueManager queueManager = nullptr;
         pQueue graphicsQueue = nullptr;
         pQueueLane VirtualShadowQueue = nullptr;
+
+        pMemoryAllocator allocator{nullptr};
 
         [[gnu::hot]] [[nodiscard]] ErrorDataOutput<void> processQueueLoop(const QueueRecordTypeFunction &function) noexcept{
 

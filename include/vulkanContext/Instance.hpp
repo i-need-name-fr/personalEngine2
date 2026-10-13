@@ -13,6 +13,10 @@
 #include "../logger/logger.hpp"
 #include <utility>
 
+#define SetTypicalOperators(type) type() = delete ;type(const type& input) = delete; type(type& input) = delete; type& operator=(type& input) = delete; type& operator=(const type& input) = delete;
+#define SetTypicalTransferOperators(type) type(type&& input) noexcept{if(this == &input)return; processCopy(std::move(input));} type& operator=(type&& input) noexcept{if(this == &input)return *this; processCopy(std::move(input)); return *this;}
+
+
 namespace mox{
 
     #ifdef NDEBUG
