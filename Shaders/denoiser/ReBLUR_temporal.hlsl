@@ -1,5 +1,5 @@
 [[vk::image_format("rgba16f")]]
-[[vk::binding(0, 0)]] RWTexture2D<float4> inputDiffuse;
+[[vk::binding(0, 0)]] RWTexture2D<float4> inputImage;
 
 [[vk::image_format("rgba16f")]]
 [[vk::binding(1, 0)]] RWTexture2D<float4> prevDiffuse;
@@ -26,7 +26,7 @@
 [[vk::binding(10, 0)]] Texture2D prevPositionImage;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(11, 0)]] RWTexture2D<float4> outputDiffuse;
+[[vk::binding(11, 0)]] RWTexture2D<float4> outputImage;
 
 [[vk::image_format("r32f")]]
 [[vk::binding(12, 0)]] RWTexture2D<float> pixelCheck;
@@ -62,7 +62,7 @@ bool checkDisocclusion(int3 currentUV , int3 prevUV){
 void main(uint3 id : SV_DispatchThreadID){
 
     uint width , height;
-    inputDiffuse.GetDimensions(width, height);
+    inputImage.GetDimensions(width, height);
 
     uint2 screenSize = uint2(width , height);
     if(any(id.xy >= screenSize)) return;
@@ -76,7 +76,7 @@ void main(uint3 id : SV_DispatchThreadID){
     float2 prevUV = uv + motionVector[id.xy];
     const uint2 prevCoord = uint2(prevUV * float2(screenSize) - 0.5f);
 
-    float3 currentDiffuse = inputDiffuse[id.xy].xyz;
+    float3 currentDiffuse = inputImage[id.xy].xyz;
     float pCount = prevFrameCount[prevCoord].x;
     float3 history = prevDiffuse[prevCoord].xyz;
     bool valid = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f))) && checkDisocclusion(uint3(id.xy , 0) , uint3(prevCoord , 0));
@@ -90,5 +90,5 @@ void main(uint3 id : SV_DispatchThreadID){
     float alpha = 1.0f / pCount;
     float3 accumulated = lerp(history , currentDiffuse , alpha);
     frameCount[id.xy] = pCount;
-    outputDiffuse[id.xy] = float4(accumulated , 1.0f);
+    outputImage[id.xy] = float4(accumulated , 1.0f);
 }

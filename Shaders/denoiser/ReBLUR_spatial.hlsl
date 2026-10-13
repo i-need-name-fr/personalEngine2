@@ -1,5 +1,5 @@
 [[vk::image_format("rgba16f")]]
-[[vk::binding(0, 0)]] RWTexture2D<float4> inputDiffuse;
+[[vk::binding(0, 0)]] RWTexture2D<float4> inputImage;
 
 [[vk::image_format("rgba16f")]]
 [[vk::binding(1, 0)]] RWTexture2D<float4> prevDiffuse;
@@ -27,7 +27,7 @@
 
 // WE WERE WRITING IN THIS , NOW WE ARE WRITING BACK TO INPUT
 [[vk::image_format("rgba16f")]]
-[[vk::binding(11, 0)]] RWTexture2D<float4> outputDiffuse;
+[[vk::binding(11, 0)]] RWTexture2D<float4> outputImage;
 
 [[vk::image_format("r32f")]]
 [[vk::binding(12, 0)]] RWTexture2D<float> pixelCheck;
@@ -60,7 +60,7 @@ float ComputeBlurRadius(float normalizedHitDist, float historyCount) {
 void main(uint3 id : SV_DispatchThreadID){
 
     uint width , height;
-    inputDiffuse.GetDimensions(width, height);
+    inputImage.GetDimensions(width, height);
 
     uint2 screenSize = uint2(width , height);
     if(any(id.xy >= screenSize)) return;
@@ -69,13 +69,13 @@ void main(uint3 id : SV_DispatchThreadID){
         return;
     }
 
-    float3 center = outputDiffuse[id.xy].xyz;
+    float3 center = outputImage[id.xy].xyz;
     float historyCount = frameCount[id.xy].x;
-    float hitDistance = inputDiffuse[id.xy].a;
+    float hitDistance = inputImage[id.xy].a;
 
     if(hitDistance >= 999.0f){
 
-        inputDiffuse[id.xy]= outputDiffuse[id.xy];
+        inputImage[id.xy]= outputImage[id.xy];
         return;
     }
 
@@ -102,9 +102,9 @@ void main(uint3 id : SV_DispatchThreadID){
         float w = depthW * normalW;
         // neighbours come from temporal's output (outputDiffuse) , never from inputDiffuse -
         // other invocations of this dispatch are writing inputDiffuse right now
-        sum += outputDiffuse[samplePos].xyz * w;
+        sum += outputImage[samplePos].xyz * w;
         weight += w;
     }
 
-    inputDiffuse[id.xy] = float4(sum / weight , 1.0f);
+    inputImage[id.xy] = float4(sum / weight , 1.0f);
 }
