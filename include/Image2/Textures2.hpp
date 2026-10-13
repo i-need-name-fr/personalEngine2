@@ -27,7 +27,7 @@ namespace mox{
             if(view && device) vkDestroyImageView(device , view , nullptr);
             view = nullptr;
             cleanImage();
-            performCopy(std::move(input));
+            processCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
             currentAccess = input.currentAccess;
             currentStage = input.currentStage;

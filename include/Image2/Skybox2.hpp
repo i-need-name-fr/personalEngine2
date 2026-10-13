@@ -28,7 +28,7 @@ namespace mox{
             if(view && device) vkDestroyImageView(device , view , nullptr);
             view = nullptr;
             cleanImage();
-            performCopy(std::move(input));
+            processCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
             // the barrier of the next translate starts from where the image is now
             currentAccess = input.currentAccess;

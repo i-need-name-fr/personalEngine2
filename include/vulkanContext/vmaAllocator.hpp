@@ -33,6 +33,10 @@ namespace mox{
 
         VmaAllocator allocation{nullptr};
 
+        ~MemoryAllocator(){
+            vmaDestroyAllocator(allocation);
+        }
+
     private:
         
         [[nodiscard]] ErrorDataOutput<void> createAllocater(const CreateInfo &input)noexcept{

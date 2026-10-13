@@ -42,7 +42,7 @@ namespace mox{
             // the views and the image that this object held would leak
             destroyViews();
             cleanImage();
-            performCopy(std::move(input));
+            processCopy(std::move(input));
             takeViews(std::move(input));
             return *this;
         }

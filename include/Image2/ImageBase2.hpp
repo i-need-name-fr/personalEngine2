@@ -38,7 +38,7 @@ namespace mox{
             this->device = context->logicalDevice->device;
         }
         ImageBase2(ImageBase2&& input) noexcept{
-            performCopy(std::move(input));
+            processCopy(std::move(input));
         }
 
         ImageBase2& operator=(ImageBase2& input) = delete;
@@ -46,7 +46,7 @@ namespace mox{
             if(this == &input) return *this;
             // what this object held would leak
             cleanImage();
-            performCopy(std::move(input));
+            processCopy(std::move(input));
             return *this;
         }
 
@@ -72,7 +72,6 @@ namespace mox{
 
         VkImage image = nullptr;
 
-        VkDeviceMemory memory = nullptr;
 
         VkExtent2D extent = {0 ,0};
         VkFormat format{VK_FORMAT_UNDEFINED};
@@ -82,16 +81,18 @@ namespace mox{
         VulkanContext* context = nullptr;
         VkDevice device = nullptr;
 
+        VmaAllocation allocation{nullptr};
+        VmaAllocationInfo memoryInfo{};
+
         ImageInfo generalImageData{};
 
         void cleanImage(){
             if(device){
-                if(image) vkDestroyImage(device , image , nullptr);
-                if(memory) vkFreeMemory(device , memory , nullptr);
+                vmaDestroyImage(context->allocator->allocation , image , allocation);
             }
-
+            allocation = nullptr;
+            memoryInfo = {};
             image = nullptr;
-            memory = nullptr;
             device = nullptr;
             context = nullptr;
         }
@@ -128,35 +129,13 @@ namespace mox{
                 info.usage=  data.imageUsage;
                 info.tiling = VK_IMAGE_TILING_OPTIMAL;
 
-                const auto result = vkCreateImage(device , &info  ,nullptr , &image);
-                if(result != VK_SUCCESS){
-                    const ErrorDataType error{MOX_ERROR_TYPE_CRITICAL , std::format("failed to create image , error ID -> {}" , static_cast<int32_t>(result))};
-                    return std::unexpected(error);
-                }
+                VmaAllocationCreateInfo alloc{};
+                alloc.usage = VMA_MEMORY_USAGE_UNKNOWN;
+                alloc.flags = 0;
+                alloc.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-            }
-
-            {
-                VkMemoryRequirements req{};
-                vkGetImageMemoryRequirements(device , image , &req);
-
-                VkMemoryAllocateInfo info{};
-                info.memoryTypeIndex = findMemoryIndex(context, req.memoryTypeBits , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-                info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-                info.pNext = nullptr;
-                info.allocationSize = req.size;
-
-                const auto result = vkAllocateMemory(device , &info , nullptr , &memory);
-                if(result != VK_SUCCESS){
-                    const ErrorDataType error{MOX_ERROR_TYPE_CRITICAL , std::format("failed to allocate the memory , error ID -> {}" , static_cast<int32_t>(result))};
-                    return std::unexpected(error);
-                }
-            }
-
-            const auto result = vkBindImageMemory(device , image , memory , 0);
-            if(result != VK_SUCCESS){
-                const ErrorDataType error{MOX_ERROR_TYPE_CRITICAL , std::format("failed to bind the image memory , error ID -> {}" , static_cast<int32_t>(result))};
-                return std::unexpected(error);
+                const auto result = vmaCreateImage(data.context->allocator->allocation , &info , &alloc , &image , &allocation , &memoryInfo);
+                if(result != VK_SUCCESS) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create image, VMA error ID -> {}", static_cast<int32_t>(result))});
             }
 
             extent = data.extent;
@@ -192,14 +171,15 @@ namespace mox{
             return {};
         }
         
-        void performCopy(ImageBase2&& input) noexcept{
+        void processCopy(ImageBase2&& input) noexcept{
             device = std::exchange(input.device , nullptr);
             context = std::exchange(input.context , nullptr);
             image = std::exchange(input.image , nullptr);
-            memory = std::exchange(input.memory , nullptr);
             extent = input.extent;
             format = input.format;
             generalImageData = input.generalImageData;
+            allocation = std::exchange(input.allocation , nullptr);
+            memoryInfo = input.memoryInfo;
         }
 
 

@@ -55,7 +55,7 @@ namespace mox{
             // the view and the image that this object held would leak
             cleanRenderImage();
             cleanImage();
-            performCopy(std::move(input));
+            processCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
             currentAccess = input.currentAccess;
             currentStage = input.currentStage;
@@ -127,7 +127,9 @@ namespace mox{
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
             barrier.image = this->image;
             barrier.pNext = nullptr;
-            barrier.srcAccessMask = 0;
+            // the old contents are dropped ( UNDEFINED ) , but the layout transition itself is a write : it has to wait for the previous writes of the image ,
+            // so the source access is the access that the image has now , not 0 ( with 0 the transition could overtake them : WRITE_AFTER_WRITE )
+            barrier.srcAccessMask = currentAccess;
             barrier.dstAccessMask = access;
             barrier.srcStageMask = currentStage;
             barrier.dstStageMask = stage;

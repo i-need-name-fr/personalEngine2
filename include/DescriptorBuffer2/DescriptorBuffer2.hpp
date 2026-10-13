@@ -165,14 +165,6 @@ namespace mox{
                     layout = nullptr;
                     THROW_MESSAGE;
                 }
-
-                const auto mapped = vkMapMemory(info.context->logicalDevice->device , memory , 0 , size , 0 , &this->data);
-                if(mapped != VK_SUCCESS){
-                    engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create DescriptorBuffer2 , map memory error , Error ID -> {}" , static_cast<int32_t>(mapped))});
-                    cleanBuffer();
-                    layout = nullptr;
-                    THROW_MESSAGE;
-                }
             }
 
             for(auto& data : info.data){
