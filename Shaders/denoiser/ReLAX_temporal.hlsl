@@ -61,7 +61,12 @@ float3 ComputeVirtualPosition(float3 worldPos, float3 normal, float3 viewDir, fl
 
 float2 ComputeVirtualMotionVector(float3 currentVirtualPos, float4x4 prevViewProj, float2 currentUV) {
     float4 prevClip = mul(prevViewProj, float4(currentVirtualPos, 1.0));
+    // behind the previous camera : outside of the screen , the caller drops the history
+    if(prevClip.w <= 0.0f) return currentUV - float2(-2.0f , -2.0f);
+
     float2 prevUV = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
+    // the same flip as the other passes ( ndc y goes up , the uv goes down )
+    prevUV.y = 1.0f - prevUV.y;
     return currentUV - prevUV;
 }
 
@@ -115,16 +120,18 @@ void main(uint3 id : SV_DispatchThreadID){
     float2 virtualUV = ComputeVirtualMotionVector(virtualPos , generalBuffer.prevViewProj , uv);
     float2 prevUV = uv - virtualUV;
 
-    const uint2 prevCoord = uint2(prevUV * float2(screenSize) - 0.5f);
+    const uint2 prevCoord = uint2(clamp(prevUV * float2(screenSize) - 0.5f , float2(0.0f , 0.0f) , float2(screenSize) - 1.0f));
 
-    bool valid = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f))) && checkDisocclusion(uint3(id.xy , 0) , uint3(prevCoord , 0));
+    // the history is read only when it is on the screen
+    bool valid = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f)));
+    valid = valid && checkDisocclusion(uint3(id.xy , 0) , uint3(prevCoord , 0));
 
-    float pCount = prevFrameCount[prevCoord].x;
-    float3 history = prevSpecular[prevCoord].xyz;
+    float pCount = 0.0f;
+    float3 history = current;
 
-    if(!valid){
-        pCount = 0.0f;    
-        history = current;
+    if(valid){
+        pCount = prevFrameCount[prevCoord].x;
+        history = prevSpecular[prevCoord].xyz;
     }
 
     pCount = min(pCount + 1.0f , MAX_ACCUM_FRAMES);

@@ -257,6 +257,17 @@ namespace mox{
                 }
             }
 
+            {
+                {
+                    const auto result = processInputParameter(data->motionVector.get() , "motionVector");
+                    if(!result.has_value()) return result;
+                }
+            }
+
+            {
+                const auto result = processInputParameter(data->viewImage.get() , "viewImage");
+                if(!result.has_value()) return result;
+            }
 
             return {};
         }

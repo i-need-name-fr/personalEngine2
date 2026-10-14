@@ -65,6 +65,8 @@ namespace mox{
         // 25
         // the fragment shader of the deferred render marks the pixels that it drew , the HDR pass reads them
         pRenderImage2 pixelCheck{nullptr};
+        pRenderImage2 motionVector{nullptr};
+        pRenderImage2 viewImage{nullptr};
 
         ~FrameTargets() noexcept{
             processDelete();
@@ -94,7 +96,7 @@ namespace mox{
                 return fromUndefined ? image->translateImageUndefined(access , stage) : image->translateImage(access , stage);
             };
 
-            std::array<VkImageMemoryBarrier2 , 16> barriers;
+            std::array<VkImageMemoryBarrier2 , 18> barriers;
             barriers[0] = translate(positionImage[id].get());
             barriers[1] = translate(normalImage[id].get());
             barriers[2] = translate(depthImage[id].get());
@@ -112,6 +114,8 @@ namespace mox{
             barriers[13] = translate(filteredShadowImage.get());
             barriers[14] = translate(filteredAmbientOcclusion.get());
             barriers[15] = translate(finalImage.get());
+            barriers[16] = translate(motionVector.get());
+            barriers[17] = translate(viewImage.get());
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -146,6 +150,8 @@ namespace mox{
             metallicImage->cleanTheImage(cmd);
             finalImage->cleanTheImage(cmd);
             ambientImage->cleanTheImage(cmd);
+            motionVector->cleanTheImage(cmd);
+            viewImage->cleanTheImage(cmd);
         }
 
         [[nodiscard]] ErrorDataOutput<void> createImages(VulkanContext* context) noexcept{
@@ -168,6 +174,7 @@ namespace mox{
                 info.imageFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
                 positionImage[0] = std::make_shared<RenderImage2>(info);
                 positionImage[1] = std::make_shared<RenderImage2>(info);
+                viewImage = std::make_shared<RenderImage2>(info);
 
                 // normal
                 info.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -191,6 +198,9 @@ namespace mox{
 
                 info.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
                 finalImage = std::make_shared<RenderImage2>(info);
+
+                info.imageFormat = VK_FORMAT_R16G16_SFLOAT;
+                motionVector = std::make_shared<RenderImage2>(info);
                 
                 // depth
                 info.imageFormat = VK_FORMAT_R32_SFLOAT;
@@ -238,6 +248,7 @@ namespace mox{
             albedoImage    = std::move(input.albedoImage);
             finalImage     = std::move(input.finalImage);
             pixelCheck     = std::move(input.pixelCheck);
+            motionVector = std::move(input.motionVector);
 
             std::move(std::begin(input.shadowImage),           std::end(input.shadowImage),           std::begin(shadowImage));
             std::move(std::begin(input.ambientOcclusionImage), std::end(input.ambientOcclusionImage), std::begin(ambientOcclusionImage));
@@ -263,6 +274,7 @@ namespace mox{
             albedoImage    = nullptr;
             finalImage     = nullptr;
             pixelCheck     = nullptr;
+            motionVector = nullptr;
 
             std::fill(std::begin(shadowImage),           std::end(shadowImage),           nullptr);
             std::fill(std::begin(ambientOcclusionImage), std::end(ambientOcclusionImage), nullptr);
