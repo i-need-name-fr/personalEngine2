@@ -102,6 +102,29 @@ namespace mox{
 
         [[nodiscard]] [[gnu::hot]] const ErrorDataOutput<void> translateBarriers(VkCommandBuffer& cmd) noexcept override final{
             [[unlikely]] if(!completedInit) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate the barriers , since the pipeline wasnt created yet [ForwardPlus]"});
+            // lets clean 2 buffers
+            {
+                std::array<VkBufferMemoryBarrier2 , 2> barriers;
+                barriers[0] = tileLightIndices->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+                barriers[1] = lightCountPerTile->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+
+                VkDependencyInfo info{};
+                info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                info.bufferMemoryBarrierCount = 5;
+                info.imageMemoryBarrierCount = 0;
+                info.pMemoryBarriers = nullptr;
+                info.pBufferMemoryBarriers = barriers.data();
+                info.pImageMemoryBarriers = nullptr;
+                info.memoryBarrierCount = 0;
+                info.pNext = nullptr;
+                info.dependencyFlags = 0;
+
+                vkCmdPipelineBarrier2(cmd , &info);
+
+                vkCmdFillBuffer(cmd , tileLightIndices->buffer , 0 , tileLightIndices->getBufferSize() , 0);
+                vkCmdFillBuffer(cmd , lightCountPerTile->buffer , 0 , lightCountPerTile->getBufferSize() , 0);
+
+            }
 
             std::array<VkBufferMemoryBarrier2 , 5> barriers;
 

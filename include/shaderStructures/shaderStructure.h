@@ -501,13 +501,39 @@ struct GeneralFeatures{
 #endif
 };
 
+struct FogVolume{
+#ifdef __cplusplus
+
+    alignas(16) glm::vec3 center;
+    alignas(16) glm::vec3 halfExtent;
+    alignas(16) glm::vec3 albedo;
+
+    float density;
+    float feather;
+    float g;
+    float gridSize;
+    float heightFallOff;
+    float fogBaseHeight;
+
+#else
+
+    float3 center;
+    float3 halfExtent;
+    float3 albedo;
+
+    float density;
+    float feather;
+    float g;
+    float gridSize;
+    float heightFallOff;
+    float fogBaseHeight;
+
+#endif
+};
+
 
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;
-#else   
-
-
-
 #endif
 
 #ifndef __cplusplus
@@ -515,6 +541,26 @@ struct GeneralFeatures{
 // ---- stateful RNG ---------------------------------------------------------
 // PCG32. The state is advanced on every draw, so two draws from the same
 // variable are independent. Never derive two values from the same seed value.
+
+static const uint  AP_WIDTH  = 32; // screen X
+static const uint  AP_HEIGHT = 32; // screen Y
+static const uint  AP_SLICES = 32; // дистанция (froxel-слои)
+
+static const float DEPTH_RANGE = 128000.0; // метров — максимальная дистанция froxel'а
+static const uint FACE_SIZE = 128;
+static const float PLANET_RADIUS     = 6371000.0;
+static const float ATMOSPHERE_RADIUS = 6471000.0;
+static const float H_RAYLEIGH = 8500.0;
+static const float H_MIE      = 1200.0;
+static const float3 BETA_RAYLEIGH_SCAT = float3(5.8e-6, 1.35e-5, 3.31e-5);
+static const float  BETA_MIE_SCAT      = 4.0e-5;
+static const float  BETA_MIE_ABS       = 4.4e-6;
+static const uint   AP_STEPS = 20;
+
+static const uint LUT_WIDTH  = 192;
+static const uint LUT_HEIGHT = 108;
+
+static const uint SKY_VIEW_STEPS = 32;
 
 struct GeneralObjectInfo{
     
