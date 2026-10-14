@@ -28,6 +28,8 @@ float3 SampleExtincion(float h){
     return rayL + mie;
 }
 
+static const uint TRANSMITTANCE_STEPS = 128;
+
 [[vk::image_format("rgba16f")]]
 [[vk::binding(0 , 0)]] RWTexture2D<float4> output;
 
@@ -51,14 +53,13 @@ void main(uint3 id : SV_DispatchThreadID){
     float dist = RaySphereIntersectFar(rayOrigin , sunDir , ATMOSPHERE_RADIUS);
     float3 trans = float3(1.0f , 1.0f , 1.0f);
 
-    float t = 0.0f;
+    // the midpoint rule over the whole ray : the old version took the end of every step and never counted the last
+    // 1.75% of the ray , the transmittance came out too high ( up to x2 at the horizon ) . 128 steps are 0.3% at worst
+    const float dt = dist / float(TRANSMITTANCE_STEPS);
 
-    [unroll]
-    for(uint i = 0 ; i < 40 ; i++){
-        float newT = (float(i) + 0.3) / 40.0f * dist;
-        float dt = newT - t;
-
-        t = newT;
+    [loop]
+    for(uint i = 0 ; i < TRANSMITTANCE_STEPS ; i++){
+        const float t = (float(i) + 0.5f) * dt;
 
         float3 pos = rayOrigin + sunDir * t;
         float height = length(pos) - PLANET_RADIUS;

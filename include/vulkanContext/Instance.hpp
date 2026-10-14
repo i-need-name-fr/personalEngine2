@@ -212,7 +212,7 @@ namespace mox{
             if(enableValidations && !checkValidations()) throw std::runtime_error("CRITICAL ERROR: validation layers are not supported");
             VkApplicationInfo app{};
             app.applicationVersion = VK_MAKE_VERSION(1 , 0 , 0);
-            app.apiVersion = VK_API_VERSION_1_3;
+            app.apiVersion = VK_API_VERSION_1_4;
             app.engineVersion = VK_MAKE_VERSION(1 , 0 , 0);
             app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
             app.pNext = nullptr;

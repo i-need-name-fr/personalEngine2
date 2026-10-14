@@ -71,11 +71,10 @@ namespace mox{
             functions.vkGetDeviceImageMemoryRequirements  = vkGetDeviceImageMemoryRequirements;
 
             VmaAllocatorCreateInfo info{};
-            info.vulkanApiVersion = VK_API_VERSION_1_3;
+            info.vulkanApiVersion = VK_API_VERSION_1_4;
             info.physicalDevice   = input.pDevice;
             info.device           = input.logicalDevice;
             info.instance         = input.instance;
-            info.vulkanApiVersion = VK_API_VERSION_1_3;
             info.pVulkanFunctions  = &functions;
             info.flags =VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT
                      | VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;

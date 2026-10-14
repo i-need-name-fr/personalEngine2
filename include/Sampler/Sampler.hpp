@@ -35,6 +35,8 @@ namespace mox{
 
             bool requiredTypicalSampler = false;
             bool textureSampler = false;
+            // the lookups of the LUTs : the linear filter and the clamp , no mips and no anisotropy
+            bool linearClampSampler = false;
             bool borderColorIsWhite = false;
             bool requiredComparingSampler = false;
 
@@ -98,9 +100,6 @@ namespace mox{
 
                 info.minFilter = VK_FILTER_NEAREST;
                 info.magFilter = VK_FILTER_NEAREST;     
-                // MIRROR_CLAMP_TO_EDGE needs samplerMirrorClampToEdge , which this
-                // device was not created with - plain CLAMP_TO_EDGE behaves the same
-                // for every lookup this project does
                 info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
                 info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
                 info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -110,18 +109,21 @@ namespace mox{
 
                 info.minFilter = VK_FILTER_LINEAR;
                 info.magFilter = VK_FILTER_LINEAR;
-                // the textures have a full mip chain ( Textures.hpp builds it ) , but maxLod = 0 above made every lookup read the biggest mip :
-                // a minified texture ( the floor in the distance ) aliased and shimmered with every movement of the camera
                 info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
                 info.minLod = 0.0f;
                 info.maxLod = VK_LOD_CLAMP_NONE;
                 info.anisotropyEnable = VK_TRUE;
                 info.maxAnisotropy = 8.0f;
-                // plain REPEAT : with MIRRORED_REPEAT every second tile is flipped , and on a tiled surface ( the floor ) the mirror axes
-                // show as bright symmetric stripes that run to the horizon
                 info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
                 info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;           
                 info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;  
+            }else if(context.linearClampSampler){
+
+                info.minFilter = VK_FILTER_LINEAR;
+                info.magFilter = VK_FILTER_LINEAR;
+                info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
             }
 
             if(context.borderColorIsWhite){
