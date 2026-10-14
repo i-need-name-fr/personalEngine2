@@ -39,6 +39,10 @@ namespace mox{
             path = info.path;
         }
 
+        ~AmbientOcclusion(){
+            processDelete();
+        }
+
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
             std::vector<GraphParameterInfo> reqs(8);

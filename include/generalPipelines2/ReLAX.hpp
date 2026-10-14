@@ -30,6 +30,10 @@ namespace mox{
             inputData = info;
         }
 
+        ~ReLAX(){
+            processDelete();
+        }
+
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
             std::vector<GraphParameterInfo> reqs(14);

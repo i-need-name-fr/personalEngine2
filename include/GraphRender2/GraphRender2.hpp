@@ -84,6 +84,22 @@ namespace mox{
                 const auto result = processInputParameter(data->luminanceHistory.get() , "luminanceHistory");
                 if(!result.has_value()) return result;
             }
+
+            {
+                const auto result = processInputParameter(data->forwardInfo.get() , "forwardInfo");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->tileLightIndices.get() , "tileLightIndices");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->lightCountPerTile.get() , "lightCountPerTile");
+                if(!result.has_value()) return result;
+            }
+            
             return {};
         }
 

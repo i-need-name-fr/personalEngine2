@@ -47,6 +47,10 @@ namespace mox{
             path = std::string(info.path);
         }
 
+        ~HDR(){
+            processDelete();
+        }
+
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
             std::vector<GraphParameterInfo> reqs(15);

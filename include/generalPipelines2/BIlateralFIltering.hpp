@@ -33,6 +33,10 @@ namespace mox{
             path = info.path;
         }
 
+        ~BilateralFiltering(){
+            processDelete();
+        }
+
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
             std::vector<GraphParameterInfo> reqs(12);

@@ -46,6 +46,10 @@ namespace mox{
             }
         }
 
+        ~MultiScatter(){
+            processDelete();
+        }
+
     private:    
 
         pShaderPipe pipe{nullptr};

@@ -48,6 +48,10 @@ namespace mox{
             pathToFile = std::string(info.path);
         }
 
+        ~AEHDR(){
+            processDelete();
+        }
+
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
             
             std::vector<GraphParameterInfo> reqs(3);
