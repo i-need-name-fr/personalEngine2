@@ -99,7 +99,7 @@ void main(uint3 id : SV_DispatchThreadID){
     uint2 screenSize = uint2(width , height);
     if(any(id.xy >= screenSize)) return;
 
-    if(pixelCheck[id.xy] == SKYBOX_PIXEL || features.DDGI){
+    if(pixelCheck[id.xy] == SKYBOX_PIXEL ){
         frameCount[id.xy] = 0.0f;
         return;
     }

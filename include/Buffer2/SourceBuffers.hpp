@@ -22,17 +22,20 @@ namespace mox{
             }
         }
 
-        pGeneralBuffer2<BufferType::Device , true> generalBuffer{nullptr};
-        pGeneralBuffer2<BufferType::Device , true> features{nullptr};
-        pGeneralBuffer2<BufferType::Device , true> sunBuffer{nullptr};
-        pGeneralBuffer2<BufferType::Device , true> lightBuffer{nullptr};
-        pGeneralBuffer2<BufferType::Device , true> luminanceHistory{nullptr};
+        pDeviceReadableBuffer generalBuffer{nullptr};
+        pDeviceReadableBuffer features{nullptr};
+        pDeviceReadableBuffer sunBuffer{nullptr};
+        pDeviceReadableBuffer lightBuffer{nullptr};
+        pDeviceReadableBuffer luminanceHistory{nullptr};
 
         pGeneralBuffer2<BufferType::Device , true> forwardInfo{nullptr};
         // since we dont really care about reading it 
 
         pGeneralBuffer2<BufferType::Device , false> tileLightIndices{nullptr};
         pGeneralBuffer2<BufferType::Device , false> lightCountPerTile{nullptr};
+
+        pGeneralBuffer2<BufferType::Device , false> ReSTIRDIBuffer[2] {nullptr , nullptr};
+        pGeneralBuffer2<BufferType::Device , false> ReSTIRGIBuffer[2] {nullptr , nullptr};
 
         pGeneralBuffer2<BufferType::Device , true> skyBuffer{nullptr};
 
@@ -101,6 +104,19 @@ namespace mox{
 
                 info.size = sizeof(ForwardPlusInfo);
                 forwardInfo = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info , &data);
+
+                for(auto& id : {0 , 1}){
+                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    info.context = context;
+                    info.size = sizeof(ReservoirDI) * context->sc->extent.width * context->sc->extent.height;
+                    info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+                    ReSTIRDIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info);
+
+                    info.size = sizeof(ReservoirGI) * context->sc->extent.width * context->sc->extent.height;
+
+                    ReSTIRGIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info);
+                }
 
                 {   
 

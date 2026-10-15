@@ -265,4 +265,6 @@ namespace mox{
             completedInit = false;
         }
     };
+
+    using pForwardPlus = std::shared_ptr<ForwardPlus>;
 }

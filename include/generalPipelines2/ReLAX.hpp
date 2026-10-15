@@ -470,5 +470,7 @@ namespace mox{
             return {};
         }
     };
+
+    using pReLAX = std::shared_ptr<ReLAX>;
 }
  

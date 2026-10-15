@@ -65,7 +65,7 @@ void main(uint3 id : SV_DispatchThreadID){
     const float g = fogData.g;
 
     float3 V = normalize(pos - generalBuffer.playerPosition);
-    float3 L_sun = sunBuffer.direction;
+    float3 L_sun = -sunBuffer.direction;
     // the center of the froxel on the screen
     const uint2 pixel = min(uint2((float2(id.xy) + 0.5f) * float2(screenSize) / float2(fogSize.xy)) , screenSize - 1);
 

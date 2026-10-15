@@ -337,6 +337,27 @@ struct ReservoirDI{
 #endif
 };
 
+struct ReservoirGI{
+#ifdef __cplusplus
+    alignas(16) glm::vec3 radiance;
+    alignas(16) glm::vec3 samplePos;
+    alignas(16) glm::vec3 sampleNormal;
+
+    uint32_t M;
+#else
+
+    float3 radiance;
+    float3 samplePos;
+    float3 sampleNormal;
+
+    uint M;
+#endif
+
+    float W;
+    float weightSum;
+    float padding;
+};
+
 
 struct SunSource{
 #ifdef __cplusplus
@@ -349,57 +370,6 @@ struct SunSource{
     float3 diffuse;
     float3 direction;
 
-#endif
-};
-
-struct ProbeInfo{
-#ifdef __cplusplus
-
-    alignas(16) glm::vec3 worldPosition;
-
-#else
-
-    float3 worldPosition;
-
-#endif
-};
-
-struct ProbeTileInfo{
-#ifdef __cplusplus
-
-    alignas(16) glm::vec3 generalPosition;
-    uint32_t probesCount;
-    uint32_t firstProbe;
-
-#else
-
-    float3 generalPosition;
-    uint probesCount;
-    uint firstProbe;
-
-#endif
-};
-
-struct GeneralProbeTileInfo{
-#ifdef __cplusplus
-    uint32_t totalProbeTiles;
-    uint32_t tileSize;
-
-    uint32_t probesPerRow;
-    uint32_t probeResolution;
-
-    uint32_t atlasWidth;
-    uint32_t atlasHeight;
-#else
-
-    uint totalProbeTiles;
-    uint tileSize;
-    
-    uint probesPerRow;
-    uint probeResolution;
-
-    uint atlasWidth;
-    uint atlasHeight;
 #endif
 };
 
@@ -458,11 +428,16 @@ struct GeneralFeatures{
     float AOradius;
     float AO_intens;
 
-    uint32_t SSR;
-    uint32_t DDGI;
-    uint32_t SSGI;    
+    uint32_t indirectMode;
 
     uint32_t VSM;
+    uint32_t RayQuery;
+
+    // the number of the rays of the soft shadows : of the lamp and of the sun ( 0 - that source does not trace )
+    uint32_t RayQueryLightSampleCount;
+    float shadowThickness;
+    float temporalShadowK;
+    float light_sun_Proportion;
 
     uint32_t RT;
     uint32_t PT;
@@ -474,6 +449,9 @@ struct GeneralFeatures{
 
     float IndirectShare;
     float maxDepth;
+
+    // it is the last one : the fields before it keep their offsets
+    uint32_t RayQuerySunSampleCount;
 #else
 
     uint AO;
@@ -481,11 +459,15 @@ struct GeneralFeatures{
     float AOradius;
     float AO_intens;
 
-    uint SSR;
-    uint DDGI;
-    uint SSGI;    
+    uint indirectMode;
 
     uint VSM;
+    uint RayQuery;
+
+    uint RayQueryLightSampleCount;
+    float shadowThickness;
+    float temporalShadowK;
+    float light_sun_Proportion;
 
     uint RT;
     uint PT;
@@ -497,6 +479,8 @@ struct GeneralFeatures{
 
     float IndirectShare;
     float maxDepth;
+
+    uint RayQuerySunSampleCount;
 
 #endif
 };

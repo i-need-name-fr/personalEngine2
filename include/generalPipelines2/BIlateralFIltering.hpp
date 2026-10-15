@@ -366,4 +366,6 @@ namespace mox{
             return {};
         }
     };
+
+    using pBilateralFiltering = std::shared_ptr<BilateralFiltering>;
 }

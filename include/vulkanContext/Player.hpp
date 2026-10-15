@@ -1,13 +1,13 @@
 #pragma once
 
 #include "Window.hpp"
+#include "../shaderStructures/shaderStructure.h"
 
 namespace mox{
     class Player{
     private:
 
         const glm::vec3 up = {0.0f , 1.0f , 0.0f};
-        const float speed = 10.0f;
         const float rotation_speed = 0.05f;
 
     public:
@@ -65,6 +65,10 @@ namespace mox{
         bool firstMouseSample = true;   // was a function-local static in processMouseInput
         bool playerMoved = true;
         bool PT_required = false;
+
+        float speed = 10.0f;
+        const float maxSpeed = 25.0f;
+        const float minSpeed = 5.0f;
 
         uint32_t currentMode = 0;
         // default , albedo , normal , depth , metallic , roughness , indirect light , filtered AO ( DEFAULT_MODE .. AO_MODE ) , the R key cycles through all of them

@@ -48,7 +48,6 @@ namespace mox{
         pRenderImage2 specularImage[2]{};
         // 10
         pRenderImage2 indirectImage[2]{};
-        pRenderImage2 ambientImage{};
         // 13
         pRenderImage2 roughnessImage{};
         pRenderImage2 metallicImage{};
@@ -104,7 +103,7 @@ namespace mox{
                 return fromUndefined ? image->translateImageUndefined(access , stage) : image->translateImage(access , stage);
             };
 
-            std::array<VkImageMemoryBarrier2 , 18> barriers;
+            std::array<VkImageMemoryBarrier2 , 17> barriers;
             barriers[0] = translate(positionImage[id].get());
             barriers[1] = translate(normalImage[id].get());
             barriers[2] = translate(depthImage[id].get());
@@ -115,15 +114,14 @@ namespace mox{
             barriers[7] = translate(ambientOcclusionImage[id].get());
             barriers[8] = translate(HDRImage[id].get());
 
-            barriers[9] = translate(ambientImage.get());
-            barriers[10] = translate(roughnessImage.get());
-            barriers[11] = translate(metallicImage.get());
-            barriers[12] = translate(albedoImage.get());
-            barriers[13] = translate(filteredShadowImage.get());
-            barriers[14] = translate(filteredAmbientOcclusion.get());
-            barriers[15] = translate(finalImage.get());
-            barriers[16] = translate(motionVector.get());
-            barriers[17] = translate(viewImage.get());
+            barriers[9] = translate(roughnessImage.get());
+            barriers[10] = translate(metallicImage.get());
+            barriers[11] = translate(albedoImage.get());
+            barriers[12] = translate(filteredShadowImage.get());
+            barriers[13] = translate(filteredAmbientOcclusion.get());
+            barriers[14] = translate(finalImage.get());
+            barriers[15] = translate(motionVector.get());
+            barriers[16] = translate(viewImage.get());
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -157,7 +155,6 @@ namespace mox{
             roughnessImage->cleanTheImage(cmd);
             metallicImage->cleanTheImage(cmd);
             finalImage->cleanTheImage(cmd);
-            ambientImage->cleanTheImage(cmd);
             motionVector->cleanTheImage(cmd);
             viewImage->cleanTheImage(cmd);
         }
@@ -189,7 +186,6 @@ namespace mox{
                 normalImage[1] = std::make_shared<RenderImage2>(info);
                 normalImage[0] = std::make_shared<RenderImage2>(info);
 
-                ambientImage = std::make_shared<RenderImage2>(info);
                 albedoImage = std::make_shared<RenderImage2>(info);
 
                 indirectImage[0] = std::make_shared<RenderImage2>(info);
@@ -308,7 +304,6 @@ namespace mox{
             std::move(std::begin(input.specularImage), std::end(input.specularImage), std::begin(specularImage));
 
             std::move(std::begin(input.indirectImage), std::end(input.indirectImage), std::begin(indirectImage));
-            ambientImage = std::move(input.ambientImage);
 
             roughnessImage = std::move(input.roughnessImage);
             metallicImage  = std::move(input.metallicImage);
@@ -343,7 +338,6 @@ namespace mox{
             std::fill(std::begin(specularImage), std::end(specularImage), nullptr);
 
             std::fill(std::begin(indirectImage), std::end(indirectImage), nullptr);
-            ambientImage = nullptr;
 
             roughnessImage = nullptr;
             metallicImage  = nullptr;

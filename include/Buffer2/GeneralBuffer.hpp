@@ -426,4 +426,12 @@ namespace mox{
     std::span<T> translateToSpan(std::vector<T>& data) noexcept{
         return std::span<T>(data);
     }
+
+    using DeviceReadableBuffer = GeneralBuffer2<BufferType::Device , true>;
+    using HostReadableBuffer = GeneralBuffer2<BufferType::Host , true>;
+    using DeviceStaticBuffer = GeneralBuffer2<BufferType::Device , false>;
+
+    using pDeviceReadableBuffer = std::shared_ptr<GeneralBuffer2<BufferType::Device , true>>;
+    using pHostReadableBuffer = std::shared_ptr<GeneralBuffer2<BufferType::Host , true>>;
+    using pDeviceStaticBuffer = std::shared_ptr<GeneralBuffer2<BufferType::Device , false>>;
 }

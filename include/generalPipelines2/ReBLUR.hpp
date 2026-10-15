@@ -524,4 +524,6 @@ namespace mox{
             return {};
         }
     };
+
+    using pReBLUR = std::shared_ptr<ReBLUR>;
 }

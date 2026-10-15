@@ -322,4 +322,6 @@ namespace mox{
         RenderImage2* fogImage{nullptr};
         RenderImage2* filteredShadowImage{nullptr};
     };
+
+    using pVolumentricRender = std::shared_ptr<VolumentricRender>;
 }

@@ -344,6 +344,52 @@ namespace mox{
 
         return {};
     }
+
+
+    template<uint32_t Images , uint32_t Buffers , uint32_t Memories>
+    VkDependencyInfo TypicalDependency(VkImageMemoryBarrier2* imageBar , VkBufferMemoryBarrier2* bufBar , VkMemoryBarrier2* memBar ){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = Buffers;
+        info.imageMemoryBarrierCount = Images;
+        info.memoryBarrierCount = Memories;
+        info.pMemoryBarriers = memBar;
+        info.pBufferMemoryBarriers = bufBar;
+        info.pImageMemoryBarriers = imageBar;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
+
+    template<uint32_t Buffers , uint32_t Images>
+    VkDependencyInfo TypicalDependency(VkImageMemoryBarrier2* imageBar , VkBufferMemoryBarrier2* bufBar){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = Buffers;
+        info.imageMemoryBarrierCount = Images;
+        info.memoryBarrierCount = 0;
+        info.pMemoryBarriers = nullptr;
+        info.pBufferMemoryBarriers = bufBar;
+        info.pImageMemoryBarriers = imageBar;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
+
+    template<uint32_t Images>
+    VkDependencyInfo TypicalDependency(VkImageMemoryBarrier2* imageBar){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = 0;
+        info.imageMemoryBarrierCount = Images;
+        info.memoryBarrierCount = 0;
+        info.pMemoryBarriers = nullptr;
+        info.pBufferMemoryBarriers = nullptr;
+        info.pImageMemoryBarriers = imageBar;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
 }
 
 #endif
