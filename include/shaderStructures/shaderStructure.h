@@ -499,6 +499,12 @@ struct FogVolume{
     float heightFallOff;
     float fogBaseHeight;
 
+    // the own glow of the fog ( the radiance that it scatters without any light : the color of the fog that is seen far away ) . the albedo is another thing :
+    // it is the color that the fog gives to the light of the lamps and of the sun .
+    // NO alignas ( 16 ) : after the float the compiler of the shader puts a float3 right behind it ( offset 68 : three floats fit into the rest of the 16 byte row ) ,
+    // alignas would move it to 80 and the shader would read the padding
+    glm::vec3 color;
+
 #else
 
     float3 center;
@@ -511,6 +517,8 @@ struct FogVolume{
     float gridSize;
     float heightFallOff;
     float fogBaseHeight;
+
+    float3 color;
 
 #endif
 };
@@ -552,6 +560,11 @@ static const uint   AP_STEPS = 20;
 
 static const uint LUT_WIDTH  = 192;
 static const uint LUT_HEIGHT = 108;
+
+// the z depth ( meters ) that the froxel volume of the fog covers , the slices are spread logarithmically between these two . fogCalc ( writes the slices ) and
+// PostProcess ( reads them ) have to use the same numbers
+static const float FOG_NEAR = 0.01f;
+static const float FOG_FAR  = 200.0f;
 
 static const uint SKY_VIEW_STEPS = 32;
 

@@ -16,7 +16,7 @@
 [[vk::binding(8 , 0)]] RWTexture2D<float> filteredShadowImage;
 
 float sliceDepth(const float zf){
-    return generalBuffer.playerNear * pow(generalBuffer.playerFar / generalBuffer.playerNear , zf / fogData.gridSize );
+    return FOG_NEAR * pow(FOG_FAR / FOG_NEAR , zf / fogData.gridSize );
 }
 
 // тип тут главное сделать так что Z будет Primary Образно говоря , поэтому здесь и деление такое странное 
@@ -86,5 +86,7 @@ void main(uint3 id : SV_DispatchThreadID){
         Lin += light.diffuse * window * att * phaseHG(dot(L , V) , g);
     }
 
-    fogImage[id] = float4(Lin * sigmaS * filteredShadowImage[pixel].x , sigmaT);
+    // the light of the lamps and of the sun is shadowed , the own glow of the fog is not
+    const float3 scattered = Lin * filteredShadowImage[pixel].x + fogData.color;
+    fogImage[id] = float4(scattered * sigmaS , sigmaT);
 }

@@ -56,6 +56,11 @@
 [[vk::binding(21 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
 [[vk::binding(22 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
 
+// the sun disc in the sky
+[[vk::binding(23 , 0)]] ConstantBuffer<SunSource> sunBuffer;
+[[vk::binding(24 , 0)]] ConstantBuffer<SkyViewData> skyBuffer;
+[[vk::binding(25 , 0)]] Texture2D transmissionLUT;
+
 uint bufferIndex(uint2 pixel){
     const uint2 clamped = min(pixel , uint2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
     return clamped.x + clamped.y * generalBuffer.screenWidth;
@@ -128,6 +133,38 @@ float lightAttenuation(LightSource light , float lightDistance){
     return falloff * window;
 }
 
+
+// ---------------------------------------------------------------- the sun disc
+static const float SUN_ANGULAR_RADIUS = 0.00465f;
+static const float SUN_DISC_BRIGHTNESS = 100.0f;
+static const float SUN_DISC_MAX = 60000.0f;
+
+float3 sunTransmittanceToCamera(){
+    const float u = skyBuffer.sunCosZenith * 0.5f + 0.5f;
+    const float v = saturate(skyBuffer.cameraHeight / (ATMOSPHERE_RADIUS - PLANET_RADIUS));
+    return transmissionLUT.SampleLevel(typicalSampler , float2(u , v) , 0).rgb;
+}
+
+float3 AddSunDisc(float3 skyColor , float3 rayDir){
+    const float lightLength = length(sunBuffer.direction);
+    // the light is the direction where the light goes : the sun is on the other side
+    if(lightLength < 1e-5f) return skyColor;
+    const float3 toSun = -sunBuffer.direction / lightLength;
+
+    // nothing under the horizon
+    if(rayDir.y < 0.0f) return skyColor;
+
+    // the angle of one pixel from the projection ( projOnly[1][1] is 1 / tan( fov / 2 ) )
+    const float pixelAngle = 2.0f / (max(generalBuffer.projOnly[1][1] , 1e-3f) * float(max(generalBuffer.screenHeight , 1u)));
+    const float cosAngle = dot(rayDir , toSun);
+    if(cosAngle < cos(SUN_ANGULAR_RADIUS + pixelAngle)) return skyColor;
+
+    const float angle = acos(clamp(cosAngle , -1.0f , 1.0f));
+    const float coverage = saturate((SUN_ANGULAR_RADIUS + 0.5f * pixelAngle - angle) / pixelAngle);
+
+    const float3 disc = min(sunBuffer.diffuse * SUN_DISC_BRIGHTNESS * sunTransmittanceToCamera() , float3(SUN_DISC_MAX , SUN_DISC_MAX , SUN_DISC_MAX));
+    return skyColor + disc * coverage;
+}
 
 static const bool USE_RESTIR = false;
 
@@ -287,7 +324,8 @@ void main(uint3 id : SV_DispatchThreadID){
 
         pixelCheck[id.xy] = SKYBOX_PIXEL;
         const float3 direction = ComputePixelRayDirection(currentPixel , screenSize , generalBuffer.invViewProj, generalBuffer.playerPosition);
-        diffuseImage[id.xy] = float4( skybox.SampleLevel(typicalSampler , direction , 0).xyz , 1.0f);
+        const float3 skyColor = skybox.SampleLevel(typicalSampler , direction , 0).xyz;
+        diffuseImage[id.xy] = float4(AddSunDisc(skyColor , direction) , 1.0f);
 
         // otherwise next frame's reuse would read whatever this slot held two frames ago
         ReservoirDI empty;
