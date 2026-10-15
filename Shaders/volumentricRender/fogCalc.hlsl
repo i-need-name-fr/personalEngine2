@@ -12,11 +12,14 @@
 
 [[vk::image_format("rgba16f")]]
 [[vk::binding(7 , 0)]] RWTexture2DArray<float4> fogImage;
+[[vk::image_format("r32f")]]
+[[vk::binding(8 , 0)]] RWTexture2D<float> filteredShadowImage;
 
 float sliceDepth(const float zf){
     return generalBuffer.playerNear * pow(generalBuffer.playerFar / generalBuffer.playerNear , zf / fogData.gridSize );
 }
 
+// тип тут главное сделать так что Z будет Primary Образно говоря , поэтому здесь и деление такое странное 
 float3 froxelWorldPos(uint3 id , uint3 fogSize){
     float2 uv = float2(float2(id.xy) + 0.5f) / float2(fogSize.xy);
     float2 ndc = uv * 2.0f - 1.0f;
@@ -28,6 +31,7 @@ float3 froxelWorldPos(uint3 id , uint3 fogSize){
     return mul(generalBuffer.inverseView , float4(pos , 1.0f)).xyz;
 }
 
+// в каком дальше направлении будет идти фотон через весь fog 
 float phaseHG(const float cosTheta , const float g){
     float k = 1.0f + g * g - 2.0f * g * cosTheta;
     return (1.0f - g * g ) / (4.0f * PI * k * sqrt(k));
@@ -82,5 +86,5 @@ void main(uint3 id : SV_DispatchThreadID){
         Lin += light.diffuse * window * att * phaseHG(dot(L , V) , g);
     }
 
-    fogImage[id] = float4(Lin * sigmaS , sigmaT);
+    fogImage[id] = float4(Lin * sigmaS * filteredShadowImage[pixel].x , sigmaT);
 }

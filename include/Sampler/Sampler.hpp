@@ -37,6 +37,8 @@ namespace mox{
             bool textureSampler = false;
             // the lookups of the LUTs : the linear filter and the clamp , no mips and no anisotropy
             bool linearClampSampler = false;
+            // the sky : the azimuth ( U ) wraps around , the elevation ( V ) is clamped
+            bool linearWrapUSampler = false;
             bool borderColorIsWhite = false;
             bool requiredComparingSampler = false;
 
@@ -121,7 +123,16 @@ namespace mox{
 
                 info.minFilter = VK_FILTER_LINEAR;
                 info.magFilter = VK_FILTER_LINEAR;
+                // the edge of a LUT is the edge of the atmosphere or the ground : with REPEAT the last row would blend with the first one
                 info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+                info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            }else if(context.linearWrapUSampler){
+
+                info.minFilter = VK_FILTER_LINEAR;
+                info.magFilter = VK_FILTER_LINEAR;
+                // with CLAMP the seam at the azimuth 0 / 2 PI would blend the edge texel with itself instead of the texel on the other side
+                info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
                 info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
                 info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
             }

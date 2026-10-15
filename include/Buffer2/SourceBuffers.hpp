@@ -34,6 +34,8 @@ namespace mox{
         pGeneralBuffer2<BufferType::Device , false> tileLightIndices{nullptr};
         pGeneralBuffer2<BufferType::Device , false> lightCountPerTile{nullptr};
 
+        pGeneralBuffer2<BufferType::Device , true> skyBuffer{nullptr};
+
         ~SourceBuffers(){
             processDelete();
         }
@@ -83,6 +85,9 @@ namespace mox{
                 // luminance history
                 info.size = sizeof(uint32_t) * 257;
                 luminanceHistory = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
+
+                info.size = sizeof(SkyViewData);
+                skyBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
 
                 ForwardPlusInfo data{};
                 data.TILE_SIZE = 16;

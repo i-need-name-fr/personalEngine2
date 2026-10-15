@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderImage2.hpp"
+#include "Skybox2.hpp"
 
 namespace mox{
 
@@ -67,6 +68,13 @@ namespace mox{
         pRenderImage2 pixelCheck{nullptr};
         pRenderImage2 motionVector{nullptr};
         pRenderImage2 viewImage{nullptr};
+
+        pRenderImage2 fogImage;
+        pRenderImage2 transmissionLUT;
+        pRenderImage2 multiScatterLUT;
+        pRenderImage2 multiScatter;
+        pRenderImage2 SkyView;
+        pSkybox2 skybox;
 
         ~FrameTargets() noexcept{
             processDelete();
@@ -221,6 +229,65 @@ namespace mox{
                 filteredAmbientOcclusion=  std::make_shared<RenderImage2>(info);
                 filteredShadowImage=  std::make_shared<RenderImage2>(info);
 
+                {
+                    RenderImage2::CreateInfo info{};
+                    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    info.imageType = VK_IMAGE_TYPE_2D;
+                    info.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+                    info.context = context;
+                    info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+                    info.extent = {192, 108};
+                    info.mipMapCount = 1;
+                    info.layerCount = 1;
+                    info.clear.float32[0] = 0.0f;
+                    info.clear.float32[1] = 0.0f;
+                    info.clear.float32[2] = 0.0f;
+                    info.clear.float32[3] = 0.0f;
+                    info.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+                    transmissionLUT = std::make_shared<RenderImage2>(info);
+                    multiScatterLUT = std::make_shared<RenderImage2>(info);
+                    SkyView = std::make_shared<RenderImage2>(info);
+
+                    // the froxel volume : 160 x 90 pixels and 64 layers ( the dispatch of the VolumentricRender covers exactly this )
+                    info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+                    info.layerCount = 64;
+                    info.extent = {160 , 90};
+
+                    fogImage = std::make_shared<RenderImage2>(info);
+                }
+
+                {
+                    RenderImage2::CreateInfo info{};
+                    info.viewType = VK_IMAGE_VIEW_TYPE_1D;
+                    info.imageType = VK_IMAGE_TYPE_1D;
+                    info.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+                    info.context = context;
+                    info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+                    info.extent = {512 , 1};
+                    info.mipMapCount = 1;
+                    info.layerCount = 1;
+                    info.clear.float32[0] = 0.0f;
+                    info.clear.float32[1] = 0.0f;
+                    info.clear.float32[2] = 0.0f;
+                    info.clear.float32[3] = 0.0f;
+                    info.imageFormat = VK_FORMAT_R32_SFLOAT;
+
+                    multiScatter = std::make_shared<RenderImage2>(info);
+                }
+
+                {
+                    // skybox
+                    Skybox2::CreateInfo info{};
+                    info.context = context;
+                    info.extent = {128 , 128};
+                    info.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    info.isTexture = false;
+                    info.resolution = 128;
+                    info.usage =  VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+                    skybox = std::make_shared<Skybox2>(info);
+                }
             }
             catch(std::exception& e){
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create typical images"});
@@ -256,6 +323,15 @@ namespace mox{
             filteredAmbientOcclusion = std::move(input.filteredAmbientOcclusion);
 
             std::move(std::begin(input.HDRImage), std::end(input.HDRImage), std::begin(HDRImage));
+
+            viewImage = std::move(input.viewImage);
+
+            fogImage = std::move(input.fogImage);
+            transmissionLUT = std::move(input.transmissionLUT);
+            multiScatterLUT = std::move(input.multiScatterLUT);
+            multiScatter = std::move(input.multiScatter);
+            SkyView = std::move(input.SkyView);
+            skybox = std::move(input.skybox);
         }
 
         void processDelete() noexcept {
@@ -282,6 +358,15 @@ namespace mox{
             filteredAmbientOcclusion = nullptr;
 
             std::fill(std::begin(HDRImage), std::end(HDRImage), nullptr);
+
+            viewImage = nullptr;
+
+            fogImage = nullptr;
+            transmissionLUT = nullptr;
+            multiScatterLUT = nullptr;
+            multiScatter = nullptr;
+            SkyView = nullptr;
+            skybox = nullptr;
         }
     };
 

@@ -531,6 +531,15 @@ struct FogVolume{
 #endif
 };
 
+struct SkyViewData{
+    float cameraHeight;
+    float sunCosZenith;
+    // the azimuth of the sun in the world ( the horizontal direction of the sun : x = cos , z = sin ) . the sky view LUT always has the sun at the azimuth 0 ,
+    // the cube turns the LUT by this angle
+    float sunCosAzimuth;
+    float sunSinAzimuth;
+};
+
 
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;

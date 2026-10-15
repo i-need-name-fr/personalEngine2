@@ -27,9 +27,12 @@ namespace mox{
             // the view and the image that this object held would leak
             if(view && device) vkDestroyImageView(device , view , nullptr);
             view = nullptr;
+            if(storageView && device) vkDestroyImageView(device , storageView , nullptr);
+            storageView = nullptr;
             cleanImage();
             processCopy(std::move(input));
             view = std::exchange(input.view , nullptr);
+            storageView = std::exchange(input.storageView , nullptr);
             // the barrier of the next translate starts from where the image is now
             currentAccess = input.currentAccess;
             currentStage = input.currentStage;
@@ -37,6 +40,7 @@ namespace mox{
         }
         Skybox2(Skybox2&& input) noexcept : ImageBase2(std::move(input)){
             view = std::exchange(input.view , nullptr);
+            storageView = std::exchange(input.storageView , nullptr);
             currentAccess = input.currentAccess;
             currentStage = input.currentStage;
         }
@@ -44,6 +48,8 @@ namespace mox{
         ~Skybox2(){
             if(view && device) vkDestroyImageView(device , view , nullptr);
             view = nullptr;
+            if(storageView && device) vkDestroyImageView(device , storageView , nullptr);
+            storageView = nullptr;
         }
 
         struct CreateInfo{
@@ -77,11 +83,18 @@ namespace mox{
                 // the destructor of Skybox never runs when the constructor throws
                 if(view) vkDestroyImageView(device , view , nullptr);
                 view = nullptr;
+                if(storageView) vkDestroyImageView(device , storageView , nullptr);
+                storageView = nullptr;
                 THROW_MESSAGE;
             }
         }
 
         VkImageView view = nullptr;
+
+        // the same image as a 2D array of 6 layers ( the faces ) : the view for the shaders that WRITE the cube . HLSL has no RWTextureCube ,
+        // and a CUBE view does not match the RWTexture2DArray of the shader ( VUID-vkCmdDispatch-viewType-07752 ) . the cube is read through "view" .
+        // it exists only for the skyboxes that are not textures and have VK_IMAGE_USAGE_STORAGE_BIT
+        VkImageView storageView = nullptr;
 
         VkImageMemoryBarrier2 translateImage(const VkAccessFlags2 access ,const VkPipelineStageFlags2 stage) noexcept{
             VkImageMemoryBarrier2 barrier{};
@@ -305,6 +318,31 @@ namespace mox{
             return {};
         }
 
+        // the 2D array view of the 6 faces : createImageView of the base class takes the view type of the image ( CUBE )
+        [[nodiscard]] ErrorDataOutput<void> createStorageView() noexcept{
+            VkImageViewCreateInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            info.pNext = nullptr;
+            info.image = this->image;
+            info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            info.format = this->format;
+            info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+            info.subresourceRange.aspectMask = generalImageData.aspect;
+            info.subresourceRange.baseArrayLayer = 0;
+            info.subresourceRange.baseMipLevel = 0;
+            info.subresourceRange.layerCount = 6;
+            info.subresourceRange.levelCount = 1;
+
+            const auto result = vkCreateImageView(device , &info , nullptr , &storageView);
+            if(result != VK_SUCCESS){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create the storage view of the skybox , error ID -> {}" , static_cast<int32_t>(result))});
+            }
+            return {};
+        }
+
         [[nodiscard]] ErrorDataOutput<void> processNonTextureSkybox(const CreateInfo &data) noexcept{
 
             ImageInfo info{};
@@ -329,6 +367,13 @@ namespace mox{
 
             {
                 const auto result = createImageView(view , 6 , 0 , 1 , 0);
+                if(!result.has_value()){
+                    return std::unexpected(result.error());
+                }
+            }
+
+            if(data.usage & VK_IMAGE_USAGE_STORAGE_BIT){
+                const auto result = createStorageView();
                 if(!result.has_value()){
                     return std::unexpected(result.error());
                 }

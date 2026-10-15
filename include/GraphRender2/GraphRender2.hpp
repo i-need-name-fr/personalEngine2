@@ -99,6 +99,11 @@ namespace mox{
                 const auto result = processInputParameter(data->lightCountPerTile.get() , "lightCountPerTile");
                 if(!result.has_value()) return result;
             }
+
+            {
+                const auto result = processInputParameter(data->skyBuffer.get() , "skyBuffer");
+                if(!result.has_value()) return result;
+            }
             
             return {};
         }
@@ -282,6 +287,36 @@ namespace mox{
 
             {
                 const auto result = processInputParameter(data->viewImage.get() , "viewImage");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->fogImage.get() , "fogImage");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->transmissionLUT.get() , "transmissionLUT");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->multiScatterLUT.get() , "multiScatterLUT");
+                if(!result.has_value()) return result;
+            }
+        
+            {
+                const auto result = processInputParameter(data->multiScatter.get() , "multiScatter");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->SkyView.get() , "SkyView");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->skybox.get() , "skybox");
                 if(!result.has_value()) return result;
             }
 
