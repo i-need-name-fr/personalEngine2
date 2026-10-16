@@ -48,6 +48,7 @@ namespace mox{
             this->device = info.context->logicalDevice->device;
             this->cacheSaveFile = info.cacheFile;
             cache = nullptr;
+            context = info.context;
         }
 
         VkPipelineCache loadPipelineCache() noexcept{
@@ -93,6 +94,32 @@ namespace mox{
             releaseResources();
         }
 
+        [[nodiscard]] ErrorDataOutput<void> createLayouts(std::vector<DescriptorLayout::CreateInfo> layouts , std::vector<VkPushConstantRange> ranges , VkShaderStageFlags stage) noexcept{
+            try{
+
+                for(auto& l :layouts){
+                    addDescriptorLayout(l);
+                }
+
+                std::vector<DescriptorLayout*> data;
+
+                for(auto& l : descriptorLayouts){
+                    data.push_back(l.get());
+                }
+
+                PipelineLayout::CreateInfo info{};
+                info.context = context;
+                info.layouts = data;
+                info.ranges = ranges;
+
+                layout = std::make_shared<PipelineLayout>(info);
+            }
+            catch(std::exception&e){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create layouts for shader pipe"});
+            }
+            return{};
+        }
+
     protected:
 
         // everything this object owns is destroyed ( the cache is saved first ) : the destructor and the move use it
@@ -113,6 +140,7 @@ namespace mox{
             device = nullptr;
             renderPass = nullptr;
             layout = nullptr;
+            context = nullptr;
         }
 
         void performCopy(Pipeline&& input) noexcept{
@@ -129,9 +157,11 @@ namespace mox{
             cacheSaveFile = input.cacheSaveFile;
             device = std::exchange(input.device , nullptr);
             buffers = std::move(input.buffers);
+            context = std::exchange(input.context, nullptr);
         }
 
         VkDevice device = nullptr;
+        VulkanContext* context;
 
     private:
 

@@ -16,14 +16,14 @@
 
 #include "include/Image2/MultiViewImage2.hpp"
 #include "tempCore.hpp"
-
+#include "Core2.hpp"
 
 using namespace mox;
 
 int main(){
     std::cout << "hello world\n";
     try{
-        TempCore core;
+        Core2 core(9);
         core.run();
     }
     catch(std::exception &e){

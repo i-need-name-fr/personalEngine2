@@ -617,6 +617,7 @@ namespace mox{
                 features.currentMode = DEFAULT_MODE;
                 features.randomValues = 1;
                 features.volumentricFog = 1;
+                features.ReSTIR = 1;
                 features.IndirectShare = 0.5f;
                 features.maxDepth = 50.0f;
                 sbuf->features->recordData(std::span<GeneralFeatures>(&features , 1));

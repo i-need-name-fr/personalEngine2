@@ -45,7 +45,7 @@ namespace mox{
     class VulkanContext final{
     private:
 
-        void init(const uint32_t m , const uint32_t am){
+        ErrorDataOutput<void> init(const uint32_t m , const uint32_t am){
             try{
                 user = std::make_shared<Player>();
 
@@ -131,8 +131,41 @@ namespace mox{
                 sc = std::make_shared<Swapchain>(info);
 
                 loadAllFunctions(instance->instance);
+
+                {
+                    uint32_t count;
+                    vkGetSwapchainImagesKHR(logicalDevice->device , sc->sc , &count , nullptr);
+
+                    images.resize(count);
+                    views.resize(count);
+                    vkGetSwapchainImagesKHR(logicalDevice->device , sc->sc , &count , images.data());
+                    uint32_t i = 0;
+                    for(auto& image : images){
+                        VkImageViewCreateInfo info{};
+                        info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                        info.flags = 0;
+                        info.image = image;
+                        info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+                        info.format = sc->format.format;
+                        info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                        info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                        info.subresourceRange.baseArrayLayer = 0;
+                        info.subresourceRange.baseMipLevel = 0;
+                        info.subresourceRange.layerCount = 1;
+                        info.subresourceRange.levelCount = 1;
+
+                        const auto result = vkCreateImageView(logicalDevice->device , &info ,nullptr , &views[i]);
+                        if(result != VK_SUCCESS) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to create image view for swap chain , error ID -> P{}" , static_cast<int32_t>(result)) });
+                        i++;
+                    }
+                }
             }
             catch(std::exception& e){throw;}
+
+            return {};
         }
 
         inline void loadAllFunctions(VkInstance instance){
@@ -175,7 +208,29 @@ namespace mox{
 
         }
 
-        
+        void processCopy(VulkanContext&& input) noexcept{
+
+        }
+
+        void processDelete() noexcept{
+            for(auto& view : views){
+                vkDestroyImageView(logicalDevice->device , view , nullptr);
+            }
+
+            images.clear();
+            views.clear();
+            sc = nullptr;
+            queueManager = nullptr;
+            graphicsQueue = nullptr;
+            allocator = nullptr;
+            VirtualShadowQueue = nullptr;
+            logicalDevice = nullptr;
+            physicalDevice=  nullptr;
+            user = nullptr;
+            surface = nullptr;
+            instance = nullptr;
+            window = nullptr;
+        }
 
     public:
 
@@ -185,11 +240,17 @@ namespace mox{
         };
 
         explicit VulkanContext(const CreateInfo &info){
-            init(info.multithreadQueueCount , info.asyncMultiThreadQueueCount);
+            const auto result = init(info.multithreadQueueCount , info.asyncMultiThreadQueueCount);
+            if(!result.has_value()){
+                engineLogger(result);
+                THROW_MESSAGE;
+            }
         }
 
         SetTypicalOperators(VulkanContext)
-        ~VulkanContext() = default;
+        ~VulkanContext() noexcept{
+            processDelete();
+        }
         
         pPlayer user = nullptr;
         pWindow window = nullptr;
@@ -206,6 +267,9 @@ namespace mox{
         pQueueLane VirtualShadowQueue = nullptr;
 
         pMemoryAllocator allocator{nullptr};
+
+        std::vector<VkImage> images{};
+        std::vector<VkImageView> views{};
 
         [[gnu::hot]] [[nodiscard]] ErrorDataOutput<void> processQueueLoop(const QueueRecordTypeFunction &function) noexcept{
 

@@ -4,6 +4,7 @@
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../AS2/AccelerationStructureBase.hpp"
+#include "../Object2/Mesh2.hpp"
 
 namespace mox{
 
@@ -35,7 +36,7 @@ namespace mox{
 
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
-            std::vector<GraphParameterInfo> reqs(13);
+            std::vector<GraphParameterInfo> reqs(16);
 
             reqs[0].type = moxGraphTypeBuffer;
             reqs[0].name = "generalBuffer";
@@ -84,6 +85,16 @@ namespace mox{
             reqs[12].type = moxGraphTypeImage;
             reqs[12].name = "pixelCheck";
             reqs[12].imageSpecification.type = ImageType::RenderImage2;
+
+            // the lamps of the tiles ( Forward+ ) : the shadow is made from all the lamps of the tile of the pixel
+            reqs[13].type = moxGraphTypeBuffer;
+            reqs[13].name = "tileLightIndices";
+
+            reqs[14].type = moxGraphTypeBuffer;
+            reqs[14].name = "lightCountPerTile";
+
+            reqs[15].type = moxGraphTypeBuffer;
+            reqs[15].name = "forwardInfo";
 
             return reqs;
         }
@@ -139,7 +150,9 @@ namespace mox{
                 GraphSlot<RenderImage2>{"shadowImage_0" , &shadowImage[0]} , GraphSlot<RenderImage2>{"shadowImage_1" , &shadowImage[1]} ,
                 GraphSlot<RenderImage2>{"positionImage_0" , &positionImage[0]} , GraphSlot<RenderImage2>{"positionImage_1" , &positionImage[1]} ,
                 GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck});
+                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
+                GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices} , GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile} ,
+                GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo});
             if(!bound.has_value()) return bound;
 
             // the features are read by the CPU ( requestExecution ) : the buffer has to be a DeviceReadableBuffer . bit_cast does not check the type , it takes
@@ -165,15 +178,22 @@ namespace mox{
             images[3] = positionImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             images[4] = normalImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
-            std::array<VkBufferMemoryBarrier2 , 5> buffers;
+            std::array<VkBufferMemoryBarrier2 , 10> buffers;
 
             buffers[0] = generalBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[1] = features->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[2] = sunBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[3] = ReSTIRDIBuffer[currentImage]->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[4] = lightBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            // the instances and the materials : the shader looks at the candidates of the ray
+            buffers[5] = Mesh2::instanceLayoutBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[6] = Mesh2::LUT_buffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            // the lists of the lamps of the tiles : written by the ForwardPlus
+            buffers[7] = tileLightIndices->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[8] = lightCountPerTile->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[9] = forwardInfo->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
-            auto dep = TypicalDependency<5 , 5>(images.data() , buffers.data());
+            auto dep = TypicalDependency<10 , 5>(images.data() , buffers.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -192,6 +212,9 @@ namespace mox{
         BufferBase2* sunBuffer{nullptr};
         BufferBase2* ReSTIRDIBuffer[2]{nullptr , nullptr};
         BufferBase2* lightBuffer{nullptr};
+        BufferBase2* tileLightIndices{nullptr};
+        BufferBase2* lightCountPerTile{nullptr};
+        BufferBase2* forwardInfo{nullptr};
 
         RenderImage2* shadowImage[2]{nullptr , nullptr};
         RenderImage2* positionImage[2]{nullptr , nullptr};
@@ -205,7 +228,7 @@ namespace mox{
 
                 pipe = std::make_shared<ShaderPipe>(context);
                 {
-                    std::vector<DescriptorLayoutData> data(11);
+                    std::vector<DescriptorLayoutData> data(16);
                     data[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
@@ -220,6 +243,15 @@ namespace mox{
                     data[8] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[9] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[10] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+
+                    // the instances and the materials of Mesh2
+                    data[11] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[12] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+
+                    // the lamps of the tiles
+                    data[13] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[14] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[15] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -242,7 +274,7 @@ namespace mox{
 
                 {
                     for(auto id : {0  ,1}){
-                        std::vector<DescriptorData2> data(11);
+                        std::vector<DescriptorData2> data(16);
                         data[0] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
                         data[1] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
                         data[2] = DescriptorData2::createData(sunBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
@@ -257,6 +289,13 @@ namespace mox{
                         data[8] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0);
                         data[9] = DescriptorData2::createData(positionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 9 , 0);
                         data[10] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 10 , 0);
+
+                        data[11] = DescriptorData2::createData(Mesh2::instanceLayoutBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 11 , 0);
+                        data[12] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 12 , 0);
+
+                        data[13] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
+                        data[14] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 14 , 0);
+                        data[15] = DescriptorData2::createData(forwardInfo , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 15 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
@@ -303,6 +342,9 @@ namespace mox{
             rawFeaturePtr = std::exchange(input.rawFeaturePtr , nullptr);
             sunBuffer = std::exchange(input.sunBuffer , nullptr);
             lightBuffer = std::exchange(input.lightBuffer , nullptr);
+            tileLightIndices = std::exchange(input.tileLightIndices , nullptr);
+            lightCountPerTile = std::exchange(input.lightCountPerTile , nullptr);
+            forwardInfo = std::exchange(input.forwardInfo , nullptr);
 
             for(const auto i : {0 , 1}){
                 ReSTIRDIBuffer[i] = std::exchange(input.ReSTIRDIBuffer[i] , nullptr);
@@ -326,6 +368,9 @@ namespace mox{
             rawFeaturePtr = nullptr;
             sunBuffer = nullptr;
             lightBuffer = nullptr;
+            tileLightIndices = nullptr;
+            lightCountPerTile = nullptr;
+            forwardInfo = nullptr;
 
             for(const auto i : {0 , 1}){
                 ReSTIRDIBuffer[i] = nullptr;

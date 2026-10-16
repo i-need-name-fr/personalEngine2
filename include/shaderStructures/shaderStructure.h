@@ -320,11 +320,16 @@ struct ReservoirDI{
     uint32_t chosenIndex;
     float W;
     float weightSum;
+    // the light of ALL the candidates ( the lamps of the tile ) , simply summed : diffuse and specular are denoised by different denoisers , so they are two
+    alignas(16) glm::vec4 diffuseColor;
+    alignas(16) glm::vec4 specularColor;
 #else
     uint M;
     uint chosenIndex;
     float W;
     float weightSum;
+    float4 diffuseColor;
+    float4 specularColor;
 
     void update(uint lightIndex, float w, float randomValue){
         weightSum += w;
@@ -450,8 +455,11 @@ struct GeneralFeatures{
     float IndirectShare;
     float maxDepth;
 
-    // it is the last one : the fields before it keep their offsets
     uint32_t RayQuerySunSampleCount;
+
+    // ReSTIR DI of the LightPass : 1 - the best lamp of the tile is chosen ( the shadows go to it ) , 0 - all the lamps of the tile are added up .
+    // it is the last one : the fields before it keep their offsets
+    uint32_t ReSTIR;
 #else
 
     uint AO;
@@ -481,6 +489,8 @@ struct GeneralFeatures{
     float maxDepth;
 
     uint RayQuerySunSampleCount;
+
+    uint ReSTIR;
 
 #endif
 };

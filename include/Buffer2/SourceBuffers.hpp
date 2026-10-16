@@ -121,11 +121,15 @@ namespace mox{
                     info.context = context;
                     info.size = sizeof(ReservoirDI) * context->sc->extent.width * context->sc->extent.height;
                     info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-
+                    ReservoirDI di{};
+                    di.chosenIndex = 9999;
+                    
+                    di.M = 0;
+                    di.W = 0.0f;
+                    di.weightSum = 0.0f;
+                    std::vector<ReservoirDI> data(context->sc->extent.width * context->sc->extent.height , di );
                     ReSTIRDIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info);
-
                     info.size = sizeof(ReservoirGI) * context->sc->extent.width * context->sc->extent.height;
-
                     ReSTIRGIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info);
                 }
 
@@ -151,4 +155,6 @@ namespace mox{
             return {};
         }
     };
+
+    using pSourceBuffers = std::shared_ptr<SourceBuffers>;
 }

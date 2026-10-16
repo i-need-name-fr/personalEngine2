@@ -201,16 +201,10 @@ namespace mox{
             manager = nullptr;
         }
 
-        inline static void updateMeshData() noexcept{
-            if(!needsUpdate) return;
-            LUT_buffer->recordData(translateToSpan(LUTs));
-            MeshBuffer->recordData(translateToSpan(totalMeshesData));
-            instanceBuffer->recordData(translateToSpan(instances));
-            instanceLayoutBuffer->recordData(translateToSpan(totalInstanceLayouts));
-
-            // setting the cmd buffer
+        // one draw command for every instance that is drawn ( the order is the order of the instances ) , totalCmdCount is their number
+        inline static std::vector<VkDrawIndexedIndirectCommand> buildIndirectCommands() noexcept{
             std::vector<VkDrawIndexedIndirectCommand> cmds{};
-            uint32_t i = 0u; 
+            uint32_t i = 0u;
             for(auto& instance: totalInstanceLayouts){
                 auto mesh = totalMeshesData[instance.meshDataIndex];
                 if(!instance.needsToBeDraw) continue ;
@@ -225,8 +219,42 @@ namespace mox{
                 i++;
                 cmds.push_back(cmd);
             }
-            totalCmdCount = cmds.size();
+            totalCmdCount = static_cast<uint32_t>(cmds.size());
+            return cmds;
+        }
+
+        // the first upload ( End ) : nothing is in flight yet , so the CPU can write the memory itself
+        inline static void updateMeshData() noexcept{
+            if(!needsUpdate) return;
+            LUT_buffer->recordData(translateToSpan(LUTs));
+            MeshBuffer->recordData(translateToSpan(totalMeshesData));
+            instanceBuffer->recordData(translateToSpan(instances));
+            instanceLayoutBuffer->recordData(translateToSpan(totalInstanceLayouts));
+
+            auto cmds = buildIndirectCommands();
             indirectCmdBuffer->recordData(translateToSpan(cmds));
+
+            needsUpdate = false;
+        }
+
+        // every frame ( moved matrices , added or deleted instances ) : the data goes into the command buffer , like the buffers of updateData .
+        // the CPU does not touch the memory that the GPU may still read ( up to frames_in_flight frames ) : the update is made at its place of the queue
+        // and the barriers of updateBufferCmd wait for the reads of the previous frames
+        inline static void updateMeshData(VkCommandBuffer& cmd) noexcept{
+            if(!cmd) return;
+            std::lock_guard<std::mutex> guard(m);
+            if(!needsUpdate) return;
+
+            constexpr VkAccessFlags2 read = VK_ACCESS_2_SHADER_READ_BIT;
+            constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+            LUT_buffer->updateBufferCmd(cmd , translateToSpan(LUTs) , read , stage);
+            MeshBuffer->updateBufferCmd(cmd , translateToSpan(totalMeshesData) , read , stage);
+            instanceBuffer->updateBufferCmd(cmd , translateToSpan(instances) , read , stage);
+            instanceLayoutBuffer->updateBufferCmd(cmd , translateToSpan(totalInstanceLayouts) , read , stage);
+
+            auto cmds = buildIndirectCommands();
+            indirectCmdBuffer->updateBufferCmd(cmd , translateToSpan(cmds) , VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | read , stage);
 
             needsUpdate = false;
         }

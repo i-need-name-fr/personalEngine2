@@ -37,20 +37,21 @@ namespace mox{
             return data;
         }
 
-        ShaderPipe(VulkanContext* context){
-            if(!context){
+        ShaderPipe(VulkanContext* info){
+            if(!info){
                 const ErrorDataType error(MOX_ERROR_TYPE_FAILED_CREATION , "failed to create shaderPipe , since the context is nullptr");
                 engineLogger(&error);
                 THROW_MESSAGE;
             }
 
-            if(!context->logicalDevice){
+            if(!info->logicalDevice){
                 const ErrorDataType error(MOX_ERROR_TYPE_FAILED_CREATION , "failed to create shaderPipe , since the context logical device is nullptr");
                 engineLogger(&error);
                 THROW_MESSAGE;
             }
             
-            device = context->logicalDevice->device;
+            device = info->logicalDevice->device;
+            this->context = info;
         }
 
         void addDescriptorBuffer2(const DescriptorBuffer2::CreateInfo &info){
@@ -74,6 +75,32 @@ namespace mox{
             catch(std::exception &e){throw std::runtime_error("failed to create shader");}
         }
 
+        [[nodiscard]] ErrorDataOutput<void> createLayouts(std::vector<DescriptorLayout::CreateInfo> layouts , std::vector<VkPushConstantRange> ranges , VkShaderStageFlags stage) noexcept{
+            try{
+
+                for(auto& l :layouts){
+                    addDescriptorLayout(l);
+                }
+
+                std::vector<DescriptorLayout*> data;
+
+                for(auto& l : descriptorLayouts){
+                    data.push_back(l.get());
+                }
+
+                PipelineLayout::CreateInfo info{};
+                info.context = context;
+                info.layouts = data;
+                info.ranges = ranges;
+
+                layout = std::make_shared<PipelineLayout>(info);
+            }
+            catch(std::exception&e){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create layouts for shader pipe"});
+            }
+            return{};
+        }
+
         ~ShaderPipe(){
             cleanPipe();
         }
@@ -86,6 +113,7 @@ namespace mox{
             shaders.clear();
             buffers.clear();
             device = nullptr;
+            context = nullptr;
         }
 
         void performCopy(ShaderPipe&& input) noexcept{
@@ -97,10 +125,11 @@ namespace mox{
             buffers = std::move(input.buffers);
             layout = std::move(input.layout);
             device = std::exchange(input.device , nullptr);
+            context = std::exchange(input.context, nullptr);
         }
 
         VkDevice device = nullptr;
-
+        VulkanContext* context;
     };
 
     using pShaderPipe = std::shared_ptr<ShaderPipe>;
