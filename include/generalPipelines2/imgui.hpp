@@ -286,9 +286,11 @@ namespace mox{
             if(std::memcmp(&before , &after , sizeof(T)) == 0) return;
 
             T value = after;
-            // the CPU copy is what the next frame reads ( and what the passes read on the CPU ) , the GPU copy is what the shaders read
+            // the buffer is HOST_VISIBLE | HOST_COHERENT : the CPU copy IS the memory that the shaders read , so one write is enough . a vkCmdUpdateBuffer on top of it
+            // is executed later , when the GPU gets to this frame , and it would put the old value back over what the CPU wrote in a newer frame
+            // ( the checkbox of the fog jumped back , the mode of the view came late ) . the write is visible to the next submit
             buffer->recordData(&value , sizeof(T));
-            buffer->updateBufferCmd(cmd , value , VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_UNIFORM_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+            (void)cmd;
         }
 
         void commitData(VkCommandBuffer& cmd , const Data& before , const Data& after) noexcept{
@@ -994,6 +996,11 @@ namespace mox{
             ImGui::TextDisabled("Direct %.0f%%  /  indirect %.0f%%" , data.general.directWeight * 100.0f , data.general.indirectWeight * 100.0f);
 
             ImGui::SliderFloat("Exposure" , &data.general.exposure , 0.1f , 8.0f , "%.2f");
+
+            // the speed of the camera ( WASD / Space / Shift ) lives in the Player , not in a buffer : it is changed directly
+            if(auto& user = inputData.context->user; user){
+                ImGui::SliderFloat("Camera speed" , &user->speed , user->minSpeed , user->maxSpeed , "%.1f m/s");
+            }
 
             // ===== sun =====
             ImGui::SeparatorText("Sun");

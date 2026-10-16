@@ -76,7 +76,10 @@ namespace mox{
                 cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 1 , sets , offset);
             }
 
-            vkCmdDispatch(cmd , (inputData.generalData.TILE_TOTAL_AMOUNT + 256 - 1) / 256 , 1 ,1 );
+            // one workgroup per tile ( forward.hlsl : groupId.xy is the tile , its 256 threads walk over the lights ) : the grid is TILE_PER_ROW x rows
+            const uint32_t perRow = std::max(inputData.generalData.TILE_PER_ROW , 1u);
+            const uint32_t rows = (inputData.generalData.TILE_TOTAL_AMOUNT + perRow - 1) / perRow;
+            vkCmdDispatch(cmd , perRow , rows , 1);
 
             shaders[0] = nullptr;
             cmdBindShadersEXT(cmd , 1 , stages , shaders);
@@ -110,7 +113,7 @@ namespace mox{
 
                 VkDependencyInfo info{};
                 info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                info.bufferMemoryBarrierCount = 5;
+                info.bufferMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
                 info.imageMemoryBarrierCount = 0;
                 info.pMemoryBarriers = nullptr;
                 info.pBufferMemoryBarriers = barriers.data();

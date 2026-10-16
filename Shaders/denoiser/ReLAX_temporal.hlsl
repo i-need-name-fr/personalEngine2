@@ -120,7 +120,8 @@ void main(uint3 id : SV_DispatchThreadID){
     float2 virtualUV = ComputeVirtualMotionVector(virtualPos , generalBuffer.prevViewProj , uv);
     float2 prevUV = uv - virtualUV;
 
-    const uint2 prevCoord = uint2(clamp(prevUV * float2(screenSize) - 0.5f , float2(0.0f , 0.0f) , float2(screenSize) - 1.0f));
+    // rounded to the nearest pixel of the last frame ( the plain conversion to uint cut the number off , always towards the top left : the history drifted )
+    const uint2 prevCoord = uint2(round(clamp(prevUV * float2(screenSize) - 0.5f , float2(0.0f , 0.0f) , float2(screenSize) - 1.0f)));
 
     // the history is read only when it is on the screen
     bool valid = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f)));

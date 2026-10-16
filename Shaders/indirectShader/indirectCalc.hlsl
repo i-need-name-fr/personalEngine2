@@ -1,42 +1,42 @@
 #include "../../include/ShaderStructures/ShaderStructure.h"
 [[vk::image_format("rgba32f")]]
-[[vk::binding(1 , 0)]] RWTexture2D<float4> positionImage;
+[[vk::binding(0 , 0)]] RWTexture2D<float4> positionImage;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(2 , 0)]] RWTexture2D<float4> normalImage;
+[[vk::binding(1 , 0)]] RWTexture2D<float4> normalImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(3 , 0)]] RWTexture2D<float> depthImage;
+[[vk::binding(2 , 0)]] RWTexture2D<float> depthImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(4 , 0)]] RWTexture2D<float> roughnessImage;
+[[vk::binding(3 , 0)]] RWTexture2D<float> roughnessImage;
 
 [[vk::image_format("rgba32f")]]
-[[vk::binding(5 , 0)]] RWTexture2D<float4> viewImage;
+[[vk::binding(4 , 0)]] RWTexture2D<float4> viewImage;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(6 , 0)]] RWTexture2D<float4> diffuseImage;
+[[vk::binding(5 , 0)]] RWTexture2D<float4> diffuseImage;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(7 , 0)]] RWTexture2D<float4> specularImage;
+[[vk::binding(6 , 0)]] RWTexture2D<float4> specularImage;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(8 , 0)]] RWTexture2D<float4> indirectImage;
+[[vk::binding(7 , 0)]] RWTexture2D<float4> indirectImage;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(9 , 0)]] RWTexture2D<float4> prevHDRImage;
+[[vk::binding(8 , 0)]] RWTexture2D<float4> prevHDRImage;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(10 , 0)]] RWTexture2D<float4> albedoImage;
+[[vk::binding(9 , 0)]] RWTexture2D<float4> albedoImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(11 , 0)]] RWTexture2D<float> metallicImage;
+[[vk::binding(10 , 0)]] RWTexture2D<float> metallicImage;
 
-[[vk::binding(12 , 0)]] TextureCube skybox;
-[[vk::binding(13 , 0)]] SamplerState typicalSampler;
+[[vk::binding(11 , 0)]] TextureCube skybox;
+[[vk::binding(12 , 0)]] SamplerState typicalSampler;
 
-[[vk::binding(14 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
-[[vk::binding(15 , 0)]] ConstantBuffer<GeneralFeatures> features;
+[[vk::binding(13 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
+[[vk::binding(14 , 0)]] ConstantBuffer<GeneralFeatures> features;
 
 
 // the farther the thing that gives the light is ( the hit distance ) , the less it matters : 1 at the surface , 0.5 at
@@ -121,7 +121,7 @@ float3 computeSSGI(uint2 currentPixel , out float visibility){
 
     // random : 8 rays per pixel , the directions come from a seed of the pixel and the frame
     // ( the no random version used the points of a Hammersley set , see the commented line in the loop )
-    const uint SAMPLES = 8u;
+    const uint SAMPLES = 2u;
 
     float3 result = float3(0.0f , 0.0f , 0.0f);
     float distanceSum = 0.0f;
@@ -153,6 +153,8 @@ float3 computeSSGI(uint2 currentPixel , out float visibility){
             result += min(prevHDRImage[pPixel].xyz , float3(8.0f , 8.0f , 8.0f)) * indirectDistanceWeight(info.distance);
             // a ray that hit something does not reach the sky
             occlusion += indirectDistanceWeight(info.distance);
+        }else{
+            result += skybox.SampleLevel(typicalSampler , dir , 0).xyz * 0.4;
         }
 
         // a miss can report a huge distance , it must not blow the average up

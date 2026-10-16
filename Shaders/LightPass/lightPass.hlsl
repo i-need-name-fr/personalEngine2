@@ -166,7 +166,7 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
     return skyColor + disc * coverage;
 }
 
-static const bool USE_RESTIR = false;
+static const bool USE_RESTIR = true;
 
 float targetPdf_DI(uint lightIndex , GeneralObjectInfo info){
     const LightSource candidate = lightBuffer[lightIndex];
@@ -188,12 +188,6 @@ void finalizeReservoir_DI(inout ReservoirDI r , GeneralObjectInfo info){
     r.W = (p_hat > 1e-6f && r.M > 0u) ? r.weightSum / (float(r.M) * p_hat) : 0.0f;
 }
 
-uint SelectRandomLightIndex(uint totalLightsPerTile, inout uint seed)
-{
-    float r = rand(seed);   // твоя уже существующая RNG-функция, возвращает [0, 1)
-    return uint(r * float(totalLightsPerTile));   // масштабируем в нужный диапазон
-}
-
 // `lightOffset` is already `tileIndex * MAX_LIGHTS` (see findLightIndices),
 // i.e. the base slot of this tile's list inside `tileLightIndices`. This used
 // to (1) multiply that offset by MAX_LIGHTS again, producing an index far
@@ -209,16 +203,22 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
     res.weightSum = 0.0f;
     res.chosenIndex = 0;
     if(lightIndicesCount == 0u) return;
-    // 64 candidates ( MAX_LIGHTS ) evaluated the whole BRDF 64 times per pixel : the LightPass took ~200 ms at 2560x1440 with 4 lights .
-    // a handful of candidates is what RIS needs , the temporal and spatial reuse below collect the rest over the frames
-    const uint candidateCount = min(2u * lightIndicesCount , 16u);
-    for(uint i = 0 ; i < candidateCount ;i++){
-        // two independent draws: one picks the light, one drives the update
-        const uint slot = lightOffset + SelectRandomLightIndex(lightIndicesCount , seed);
-        const uint currentLightIndex = tileLightIndices[slot];
-        const float w = targetPdf_DI(currentLightIndex ,info);
-        res.update(currentLightIndex , w , rand(seed));
+
+    // no random : every light of the tile is visited and the best one for this pixel ( the biggest p_hat ) is kept . the old version picked the candidates
+    // at random , and both the candidates and the winner flipped from pixel to pixel and from frame to frame ( flashes ) .
+    // weightSum is the p_hat of ALL the lights : finalizeReservoir_DI gives W = sum / p_hat( best ) , so the light of the weaker lamps is not lost , it is
+    // carried by the best lamp ( the brightness is the same as the sum of the lamps , the colour and the direction are the ones of the best lamp )
+    float bestPdf = -1.0f;
+    for(uint i = 0 ; i < lightIndicesCount ; i++){
+        const uint lightIndex = tileLightIndices[lightOffset + i];
+        const float p_hat = targetPdf_DI(lightIndex , info);
+        res.weightSum += p_hat;
+        if(p_hat > bestPdf){
+            bestPdf = p_hat;
+            res.chosenIndex = lightIndex;
+        }
     }
+    res.M = 1u;
     finalizeReservoir_DI(res , info);
 }
 
@@ -298,10 +298,10 @@ ReservoirDI ReSTIR_DI_generation(uint2 currentPixel , float2 prevUV , inout uint
                                           float2(0.0f , 0.0f) ,
                                           float2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
 
+    // every light is visited in generateReservoir_DI , so there is nothing to collect from the last frame or from the neighbours . ( the reuse picks between
+    // the reservoirs by a random number : it would bring the flashes back )
     ReservoirDI r;
     generateReservoir_DI(r , seed , info , lightIndicesCount , lightOffset);
-    if(validUV) temporalReuse_DI(r , seed , prevCoords ,info);
-    spatialReuse_DI(r , seed , currentPixel , info);
 
     const uint M_CAP = 500u;
     if(r.M > M_CAP){
@@ -343,10 +343,7 @@ void main(uint3 id : SV_DispatchThreadID){
         const float roughness = roughnessImage[id.xy].x;
         const float3 albedo = albedoImage[id.xy].xyz;
 
-        float shadow = filteredShadowImage[id.xy].x;
-        float AO = filteredAmbientOcclusion[id.xy].x;
-        shadow = pow(shadow , features.shadowThickness);
-        AO = pow(AO , features.AO_intens);
+        // the shadows and the occlusion are not applied here : PostProcess multiplies the picture by them ( after the denoisers )
 
         uint lightCount;
         uint lightOffset;
@@ -448,8 +445,8 @@ void main(uint3 id : SV_DispatchThreadID){
         }
 
         // the balance of the picture ( ImGui : indirect share ) : the lamps are the direct light
-        diffuse *= generalBuffer.directWeight * shadow * AO;
-        specular *= generalBuffer.directWeight * shadow * AO;
+        diffuse *= generalBuffer.directWeight;
+        specular *= generalBuffer.directWeight;
 
         // demodulation : PostProcess multiplies the denoised diffuse by the same max( albedo , 0.02 )
         diffuse /= max(albedo , 0.02f);

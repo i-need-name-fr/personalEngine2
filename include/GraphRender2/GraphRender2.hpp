@@ -103,6 +103,11 @@ namespace mox{
             }
 
             {
+                const auto result = processInputParameter(data->fogData.get() , "fogData");
+                if(!result.has_value()) return result;
+            }
+
+            {
                 const auto result = processInputParameter(data->ReSTIRDIBuffer[0].get() , "ReSTIRDIBuffer_0");
                 if(!result.has_value()) return result;
             }

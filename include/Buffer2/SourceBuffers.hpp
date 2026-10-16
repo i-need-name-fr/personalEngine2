@@ -27,6 +27,8 @@ namespace mox{
         pDeviceReadableBuffer sunBuffer{nullptr};
         pDeviceReadableBuffer lightBuffer{nullptr};
         pDeviceReadableBuffer luminanceHistory{nullptr};
+        // FogVolume : read by fogCalc / PostProcess , edited by the ImGuiPipe ( the CPU reads it )
+        pDeviceReadableBuffer fogData{nullptr};
 
         pGeneralBuffer2<BufferType::Device , true> forwardInfo{nullptr};
         // since we dont really care about reading it 
@@ -51,6 +53,12 @@ namespace mox{
             sunBuffer = nullptr;
             lightBuffer = nullptr;
             luminanceHistory = nullptr;
+            fogData = nullptr;
+            skyBuffer = nullptr;
+            ReSTIRDIBuffer[0] = nullptr;
+            ReSTIRDIBuffer[1] = nullptr;
+            ReSTIRGIBuffer[0] = nullptr;
+            ReSTIRGIBuffer[1] = nullptr;
             
             tileLightIndices = nullptr;
             lightCountPerTile = nullptr;
@@ -91,6 +99,9 @@ namespace mox{
 
                 info.size = sizeof(SkyViewData);
                 skyBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
+
+                info.size = sizeof(FogVolume);
+                fogData = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
 
                 ForwardPlusInfo data{};
                 data.TILE_SIZE = 16;

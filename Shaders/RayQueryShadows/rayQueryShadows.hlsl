@@ -108,6 +108,7 @@ void main(uint3 id : SV_DispatchThreadID){
             visible += (shadowTraceRay(dir , offset , dist)) ? 0.0f : 1.0f;
         }
         lightShadow = visible / float(lightSamples);
+        lightShadow = pow(lightShadow , 2.0f);
     }
 
     // now the sun shadow
@@ -129,6 +130,7 @@ void main(uint3 id : SV_DispatchThreadID){
             visible += (shadowTraceRay(dir , sunOrigin , 1000.0f)) ? 0.0f : 1.0f;
         }
         sunShadow = visible / float(sunSamples);
+        
     }
 
     const float rawShadow = lerp(lightShadow , sunShadow , features.light_sun_Proportion);

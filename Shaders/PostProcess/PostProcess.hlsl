@@ -29,51 +29,43 @@
 [[vk::binding(10 , 0)]] SamplerState samp;
 [[vk::binding(11 , 0)]] Texture2DArray fogImage;
 
-// since the diffuse already contains shadows / AO  , the only thing we should do is multiply the diffuse with albedo and thats kinda all
+[[vk::image_format("r32f")]]
+[[vk::binding(12 , 0)]] RWTexture2D<float> filteredShadowImage;
 
-// ---------------------------------------------------------------- the fog
-// the froxel volume of fogCalc covers the z depth from FOG_NEAR to FOG_FAR ( ShaderStructure.h : the same numbers as in fogCalc ) , its slices are spread
-// logarithmically . fogCalc writes the light that the slice scatters ( rgb ) and its extinction ( a ) , it does not accumulate : the accumulation along
-// the ray is done here . behind FOG_FAR and in the sky the fog goes on with the formula of the height fog
+[[vk::image_format("r32f")]]
+[[vk::binding(13 , 0)]] RWTexture2D<float> filteredAmbientOcclusion;
 
-// the sky has no depth : the fog is taken for a ray of this length ( z depth , meters )
+// the cube of the atmosphere ( AtmosphereScattering ) : the ambient light of the sky
+[[vk::binding(14 , 0)]] TextureCube skybox;
+
+[[vk::image_format("rgba16f")]]
+[[vk::binding(15 , 0)]] RWTexture2D<float4> normalImage;
+
 static const float FOG_SKY_DISTANCE = 20000.0f;
 
-// the z depth of the border of a slice ( k = 0 is the near border of the volume , k = sliceCount is the far one )
 float fogSliceDepth(const float k , const float sliceCount){
     return FOG_NEAR * pow(FOG_FAR / FOG_NEAR , k / sliceCount);
 }
 
-// the optical depth ( the integral of the density ) of the height fog along a piece of a ray :
-//      density( y ) = fogData.density * exp( -heightFallOff * max( y - fogBaseHeight , 0 ) )
-// it is constant under the base height and falls exponentially above it , so the ray is cut where it crosses the base height and both pieces
-// have a closed form : constant * length , and ( exp( -k y1 ) - exp( -k y2 ) ) / ( k * dy ) for the exponential one
-// origin - where the piece starts , direction - normalized , rayLength - the length of the piece ( meters , along the ray )
 float ComputeHeightFog(float3 origin , float3 direction , float rayLength){
     const float falloff = fogData.heightFallOff;
     const float density = fogData.density;
     const float y0 = origin.y - fogData.fogBaseHeight;
     const float dy = direction.y;
 
-    // no falloff : the same density at every height
     if(falloff < 1e-6f) return density * rayLength;
 
-    // a horizontal ray : the density does not change along it
     if(abs(dy) < 1e-5f){
         return density * exp(-falloff * max(y0 , 0.0f)) * rayLength;
     }
 
-    // where the ray crosses the base height ( it can be behind the start or behind the end )
     const float tCross = clamp(-y0 / dy , 0.0f , rayLength);
 
-    // the part under the base height and the part above it
     float underStart , underEnd , aboveStart , aboveEnd;
     if(dy > 0.0f){
-        // goes up : under until the crossing , above after it
         underStart = 0.0f;   underEnd = tCross;
         aboveStart = tCross; aboveEnd = rayLength;
     }else{
-        // goes down : above until the crossing , under after it
         aboveStart = 0.0f;   aboveEnd = tCross;
         underStart = tCross; underEnd = rayLength;
     }
@@ -86,12 +78,7 @@ float ComputeHeightFog(float3 origin , float3 direction , float rayLength){
     return max(opticalDepth , 0.0f);
 }
 
-// the fog between the camera and the thing that is linearDepth meters away ( z depth ) in the direction of rayDirection :
-//      color of the thing * what passes through the fog + what the fog scatters on the way
-// the froxel volume is accumulated slice by slice from the camera to the depth of the pixel : one step of a slice is
-//      T *= exp( -sigmaT * length ) ,  S += T * ( scatter - scatter * exp( -sigmaT * length ) ) / sigmaT
 float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 uv){
-    // the volume is made in the z depth , the ray of a pixel off the center of the screen is longer by 1 / cos of the angle to the axis of the camera
     const float cosAxis = max(dot(rayDirection , generalBuffer.playerDirection) , 1e-3f);
     const float rayScale = 1.0f / cosAxis;
 
@@ -101,7 +88,6 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
     float transmittance = 1.0f;
     float3 scattered = float3(0.0f , 0.0f , 0.0f);
 
-    // 1 : the froxel volume , up to the pixel or up to the end of the volume
     const float volumeEnd = min(linearDepth , FOG_FAR);
 
     [loop]
@@ -110,10 +96,8 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
         if(near >= volumeEnd) break;
         const float far = min(fogSliceDepth(float(k + 1u) , float(sliceCount)) , volumeEnd);
 
-        // the length of the ray inside of this slice
         const float length = (far - near) * rayScale;
 
-        // the slice is read at its own layer : the layers of an array are not filtered between each other , the xy are filtered
         const float4 slice = fogImage.SampleLevel(samp , float3(uv , float(k)) , 0);
         const float sigmaT = slice.a;
         const float3 scatter = slice.rgb;
@@ -127,14 +111,12 @@ float3 applyFog(float3 color , float linearDepth , float3 rayDirection , float2 
 
     float3 result = color * transmittance + scattered;
 
-    // 2 : behind the volume ( and in the sky ) the fog goes on by the formula of the height fog , it has no lamps there : only its own glow
     if(linearDepth > FOG_FAR){
         const float3 origin = generalBuffer.playerPosition + rayDirection * (FOG_FAR * rayScale);
         const float rayLength = (linearDepth - FOG_FAR) * rayScale;
 
         const float opticalDepth = ComputeHeightFog(origin , rayDirection , rayLength);
         const float farTransmittance = exp(-opticalDepth);
-        // the glow scatters albedo * color per unit of the extinction : the integral over the piece is albedo * color * ( 1 - T )
         const float3 farScattered = fogData.albedo * fogData.color * (1.0f - farTransmittance);
 
         result = result * farTransmittance + farScattered;
@@ -180,11 +162,17 @@ void main(uint3 id : SV_DispatchThreadID){
 
     const float3 diffuse = diffuseImage[id.xy].xyz;
     const float3 specular = specularImage[id.xy].xyz;
-    const float3 indirect = indirectImage[id.xy].xyz * generalBuffer.indirectWeight;
     const float3 albedo = max(albedoImage[id.xy].xyz , 0.02f);
     const float3 direct = (diffuse * albedo + specular);
     const float linearDepth = depthImage[id.xy].x;
-    float3 result = direct + indirect;
+    const float shadow = pow(filteredShadowImage[id.xy].x , features.shadowThickness);
+    const float AO = pow(filteredAmbientOcclusion[id.xy].x , features.AO_intens);
+    float3 result = direct * shadow * AO;
+
+    // the ambient light : the colour of the sky in the direction of the normal , times albedo
+    const float3 skyColor = skybox.SampleLevel(samp , normalImage[id.xy].xyz , 0).xyz;
+    const float3 ambient = skyColor * 0.1f * albedo;
+    result += ambient;
 
     if(features.currentMode == INDIRECT_MODE){
         // a debug view : no fog on it
