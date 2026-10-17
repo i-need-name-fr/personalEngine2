@@ -89,7 +89,7 @@ struct [raypayload] HitRayPayLoad{
 // material , the same normal map , the same parallax ) , so the secondary hit looks like the primary one
 
 // true : the normal maps are OpenGL style ( green up ) , false : DirectX style ( green down ) . THE SAME VALUE AS IN DeferredRender/fragmentShader.hlsl
-static const bool NORMAL_MAP_OPENGL = true;
+static const bool NORMAL_MAP_OPENGL = false;
 
 struct HitSurface{
     float3 normal;

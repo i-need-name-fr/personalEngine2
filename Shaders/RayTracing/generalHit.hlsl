@@ -394,7 +394,7 @@ float calculateShadows(float3 position , float3 direction , float maxDistance){
     ShadowRayPayLoad shadow;
     shadow.inShadow = true;
     TraceRay(TLAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_NON_OPAQUE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
-        const float data = (shadow.inShadow )? 0.0f  : 1.0f;
+        const float data = (shadow.inShadow )? 0.20f  : 1.0f;
     return data;
 }
 
@@ -542,8 +542,10 @@ namespace ReSTIRGI{
         return evalDiffuse(info.albedo , info.N , L , info.metallic);
     }
 
-    float3 computeLightAt(HitRayPayLoad info, inout uint seed){
-        if(!info.didHit) return info.albedo;
+    // next task is to fix the sun shadows
+    float3 computeLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic){
+        // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear
+        if(!info.didHit) return info.albedo * (1.0f - roughness) * 0.01f * xMetallic;
 
         uint2 pixel = DispatchRaysIndex().xy;
         uint lightCount , lightOffset;
@@ -564,12 +566,18 @@ namespace ReSTIRGI{
         const float dist = length(L);
         L = normalize(L);
         computeLight(data ,L , diffuse , specular );
-
+        float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
+        // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
+        const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , -sunBuffer.direction , 1000.0f);
+        if(sunShadow == 1.0f){
+            computeLight(data , -sunBuffer.direction , sunDiffuse , sunSpecular);
+        }
         float3 result;
         const float NdotL = saturate(dot(data.N , L));  
         float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , dist);
         float window = lightAttenuation(light, dist);
-        result = NdotL * light.diffuse * (diffuse + specular) * shadow * lightCount * window;
+        result = NdotL * light.diffuse * (diffuse + specular) * shadow * lightCount * window ;
+        result += (sunDiffuse + sunSpecular) * clamp(dot(data.N , -sunBuffer.direction),  0.0f , 1.0f) * sunShadow;
         return result;
     }
 
@@ -590,7 +598,7 @@ namespace ReSTIRGI{
 
         TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , RT_HITGROUP_HITINFO , 0 , RT_MISS_HITINFO , ray , load);
 
-        const float3 brdf = computeLightAt(load,  seed);
+        const float3 brdf = computeLightAt(load,  seed, info.metallic , info.roughness);
 
         res.radiance = brdf;
         res.sampleNormal = load.normal;
@@ -693,8 +701,13 @@ float3 traceRayReflection(const float3 direction , const float3 position , out f
         return load.lightInfo.diffuse;
     }
 
-    return (load.lightInfo.diffuse + load.lightInfo.specular) * load.lightInfo.shadow + load.lightInfo.indirect;
+    // the diffuse of the hit is demodulated ( divided by max( albedo , 0.02 ) ) and holds the indirect light too : the albedo brings it back , the indirect
+    // light is taken out of it and put back without the shadow ( the shadow belongs to the direct light only , the indirect light has its own visibility inside )
+    const float3 indirect = load.lightInfo.indirect;
+    const float3 directDiffuse = max(load.lightInfo.diffuse * max(load.pixelInfo.albedo , 0.02f) - indirect , 0.0f);
+    return (directDiffuse + load.lightInfo.specular) * load.lightInfo.shadow + indirect;
 }
+
 void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const uint2 pixel){
     uint2 size = DispatchRaysDimensions().xy;
     float2 uv = (float2(pixel) + 0.5) / float2(size);
@@ -723,8 +736,8 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         const float3 L = normalize(-sunBuffer.direction);
         const float sunNdotL = saturate(dot(info.N , L));
         const float3 diff = sunBuffer.diffuse;
-        float3 diffuse;
-        float3 specular;
+        float3 diffuse = 0.0f;
+        float3 specular = 0.0f;
         computeLight(info , L , diffuse , specular);
         if(features.RayQuerySunSampleCount > 0 ){
             sunShadow =0.0f;
@@ -739,8 +752,8 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
 
             sunShadow /= float(features.RayQuerySunSampleCount);
         }
-        totalDiffuse += diffuse * diff * sunNdotL * skyBuffer.sunCosZenith;
-        totalSpecular += specular * diff * sunNdotL * skyBuffer.sunCosZenith;
+        totalDiffuse += diffuse * diff * sunNdotL;
+        totalSpecular += specular * diff * sunNdotL;
     }
 
     {
@@ -760,9 +773,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 const float d = length(L);
                 L = normalize(L);
                 float shadow = 0.0f;
-                // the shadow of a lamp fades out beyond its radius ( lightShadowReach : 1 inside of the radius , 0 at 1.5 radius ) instead of ending with a jump .
-                // the weight has no window of the radius any more : the window is in the reach
-                const float reach = lightShadowReach(d , light.lightRadius);
+                // the shadow of a lamp fades out beyond its radius ( lightShadowReach : 1 inside of the radius , 0 at lightRadius * ( 1 + lightShadowFade ) ) instead
+                // of ending with a jump . the weight has no window of the radius any more : the window is in the reach
+                const float reach = lightShadowReach(d , light.lightRadius , features.lightShadowFade);
                 const float falloff = 1.0f / (1.0f + light.lightLinear * d + light.lightQuadratic * d * d);
                 // the weight fades with the reach too : a lamp that ends its fade leaves the mean without a jump
                 const float weight = luminance(light.diffuse) * falloff * saturate(dot(info.N , L)) * reach;
@@ -781,14 +794,13 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 visibleSum += weight * shadow;
             }
             if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
-            lightShadow = pow(lightShadow , 2.0f);
         }
 
         totalDiffuse += di.diffuseColor.xyz;
         totalSpecular += di.specularColor.xyz;
     }
-
-    totalShadow = lerp(lightShadow , sunShadow , features.light_sun_Proportion);
+    const float NonTotalShadow = 1.0f - (sunShadow + lightShadow);
+    totalShadow = 1.0f - NonTotalShadow;
     // temporal occlusion for shadow
     if(validUV){
         const float prevShadow = prevShadowImage[prevPixel].x;
@@ -811,10 +823,10 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         ReSTIRGI::sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
 
         if(pdf > 0.0f){
-            const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0) * calcMultiScatterFactor(F0 , info.roughness);
+            const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
             float distance;
             const float3 radiance = traceRayReflection(L , rayOrigin , distance);
-            const float3 reflectedColor = radiance * fcos / pdf;
+            const float3 reflectedColor = radiance * fcos / pdf * info.metallic;
             nextDir = L;
             totalSpecular += reflectedColor;
             specularHitDistance = distance;
@@ -834,14 +846,19 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             diffuseHitDistance = length(gi.samplePos - info.P);
         }
     }
+    totalDiffuse *= generalBuffer.directWeight;
+    totalSpecular *= generalBuffer.directWeight;
+    totalIndirect *= generalBuffer.indirectWeight;
 
-    // the REAL distances : the denoisers take the radius of the filter from them ( indirectDistanceWeight is a weight of a colour , not a distance )
+    const float3 albedoSafe = max(info.albedo , 0.02f);
+    const float3 diffuseOut = (totalDiffuse) / albedoSafe;
+    load.pixelInfo.albedo = info.albedo;
+
     load.lightInfo.diffuseHitDistance = min(diffuseHitDistance , 10000.0f);
-    // a reflected hit writes RayTCurrent() here after this function ( it has no reflection of its own , see traceRayReflection )
     if(!load.fromReflection) load.lightInfo.specularHitDistance = min(specularHitDistance , 10000.0f);
     load.pixelInfo.viewDir = info.P + nextDir * specularHitDistance;
     load.lightInfo.shadow = totalShadow;
-    load.lightInfo.diffuse = totalDiffuse;
+    load.lightInfo.diffuse = diffuseOut;
     load.lightInfo.indirect = totalIndirect;
     load.lightInfo.specular = totalSpecular;
     load.pixelInfo.motionVector = prevUV - uv;

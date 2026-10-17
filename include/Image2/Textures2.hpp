@@ -40,6 +40,9 @@ namespace mox{
 
             VkFormat format;
             std::string path;
+            // R32_SFLOAT only : -1 reads the picture as it is ( the grey value ) , 0 .. 3 takes ONE channel of the picture ( R , G , B , A ) as the value .
+            // a packed PBR map ( ARM : R occlusion , G roughness , B metallic ) is read this way : one file , a texture of its own for every channel
+            int32_t channel = -1;
         };
 
         inline static constexpr uint32_t MaxTextureCount = 9999u;
@@ -161,10 +164,27 @@ namespace mox{
             int width = 0 , height = 0;
             void* readData = nullptr;
             VkDeviceSize size =0;
-            if(data.format == VK_FORMAT_R32_SFLOAT){
+            if(data.format == VK_FORMAT_R32_SFLOAT && data.channel >= 0 && data.channel <= 3){
+                // one channel of an 8 bit picture , as it is written ( 0 .. 255 -> 0 .. 1 ) : stbi_loadf would also apply the gamma 2.2 of
+                // stbi_ldr_to_hdr to it , and the grey of one channel is not what a packed map holds
+                unsigned char* rgba = stbi_load(data.path.c_str() , &width , &height , nullptr , 4);
+                if(rgba){
+                    const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+                    // malloc : readData is released with stbi_image_free ( free ) below
+                    float* values = static_cast<float*>(malloc(pixels * sizeof(float)));
+                    if(values){
+                        for(size_t i = 0 ; i < pixels ; i++){
+                            values[i] = static_cast<float>(rgba[i * 4 + data.channel]) / 255.0f;
+                        }
+                    }
+                    stbi_image_free(rgba);
+                    readData = values;
+                }
+                size = static_cast<VkDeviceSize>(width) * height * 4;
+            }else if(data.format == VK_FORMAT_R32_SFLOAT){
                 readData = stbi_loadf(data.path.c_str() , &width , &height , nullptr , 1);
                 size = width * height * 4;
-            }else if(data.format == VK_FORMAT_R8G8B8A8_UNORM){
+            }else if(data.format == VK_FORMAT_R8G8B8A8_UNORM || data.format == VK_FORMAT_R8G8B8A8_SRGB){
                 readData = stbi_load(data.path.c_str() , &width , &height , nullptr , 4);
                 size = width * height * 4;
             }else if(data.format == VK_FORMAT_R8G8_UNORM){

@@ -134,9 +134,9 @@ void main(uint3 id : SV_DispatchThreadID){
             const float dist = length(L);
             L /= max(dist , 1e-4f);
 
-            // the shadow of a lamp fades out beyond its radius ( lightShadowReach : 1 inside of the radius , 0 at 1.5 radius ) instead of ending with a jump .
-            // the weight has no window of the radius any more : the window is in the reach
-            const float reach = lightShadowReach(dist , light.lightRadius);
+            // the shadow of a lamp fades out beyond its radius ( lightShadowReach : 1 inside of the radius , 0 at lightRadius * ( 1 + lightShadowFade ) ) instead
+            // of ending with a jump . the weight has no window of the radius any more : the window is in the reach
+            const float reach = lightShadowReach(dist , light.lightRadius , features.lightShadowFade);
             const float falloff = 1.0f / (1.0f + light.lightLinear * dist + light.lightQuadratic * dist * dist);
             // the weight fades with the reach too : a lamp that ends its fade leaves the mean without a jump
             const float weight = luminance(light.diffuse) * falloff * saturate(dot(N , L)) * reach;
@@ -183,8 +183,10 @@ void main(uint3 id : SV_DispatchThreadID){
         sunShadow = visible / float(sunSamples);
         
     }
-
-    const float rawShadow = lerp(lightShadow , sunShadow , features.light_sun_Proportion);
+    // will go like this , we dont lerp any more , since it wont work as i expected
+    // now it will work like in теория вероятности , where we dont calculate straight the event , we find what is the chances of it not happening ( 1.0f - event )
+    float nonShadow = 1.0f - (sunShadow + lightShadow);
+    float rawShadow = 1.0f - nonShadow;
     float finalShadow;
 
     const float4 clipPos = mul(generalBuffer.prevViewProj , float4(pos,  1.0f));

@@ -84,6 +84,7 @@ namespace mox{
             image("albedoImage" , ImageType::RenderImage2);
             image("metallicImage" , ImageType::RenderImage2);
             image("viewImage" , ImageType::RenderImage2);
+            image("pixelCheck" , ImageType::RenderImage2);
             image("skybox" , ImageType::Skybox2);
 
             buffer("generalBuffer");
@@ -144,6 +145,7 @@ namespace mox{
                 GraphSlot<RenderImage2>{"HDRImage_0" , &HDRImage[0]} , GraphSlot<RenderImage2>{"HDRImage_1" , &HDRImage[1]} ,
                 GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} , GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} ,
                 GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} , GraphSlot<RenderImage2>{"viewImage" , &viewImage} ,
+                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
                 GraphSlot<Skybox2>{"skybox" , &skybox} ,
                 GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"generalFeatures" , &features});
             if(!bound.has_value()) return bound;
@@ -162,7 +164,7 @@ namespace mox{
             constexpr VkAccessFlags2 write = VK_ACCESS_2_SHADER_WRITE_BIT;
             constexpr VkAccessFlags2 uniformRead = VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT;
 
-            std::array<VkImageMemoryBarrier2 , 12> imageBar;
+            std::array<VkImageMemoryBarrier2 , 13> imageBar;
 
             // the g buffer of this frame , the picture of the last frame and the sky : only read
             imageBar[0] = positionImage[id]->translateImage(read , stage);
@@ -179,6 +181,9 @@ namespace mox{
             imageBar[9] = diffuseImage[id]->translateImage(read | write , stage);
             imageBar[10] = specularImage[id]->translateImage(read | write , stage);
             imageBar[11] = indirectImage[id]->translateImage(read | write , stage);
+
+            // only read ( for now )
+            imageBar[12] = pixelCheck->translateImage(read , stage);
 
             std::array<VkBufferMemoryBarrier2 , 2> bufBar;
 
@@ -221,6 +226,7 @@ namespace mox{
         RenderImage2* albedoImage{nullptr};
         RenderImage2* metallicImage{nullptr};
         RenderImage2* viewImage{nullptr};
+        RenderImage2* pixelCheck{nullptr};
         Skybox2* skybox{nullptr};
 
         BufferBase2* generalBuffer{nullptr};
@@ -249,6 +255,7 @@ namespace mox{
             albedoImage = std::exchange(input.albedoImage , nullptr);
             metallicImage = std::exchange(input.metallicImage , nullptr);
             viewImage = std::exchange(input.viewImage , nullptr);
+            pixelCheck = std::exchange(input.pixelCheck , nullptr);
             skybox = std::exchange(input.skybox , nullptr);
 
             generalBuffer = std::exchange(input.generalBuffer , nullptr);
@@ -278,6 +285,7 @@ namespace mox{
             albedoImage = nullptr;
             metallicImage = nullptr;
             viewImage = nullptr;
+            pixelCheck = nullptr;
             skybox = nullptr;
 
             generalBuffer = nullptr;
@@ -303,7 +311,7 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(15);
+                    std::vector<DescriptorLayoutData> data(16);
 
                     // 0 .. 10 : the images of the g buffer and the result
                     for(uint32_t i = 0 ; i <= 10 ; i++){
@@ -316,6 +324,9 @@ namespace mox{
 
                     data[13] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[14] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+
+                    // pixelCheck
+                    data[15] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -339,7 +350,7 @@ namespace mox{
                 {
                     for(auto& id : {0 , 1}){
 
-                        std::vector<DescriptorData2> data(15);
+                        std::vector<DescriptorData2> data(16);
 
                         data[0] = DescriptorData2::createData(positionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
                         data[1] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
@@ -359,6 +370,8 @@ namespace mox{
 
                         data[13] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 13 , 0);
                         data[14] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 14 , 0);
+
+                        data[15] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 15 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

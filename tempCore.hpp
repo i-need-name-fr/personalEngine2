@@ -620,6 +620,7 @@ namespace mox{
                 features.ReSTIR = 1;
                 features.IndirectShare = 0.5f;
                 features.maxDepth = 50.0f;
+                features.lightShadowFade = 0.5f;
                 sbuf->features->recordData(std::span<GeneralFeatures>(&features , 1));
             }
 
@@ -665,6 +666,7 @@ namespace mox{
                 forwardData.TILE_PER_ROW = (context->sc->extent.width + forwardData.TILE_SIZE - 1) / forwardData.TILE_SIZE;
                 forwardData.TILE_TOTAL_AMOUNT = forwardData.TILE_PER_ROW * ((context->sc->extent.height + forwardData.TILE_SIZE - 1) / forwardData.TILE_SIZE);
                 forwardData.totalLights = LAMP_COUNT;
+                forwardData.lightShadowFade = 0.5f;   // the same as the default of features.lightShadowFade
                 sbuf->forwardInfo->recordData(std::span<ForwardPlusInfo>(&forwardData , 1));
             }
         }

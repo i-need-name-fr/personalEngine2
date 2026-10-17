@@ -283,6 +283,10 @@ namespace mox{
             std::string depthPath{NonTexturePath};
             std::string roughnessPath{NonTexturePath};
             std::string metallicPath{NonTexturePath};
+            // -1 : the map is a grey picture ( the value is read as it is ) , 0 .. 3 : the value is ONE channel of the picture ( R , G , B , A ) .
+            // a packed PBR map ( ARM : R occlusion , G roughness , B metallic ) is named in both paths with the channels 1 and 2 ( the occlusion is not read )
+            int32_t roughnessChannel{-1};
+            int32_t metallicChannel{-1};
 
             glm::vec3 color{0.0f};
             glm::vec3 emission{0.0f};
@@ -545,7 +549,9 @@ namespace mox{
                 Texture2::CreateInfo info{};
                 info.path = input.diffusePath;
                 info.context = context;
-                info.format = VK_FORMAT_R8G8B8A8_UNORM;
+                // the picture is sRGB encoded : with the SRGB format the sampler returns linear values , the lighting works in linear
+                // ( it was UNORM : the albedo went through the gamma of HDR_final a second time and came out washed out )
+                info.format = VK_FORMAT_R8G8B8A8_SRGB;
 
                 const auto result = manager->addTexture(info);
                 if(result.has_value()){
@@ -588,6 +594,7 @@ namespace mox{
                 info.path = input.roughnessPath;
                 info.context = context;
                 info.format = VK_FORMAT_R32_SFLOAT;
+                info.channel = input.roughnessChannel;
 
                 const auto result = manager->addTexture(info);
                 if(result.has_value()){
@@ -602,6 +609,7 @@ namespace mox{
                 info.path = input.metallicPath;
                 info.context = context;
                 info.format = VK_FORMAT_R32_SFLOAT;
+                info.channel = input.metallicChannel;
 
                 const auto result = manager->addTexture(info);
                 if(result.has_value()){

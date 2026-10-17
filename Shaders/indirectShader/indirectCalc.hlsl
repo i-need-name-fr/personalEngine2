@@ -38,6 +38,9 @@
 [[vk::binding(13 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
 [[vk::binding(14 , 0)]] ConstantBuffer<GeneralFeatures> features;
 
+[[vk::image_format("r32f")]]
+[[vk::binding(15 , 0)]] RWTexture2D<float> pixelCheck;
+
 
 // the farther the thing that gives the light is ( the hit distance ) , the less it matters : 1 at the surface , 0.5 at
 // INDIRECT_FALLOFF_DISTANCE , and then it falls like 1 / d^2 . SSDO and SSGI multiply what a sample brings by it
@@ -132,7 +135,7 @@ float3 computeSSGI(uint2 currentPixel , out float visibility){
     const float3 cameraPos = generalBuffer.playerPosition;
     const float3 V = normalize(generalBuffer.playerPosition - P);
     const float roughness = roughnessImage[currentPixel].x;
-
+    const float metallic = metallicImage[currentPixel].x;
     uint width , height;
     prevHDRImage.GetDimensions(width, height);
     const uint2 screenSize = uint2(width,  height);
@@ -154,7 +157,7 @@ float3 computeSSGI(uint2 currentPixel , out float visibility){
             // a ray that hit something does not reach the sky
             occlusion += indirectDistanceWeight(info.distance);
         }else{
-            result += skybox.SampleLevel(typicalSampler , dir , 0).xyz * 0.4;
+            result += skybox.SampleLevel(typicalSampler , dir , 0).xyz * 0.4 * (1.0f - metallic);
         }
 
         // a miss can report a huge distance , it must not blow the average up
@@ -233,7 +236,13 @@ void main(uint3 id : SV_DispatchThreadID){
     uint2 screenSize = uint2(width,  height);
     uint2 currentPixel = id.xy;
     if(any(currentPixel >= screenSize)) return;
-
+    if(pixelCheck[id.xy] != COLOR_PIXEL){
+        // we dont have to set hit distance , since the denoisers filter the skybox and non skybox pixels 
+        // so the only requirement is to return , since it wont filter the indirect image too 
+        // NOTE : however maybe we need to set at least float3(0.0f) , since denoisers need history
+        indirectImage[id.xy] = 0.0f;
+        return;
+    }
     // the sky : the G-buffer is cleared to 0 there , and diffuseImage holds the colour of the sky itself ( PostProcess copies it to the
     // picture ) . the indirect light is added into diffuseImage now , and for the albedo 0 of the sky it is divided by 0.02 :
     // the whole sky went white
@@ -269,26 +278,8 @@ void main(uint3 id : SV_DispatchThreadID){
     // the ambient light of the sky ( the irradiance cube , the same as in LightPass ) times what the pixel sees of the sky . in the
     // demodulated form : LightPass ambient = irradiance * kD * albedo , and the albedo comes back in PostProcess
     float3 skyLight = float3(0.0f , 0.0f , 0.0f);
-    if(features.indirectMode == SSGI_REQUIRED || features.indirectMode == SSR_REQUIRED){
-        const float3 N = normalImage[id.xy].xyz;
-        const float3 albedo = albedoImage[id.xy].xyz;
-        const float metallic = metallicImage[id.xy];
-        const float3 V = normalize(generalBuffer.playerPosition - positionImage[id.xy].xyz);
-        const float NdotV = max(dot(N , V) , 0.0001f);
-        const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , albedo , metallic);
-        const float3 F = F_fresnel(F0 , NdotV);
-        const float3 kD = (1.0f - F) * (1.0f - metallic);
-        skyLight = skybox.SampleLevel(typicalSampler , N , 0).xyz * kD * skyVisibility;
-    }
 
     // the balance of the picture : the indirect light has indirectWeight ( the direct one has directWeight in LightPass / PostProcess )
     // the debug picture of the indirect light shows all of it : the bounces , the reflections and the sky light
     indirectImage[id.xy] = float4((result + skyLight * albedoImage[id.xy].xyz) * generalBuffer.indirectWeight , 1.0f);
-
-    // the indirect light is noisy ( random samples per pixel ) , and PostProcess used to add it to the picture as it was : the denoisers only
-    // saw the direct light . added into diffuse here it is denoised with it ( .a of diffuse is the hit distance , it stays )
-    float4 diffuseWithIndirect = diffuseImage[id.xy];
-    // divided by the albedo like the direct diffuse ( PostProcess multiplies it back ) , so the sum is unchanged
-    diffuseWithIndirect.rgb += (result / max(albedoImage[id.xy].xyz , 0.02f) + skyLight) * generalBuffer.indirectWeight;
-    diffuseImage[id.xy] = diffuseWithIndirect;
 }

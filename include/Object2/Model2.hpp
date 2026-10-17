@@ -197,6 +197,28 @@ namespace mox{
             return NonTexturePath;
         }
 
+        // the packed PBR map next to the diffuse one ( Poly Haven : Foo_diff_1k.jpg -> Foo_arm_1k.jpg ) : R occlusion , G roughness , B metallic .
+        // the MTL cannot name the channels of a file , so the map is found by the name
+        [[nodiscard]] std::string findPackedARM(const std::string &diffusePath) const{
+            namespace fs = std::filesystem;
+            if(diffusePath == NonTexturePath) return NonTexturePath;
+
+            const fs::path diffuse(diffusePath);
+            const std::string stem = diffuse.stem().generic_string();
+
+            for(const char* token : {"_diff_" , "_diffuse_" , "_albedo_" , "_color_"}){
+                const std::size_t at = stem.find(token);
+                if(at == std::string::npos) continue;
+
+                const std::string packedStem = stem.substr(0 , at) + "_arm_" + stem.substr(at + std::string(token).size());
+                for(const char* extension : {".jpg" , ".png" , ".jpeg" , ".tga" , ".bmp"}){
+                    const std::string found = resolveIn(diffuse.parent_path() , packedStem + extension);
+                    if(found != NonTexturePath) return found;
+                }
+            }
+            return NonTexturePath;
+        }
+
         // an empty pointer in the value means "this assimp mesh is skipped" ( no triangles ) , it is not an error
         [[nodiscard]] ErrorDataOutput<std::shared_ptr<Mesh2>> processMesh(const aiMesh* mesh , const aiScene* scene , const CreateInfo &data) noexcept{
             if(!mesh) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to process the mesh of a model , since the assimp mesh is nullptr"});
@@ -267,6 +289,22 @@ namespace mox{
                 if(info.depthPath == NonTexturePath) info.depthPath = findSiblingMap(info.diffusePath , {"Displacement" , "Height" , "Depth" , "Disp"});
                 if(info.roughnessPath == NonTexturePath) info.roughnessPath = findSiblingMap(info.diffusePath , {"Roughness" , "Rough"});
                 if(info.metallicPath == NonTexturePath) info.metallicPath = findSiblingMap(info.diffusePath , {"Metallic" , "Metalness" , "Metal"});
+
+                // still nothing : a packed ARM map ( R occlusion , G roughness , B metallic ) . the occlusion is not read , roughness and metallic are
+                // two textures of the same file ( the channel is taken when the texture is loaded , the shaders read the red of them as always )
+                if(info.roughnessPath == NonTexturePath || info.metallicPath == NonTexturePath){
+                    const std::string packed = findPackedARM(info.diffusePath);
+                    if(packed != NonTexturePath){
+                        if(info.roughnessPath == NonTexturePath){
+                            info.roughnessPath = packed;
+                            info.roughnessChannel = 1;
+                        }
+                        if(info.metallicPath == NonTexturePath){
+                            info.metallicPath = packed;
+                            info.metallicChannel = 2;
+                        }
+                    }
+                }
             }
 
             try{

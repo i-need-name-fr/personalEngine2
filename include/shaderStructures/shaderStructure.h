@@ -400,13 +400,19 @@ struct ForwardPlusInfo{
     uint32_t TILE_SIZE;
     uint32_t TILE_PER_ROW;
     uint32_t TILE_TOTAL_AMOUNT;
-    
+
+    // a copy of GeneralFeatures::lightShadowFade for the Forward+ ( it has no features buffer ) : the lamp goes into the lists of the tiles with the
+    // radius enlarged by it , so the lamp is there where its fading shadow still counts . appended at the END
+    float lightShadowFade;
+
 #else
 
     uint totalLights;
     uint TILE_SIZE;
     uint TILE_PER_ROW;
     uint TILE_TOTAL_AMOUNT;
+
+    float lightShadowFade;
 
 #endif
 };
@@ -478,6 +484,11 @@ struct GeneralFeatures{
     // ReSTIR DI of the LightPass : 1 - the best lamp of the tile is chosen ( the shadows go to it ) , 0 - all the lamps of the tile are added up .
     // it is the last one : the fields before it keep their offsets
     uint32_t ReSTIR;
+
+    // how far beyond its radius the shadow of a lamp still counts , in the radii of the lamp : the shadow fades out between lightRadius and
+    // lightRadius * ( 1 + lightShadowFade ) ( see lightShadowReach ) . 0 - the shadow ends at the radius with a jump
+    // appended at the END : the fields before it keep their offsets , so the shaders that do not read it stay valid
+    float lightShadowFade;
 #else
 
     uint AO;
@@ -512,6 +523,8 @@ struct GeneralFeatures{
     uint RayQuerySunSampleCount;
 
     uint ReSTIR;
+
+    float lightShadowFade;
 
 #endif
 };
@@ -624,13 +637,14 @@ float3 offsetRay(float3 P , float3 N , float3 origin){
     return P + N * scale;
 }
 
-// the shadow of a lamp does not end at its radius with a jump : it fades out between lightRadius and lightRadius * ( 1 + LIGHT_SHADOW_FADE ) .
-// 1 inside of the radius , 0 at the end of the fade . Forward+ puts a lamp into the lists of the tiles with the same enlarged radius , so the lamp is
-// there where its fading shadow still counts
-static const float LIGHT_SHADOW_FADE = 0.5f;
-
-float lightShadowReach(const float distance , const float lightRadius){
-    return 1.0f - smoothstep(lightRadius , lightRadius * (1.0f + LIGHT_SHADOW_FADE) , distance);
+// the shadow of a lamp does not end at its radius with a jump : it fades out between lightRadius and lightRadius * ( 1 + fade ) , where fade is
+// GeneralFeatures::lightShadowFade ( ImGui : the shadow part of the features ) . 1 inside of the radius , 0 at the end of the fade . Forward+ puts a lamp
+// into the lists of the tiles with the same enlarged radius ( ForwardPlusInfo::lightShadowFade ) , so the lamp is there where its fading shadow still counts
+float lightShadowReach(const float distance , const float lightRadius , const float fade){
+    const float outerRadius = lightRadius * (1.0f + max(fade , 0.0f));
+    // no fade : the shadow ends at the radius ( smoothstep with equal edges divides by zero )
+    if(outerRadius <= lightRadius) return (distance <= lightRadius) ? 1.0f : 0.0f;
+    return 1.0f - smoothstep(lightRadius , outerRadius , distance);
 }
 
 float luminance(float3 color) { return dot(color, float3(0.2126, 0.7152, 0.0722)); }

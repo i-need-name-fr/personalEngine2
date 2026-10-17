@@ -202,7 +202,10 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<int32_t> addTexture(Texture2::CreateInfo info) noexcept{
 
-            auto it = pathToVirtual.find(info.path);
+            // the same file can be several textures : a channel of a packed map ( ARM ) is a texture of its own , so the key has the channel in it
+            const std::string key = (info.channel >= 0) ? info.path + "#" + std::to_string(info.channel) : info.path;
+
+            auto it = pathToVirtual.find(key);
             if(it != pathToVirtual.end()){
                 return it->second;
             }
@@ -225,7 +228,7 @@ namespace mox{
                 virtualToPhysical[virtualIndex] = physicalIndex;
 
                 textures.push_back(std::move(std::make_shared<Texture2>(info)));
-                pathToVirtual.insert(std::pair<std::string , uint32_t>(info.path , virtualIndex));
+                pathToVirtual.insert(std::pair<std::string , uint32_t>(key , virtualIndex));
 
                 auto result = updateData();
                 if(!result.has_value()) return std::unexpected(result.error());

@@ -163,16 +163,13 @@ void main(uint3 id : SV_DispatchThreadID){
     const float3 diffuse = diffuseImage[id.xy].xyz;
     const float3 specular = specularImage[id.xy].xyz;
     const float3 albedo = max(albedoImage[id.xy].xyz , 0.02f);
-    const float3 direct = (diffuse * albedo + specular);
+    const float3 direct = (diffuse + specular) * albedo;
     const float linearDepth = depthImage[id.xy].x;
-    const float shadow = pow(filteredShadowImage[id.xy].x , features.shadowThickness);
+    const float shadow = max(pow(filteredShadowImage[id.xy].x , features.shadowThickness) , 0.00001f);
     const float AO = pow(filteredAmbientOcclusion[id.xy].x , features.AO_intens);
-    float3 result = direct * shadow * AO;
-
+    const float3 indirect = indirectImage[id.xy].xyz / max(albedo , 1e-20);
+    float3 result = (direct * shadow + indirect) * AO;
     // the ambient light : the colour of the sky in the direction of the normal , times albedo
-    const float3 skyColor = skybox.SampleLevel(samp , normalImage[id.xy].xyz , 0).xyz;
-    const float3 ambient = skyColor * 0.1f * albedo;
-    result += ambient;
 
     if(features.currentMode == INDIRECT_MODE){
         // a debug view : no fog on it

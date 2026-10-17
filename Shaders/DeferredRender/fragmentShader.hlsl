@@ -29,7 +29,7 @@ struct PsOutput{
 };
 
 // true : the normal maps are OpenGL style ( green up ) , false : DirectX style ( green down )
-static const bool NORMAL_MAP_OPENGL = true;
+static const bool NORMAL_MAP_OPENGL = false;
 
 float2 calculateParallax(float2 currentUV , float3 V , int depthID){
     if(depthID == NON_VALID_SLOT) return currentUV;

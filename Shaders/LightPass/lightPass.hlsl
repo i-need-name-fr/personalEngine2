@@ -396,7 +396,6 @@ void main(uint3 id : SV_DispatchThreadID){
         reservoir.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
         reservoir.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
 
-        // the direction of the light for the Fresnel of the ambient : without ReSTIR there is no single chosen light
         float3 L = normalize(info.V + N);
 
         if(features.ReSTIR != 0u){
@@ -466,8 +465,8 @@ void main(uint3 id : SV_DispatchThreadID){
             const float3 L_sun = -normalize(sunBuffer.direction);
             const float NdotL = saturate(dot(N , L_sun));
             computeLight(info , L_sun , sunDiffuse , sunSpecular);
-            sunDiffuse *=  NdotL * sunBuffer.diffuse * skyBuffer.sunCosZenith;
-            sunSpecular *= NdotL  * sunBuffer.diffuse * skyBuffer.sunCosZenith;
+            sunDiffuse *=  NdotL * sunBuffer.diffuse;
+            sunSpecular *= NdotL  * sunBuffer.diffuse;
             diffuse += sunDiffuse;
             specular += sunSpecular;
         }
@@ -491,7 +490,6 @@ void main(uint3 id : SV_DispatchThreadID){
             }
         }
 
-        // the Fresnel of the ambient from the view and the normal only : with the half vector of a chosen light it changed with the choice
         const float3 V = info.V;
         const float NdotV = max(dot(N , V) , 0.0001f);
 

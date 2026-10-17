@@ -393,6 +393,8 @@ namespace mox{
             featureSettings.maxDepth = 50.0f;
             featureSettings.ReSTIRGI = true;
             featureSettings.ReSTIRGI_temporal = true;
+            // the shadow of a lamp fades out over 0.5 of its radius beyond the radius
+            featureSettings.lightShadowFade = 0.5f;
 
             // fog : a thin haze . gridSize is the number of the slices of the fog image , it is not a setting of the user
             fogSettings = FogVolume{};
@@ -525,43 +527,6 @@ namespace mox{
                     meshes[0]->updateMatrix( model, 0);
                 }
 
-                // {
-                //     Mesh2::CreateInfo info{};
-                //     info.isALightObject=  true;
-                //     info.color = {20.0f , 20.0f , 20.0f};
-                //     info.diffusePath = NonTexturePath;
-                //     info.normalPath = NonTexturePath;
-                //     info.depthPath = NonTexturePath;
-                //     info.metallicPath = NonTexturePath;
-                //     info.roughnessPath = NonTexturePath;
-                //     info.needsCalcTBN = false;
-                //     info.inputVertices = cube::vertices;
-                //     info.inputIndices = cube::indices;
-                //     info.roughness = 0.0f;
-                //     info.metallic = 1.0f;
-                //     info.emission = {0.0f, 0.0f , 0.0f};
-
-                //     meshes.push_back(std::make_shared<Mesh2>(info));
-                //     {
-                //         glm::mat4 model = glm::mat4(1.0f);
-                //         model = glm::translate(model , glm::vec3(5.0f , 5.0f , -7.0f));
-                //         model = glm::scale(model , glm::vec3(0.3f));
-                //         meshes[1]->updateMatrix( model, 0);
-                //     }
-
-                //     {
-                //         glm::mat4 model = glm::mat4(1.0f);
-                //         model = glm::translate(model , glm::vec3(-10.0f , 5.0f , 5.0f));
-                //         model = glm::scale(model , glm::vec3(0.3f));
-                //         meshes[1]->addMatrix( model);
-                //     }
-
-                //     {
-                //         glm::mat4 model = glm::mat4(1.0f);
-                //         model = glm::scale(model , glm::vec3(0.3f));
-                //         meshes[1]->addMatrix( model);
-                //     }
-                // } 
 
                 {
                     const auto result = createLights();
@@ -609,7 +574,8 @@ namespace mox{
                     info.color = glm::vec3(0.0f);
                     info.isALightObject = false;
                     info.path = "../models/modular_fort_01/modular_fort_01.obj";
-
+                    info.metallic = 0.0f;
+                    info.roughness = 1.0f;
                     models.push_back(std::make_shared<Model2>(info));
                     glm::mat4 model(1.0f);
                     model = glm::translate(model , glm::vec3(-40.0f ,-2.0f, 0.0f));
@@ -630,20 +596,6 @@ namespace mox{
                     models[2]->setMatrix(model , 0);
                 }
 
-                // modular_fire_escape
-
-                {
-                    Model2::CreateInfo info{};
-                    info.color = glm::vec3(0.0f);
-                    info.isALightObject = false;
-                    info.path = "../models/modular_fire_escape/modular_fire_escape.obj";
-
-                    models.push_back(std::make_shared<Model2>(info));
-                    glm::mat4 model(1.0f);
-                    model = glm::translate(model , glm::vec3(-20.0f ,20.0f, 0.0f));
-                    model = glm::scale(model , glm::vec3(30.0f));
-                    models[3]->setMatrix(model , 0);
-                }
 
             }
             catch(std::exception &e){
@@ -858,6 +810,9 @@ namespace mox{
 
             drawImGui(data , features , fogData , skyData , sun);
 
+            // the Forward+ has no buffer of the features : it takes the fade of the shadows from its own info ( after the ImGui , it may change the slider )
+            forwardData.lightShadowFade = features.lightShadowFade;
+
             buffers->generalBuffer->updateBufferCmd(cmd ,data , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             buffers->sunBuffer->updateBufferCmd(cmd ,sun , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             buffers->fogData->updateBufferCmd(cmd ,fogData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
@@ -977,19 +932,19 @@ namespace mox{
             float azimuth = glm::degrees(std::atan2(sky.sunSinAzimuth , sky.sunCosAzimuth));       // -180 .. 180
             if(azimuth < 0.0f) azimuth += 360.0f;                                                   // 0 .. 360 , 0 is +X
 
-            const glm::vec3 diffuse = sun.diffuse;
-            static float intensity = std::max({diffuse.x , diffuse.y , diffuse.z});
-            float color[3] = {sun.diffuse.x , sun.diffuse.y, sun.diffuse.z};
+            static glm::vec3 diffuse = {1.0f , 1.0f , 1.0f};
+            static float intensity = glm::sin(zenith);
+            float color[3] = {diffuse.x , diffuse.y, diffuse.z};
             if(intensity > 1e-6f){
-                color[0] = diffuse.x / intensity;
-                color[1] = diffuse.y / intensity;
-                color[2] = diffuse.z / intensity;
+                color[0] = diffuse.x;
+                color[1] = diffuse.y;
+                color[2] = diffuse.z;
             }
 
             bool changed = false;
 
             gui::Text("Zenith : the vertical orientation of the sun");
-            changed |= gui::SliderFloat("Zenith" , &zenith , 0.0f , 180.0f , "%.1f deg");
+            changed |= gui::SliderFloat("Zenith" , &zenith , 0.0f , 97.5f , "%.1f deg");
             gui::Separator();
 
             gui::Text("Azimuth : the horizontal orientation of the sun");
@@ -999,15 +954,12 @@ namespace mox{
             gui::Text("Sun color : the color of the sun");
             changed |= gui::ColorEdit3("Sun color" , color);
 
-            gui::Text("Intensity");
-            changed |= gui::SliderFloat("Intensity" , &intensity , 0.001f , 50.0f , "%.3f" , ImGuiSliderFlags_Logarithmic);
-
             if(changed){
                 const float theta = glm::radians(zenith);
                 const float phi = glm::radians(azimuth);
 
                 const glm::vec3 toSun(std::sin(theta) * std::cos(phi) , std::cos(theta) , std::sin(theta) * std::sin(phi));
-
+                intensity = glm::cos(glm::radians(glm::clamp(zenith , 0.0f  ,90.0f)));
                 sun.direction = -toSun;                 // the light travels away from the sun
                 sun.diffuse = glm::vec3(color[0] , color[1] , color[2]) * intensity;
 
@@ -1037,14 +989,20 @@ namespace mox{
                     info.AO = AO_NOT_REQUIRED;
                 }
                 gui::Separator();
-
+                ImGui::Spacing();
                 // intes
                 gui::SliderFloat("AO intesivity" , &info.AO_intens , 0.0f , 5.0f);
                 gui::Separator();
+                ImGui::Spacing();
 
                 // rate
                 gui::Separator();
                 gui::SliderInt("AO SampleCount" , std::bit_cast<int*>(&info.AO_iteration), 0 , 64);
+                gui::Separator();
+                ImGui::Spacing();
+
+                gui::Separator();
+                gui::SliderFloat("AO Radius" , &info.AOradius, 0 , 20.0f);
                 gui::Separator();
             }
 
@@ -1056,17 +1014,26 @@ namespace mox{
             {
                 gui::SliderInt("Sun SampleCount" , std::bit_cast<int*>(&info.RayQuerySunSampleCount), 0 , 64);
                 gui::Separator();
+                ImGui::Spacing();
 
                 gui::SliderInt("LightPos SampleCount" , std::bit_cast<int*>(&info.RayQueryLightSampleCount), 0 , 64);
                 gui::Separator();
+                ImGui::Spacing();
 
                 gui::SliderFloat("light to Sun proportion" , &info.light_sun_Proportion , 0.0f , 1.0f);
                 gui::Separator();
+                ImGui::Spacing();
 
                 gui::SliderFloat("shadow thickness" , &info.shadowThickness , 0.0f , 5.0f);
                 gui::Separator();
+                ImGui::Spacing();
 
                 gui::SliderFloat("temporal occlusion" , &info.temporalShadowK , 0.0f , 1.0f);
+                gui::Separator();
+                ImGui::Spacing();
+
+                // how far beyond the radius of a lamp its shadow still counts ( in radii ) : 0 - it ends at the radius with a jump
+                gui::SliderFloat("light shadow fade" , &info.lightShadowFade , 0.0f , 2.0f);
                 gui::Separator();
             }
             gui::EndDisabled();
@@ -1096,6 +1063,7 @@ namespace mox{
                 }
             }
             gui::Separator();
+            ImGui::Spacing();
 
             // SSR / SSGI
             gui::BeginDisabled(info.PT && info.RT);
