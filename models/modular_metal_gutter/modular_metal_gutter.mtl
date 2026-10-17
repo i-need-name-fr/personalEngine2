@@ -1,0 +1,32 @@
+# File produced by Open Asset Import Library (http://www.assimp.sf.net)
+# (assimp v6.0.0)
+# PBR maps of this model ( the classic MTL knows only the diffuse and the normal map , the others are listed here ) :
+#   textures/modular_metal_gutter_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/modular_metal_gutter_diff_1k.jpg : metallic
+#   textures/modular_metal_gutter_nor_gl_1k.jpg : metallic
+# source : Poly Haven ( polyhaven.com ) , CC0 . converted from glTF with assimp , the glTF is next to this file
+
+newmtl modular_metal_gutter
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_metal_gutter_diff_1k.jpg
+bump textures/modular_metal_gutter_nor_gl_1k.jpg
+map_bump textures/modular_metal_gutter_nor_gl_1k.jpg
+
+newmtl modular_metal_gutter
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_metal_gutter_diff_1k.jpg
+bump textures/modular_metal_gutter_nor_gl_1k.jpg
+map_bump textures/modular_metal_gutter_nor_gl_1k.jpg
+
+newmtl $Material_2
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+

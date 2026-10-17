@@ -108,7 +108,8 @@ void main(uint3 groupId : SV_GroupID , uint localIndex : SV_GroupIndex){
 
         const LightSource light = allLights[lightIndex];
         const float3 lightPosViewSpace = mul(generalBuffer.viewOnly , float4(light.position , 1.0f)).xyz;
-        if(!SphereIntersectsTileFrustum(lightPosViewSpace , light.lightRadius , frustum)) continue;
+        // the radius of the test is the radius of the light plus the fade of its shadow ( lightShadowReach ) : the shadow still counts there
+        if(!SphereIntersectsTileFrustum(lightPosViewSpace , light.lightRadius * (1.0f + LIGHT_SHADOW_FADE) , frustum)) continue;
 
         uint writeIndex;
         InterlockedAdd(lightCountPerTile[tileIndex] , 1 , writeIndex);

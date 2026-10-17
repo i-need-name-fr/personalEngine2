@@ -30,6 +30,7 @@
 #include "include/generalPipelines2/imgui2.hpp"
 
 #include "include/GraphRender2/GraphRender2.hpp"
+#include "include/generalPipelines2/RayTracing.hpp"
 
 namespace gui = ImGui;
 
@@ -117,6 +118,7 @@ namespace mox{
             fog = nullptr;
             bilateral = nullptr;
             shadows = nullptr;
+            rt = nullptr;
             ao = nullptr;
             forward = nullptr;
             render = nullptr;
@@ -129,6 +131,7 @@ namespace mox{
             Mesh2::performDelete();
             manager = nullptr;
             context = nullptr;
+            
         }
 
         [[nodiscard]] ErrorDataOutput<void> init() noexcept{
@@ -286,6 +289,22 @@ namespace mox{
                     imgui = std::make_shared<Imgui2>(context.get());
                 }
 
+                {
+                    RayTracing::CreateInfo info{};
+                    info.as = tlas.get();
+                    info.context = context.get();
+                    info.generalHitPath = "../Shaders/RayTracing/generalHit.spv";
+                    info.generalMissPath = "../Shaders/RayTracing/generalMiss.spv";
+                    info.rayGenerationPath = "../Shaders/RayTracing/rayGeneration.spv";
+                    info.shadowMissPath = "../Shaders/RayTracing/shadowMiss.spv";
+                    info.shadowAnyHitPath = "../Shaders/RayTracing/shadowAnyHit.spv";
+                    info.giHitPath = "../Shaders/RayTracing/GI_hit.spv";
+                    info.giMissPath = "../Shaders/RayTracing/GI_miss.spv";
+                    info.manager = manager.get();
+
+                    rt = std::make_shared<RayTracing>(info);
+                }
+
                 const auto add = [this](GraphPass2* pass) -> ErrorDataOutput<void>{
                     return graph->addGraphPass2(pass , RasterizationPath);
                 };
@@ -308,8 +327,29 @@ namespace mox{
                     imgui.get()
                 };
 
+                GraphPass2* ordeк2[] = {
+                    atmosphere.get() ,   // the sky : the sky view LUT and the cube
+                    render.get() ,       // the g buffer
+                    forward.get() ,      // the lamps of every tile
+                    rt.get(),
+                    ao.get() ,           // the occlusion
+                    bilateral.get() ,    // the filter of the shadows and of the occlusion
+                    fog.get() ,          // the froxel volume of the fog
+                    reblur.get() ,       // diffuse
+                    relax.get() ,        // specular
+                    post.get() ,         // diffuse * albedo + specular , the fog
+                    aehdr.get() ,        // the exposure
+                    hdr.get() ,          // the tone mapping into the final image
+                    imgui.get()
+                };
+
                 for(GraphPass2* pass : order){
                     const auto result = add(pass);
+                    if(!result.has_value()) return result;
+                }
+
+                for(GraphPass2* pass : ordeк2){
+                    const auto result = graph->addGraphPass2(pass , RayTracingPath);
                     if(!result.has_value()) return result;
                 }
             }
@@ -351,6 +391,8 @@ namespace mox{
             featureSettings.ReSTIR = 1;
             featureSettings.IndirectShare = 0.5f;
             featureSettings.maxDepth = 50.0f;
+            featureSettings.ReSTIRGI = true;
+            featureSettings.ReSTIRGI_temporal = true;
 
             // fog : a thin haze . gridSize is the number of the slices of the fog image , it is not a setting of the user
             fogSettings = FogVolume{};
@@ -483,46 +525,51 @@ namespace mox{
                     meshes[0]->updateMatrix( model, 0);
                 }
 
-                {
-                    Mesh2::CreateInfo info{};
-                    info.isALightObject=  true;
-                    info.color = {20.0f , 20.0f , 20.0f};
-                    info.diffusePath = NonTexturePath;
-                    info.normalPath = NonTexturePath;
-                    info.depthPath = NonTexturePath;
-                    info.metallicPath = NonTexturePath;
-                    info.roughnessPath = NonTexturePath;
-                    info.needsCalcTBN = false;
-                    info.inputVertices = cube::vertices;
-                    info.inputIndices = cube::indices;
-                    info.roughness = 0.0f;
-                    info.metallic = 1.0f;
-                    info.emission = {0.0f, 0.0f , 0.0f};
+                // {
+                //     Mesh2::CreateInfo info{};
+                //     info.isALightObject=  true;
+                //     info.color = {20.0f , 20.0f , 20.0f};
+                //     info.diffusePath = NonTexturePath;
+                //     info.normalPath = NonTexturePath;
+                //     info.depthPath = NonTexturePath;
+                //     info.metallicPath = NonTexturePath;
+                //     info.roughnessPath = NonTexturePath;
+                //     info.needsCalcTBN = false;
+                //     info.inputVertices = cube::vertices;
+                //     info.inputIndices = cube::indices;
+                //     info.roughness = 0.0f;
+                //     info.metallic = 1.0f;
+                //     info.emission = {0.0f, 0.0f , 0.0f};
 
-                    meshes.push_back(std::make_shared<Mesh2>(info));
-                    {
-                        glm::mat4 model = glm::mat4(1.0f);
-                        model = glm::translate(model , glm::vec3(5.0f , 5.0f , -7.0f));
-                        model = glm::scale(model , glm::vec3(0.3f));
-                        meshes[1]->updateMatrix( model, 0);
-                    }
+                //     meshes.push_back(std::make_shared<Mesh2>(info));
+                //     {
+                //         glm::mat4 model = glm::mat4(1.0f);
+                //         model = glm::translate(model , glm::vec3(5.0f , 5.0f , -7.0f));
+                //         model = glm::scale(model , glm::vec3(0.3f));
+                //         meshes[1]->updateMatrix( model, 0);
+                //     }
 
-                    {
-                        glm::mat4 model = glm::mat4(1.0f);
-                        model = glm::translate(model , glm::vec3(-10.0f , 5.0f , 5.0f));
-                        model = glm::scale(model , glm::vec3(0.3f));
-                        meshes[1]->addMatrix( model);
-                    }
+                //     {
+                //         glm::mat4 model = glm::mat4(1.0f);
+                //         model = glm::translate(model , glm::vec3(-10.0f , 5.0f , 5.0f));
+                //         model = glm::scale(model , glm::vec3(0.3f));
+                //         meshes[1]->addMatrix( model);
+                //     }
 
-                    {
-                        glm::mat4 model = glm::mat4(1.0f);
-                        model = glm::scale(model , glm::vec3(0.3f));
-                        meshes[1]->addMatrix( model);
-                    }
-                } 
+                //     {
+                //         glm::mat4 model = glm::mat4(1.0f);
+                //         model = glm::scale(model , glm::vec3(0.3f));
+                //         meshes[1]->addMatrix( model);
+                //     }
+                // } 
 
                 {
                     const auto result = createLights();
+                    if(!result.has_value()) return result;
+                }
+
+                {
+                    const auto result = createModels();
                     if(!result.has_value()) return result;
                 }
 
@@ -540,10 +587,75 @@ namespace mox{
             return {};
         }
 
+        [[nodiscard]] ErrorDataOutput<void> createModels() noexcept{
+            try{
+                // stone 1
+                {
+                    Model2::CreateInfo info{};
+                    info.color = glm::vec3(0.0f);
+                    info.isALightObject = false;
+                    info.path = "../models/stone_01/stone_01.obj";
+
+                    models.push_back(std::make_shared<Model2>(info));
+                    glm::mat4 model(1.0f);
+                    model = glm::translate(model , glm::vec3(-2.0f));
+                    model = glm::scale(model , glm::vec3(50.0f));
+                    models[0]->setMatrix(model , 0);
+                }
+
+                // stone 1
+                {
+                    Model2::CreateInfo info{};
+                    info.color = glm::vec3(0.0f);
+                    info.isALightObject = false;
+                    info.path = "../models/modular_fort_01/modular_fort_01.obj";
+
+                    models.push_back(std::make_shared<Model2>(info));
+                    glm::mat4 model(1.0f);
+                    model = glm::translate(model , glm::vec3(-40.0f ,-2.0f, 0.0f));
+                    model = glm::scale(model , glm::vec3(1.0f));
+                    models[1]->setMatrix(model , 0);
+                }
+
+                {
+                    Model2::CreateInfo info{};
+                    info.color = glm::vec3(0.0f);
+                    info.isALightObject = false;
+                    info.path = "../models/rock_09/rock_09.obj";
+
+                    models.push_back(std::make_shared<Model2>(info));
+                    glm::mat4 model(1.0f);
+                    model = glm::translate(model , glm::vec3(-20.0f ,20.0f, 0.0f));
+                    model = glm::scale(model , glm::vec3(30.0f));
+                    models[2]->setMatrix(model , 0);
+                }
+
+                // modular_fire_escape
+
+                {
+                    Model2::CreateInfo info{};
+                    info.color = glm::vec3(0.0f);
+                    info.isALightObject = false;
+                    info.path = "../models/modular_fire_escape/modular_fire_escape.obj";
+
+                    models.push_back(std::make_shared<Model2>(info));
+                    glm::mat4 model(1.0f);
+                    model = glm::translate(model , glm::vec3(-20.0f ,20.0f, 0.0f));
+                    model = glm::scale(model , glm::vec3(30.0f));
+                    models[3]->setMatrix(model , 0);
+                }
+
+            }
+            catch(std::exception &e){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create models"});
+            }
+            return {};
+        }
+
         [[nodiscard]] ErrorDataOutput<void> createLights() noexcept{
             // 3 lights
             {
-                std::vector<LightSource> lights(3);
+                std::vector<LightSource> lights(4);
 
                 std::mt19937 rng{std::random_device{}()};
                 const auto rnd = [&rng](const float low , const float high){
@@ -552,7 +664,7 @@ namespace mox{
                 };
 
                 // the first two : violet , not too bright , a random strength and reach
-                for(uint32_t i = 0 ; i < 2 ; i++){
+                for(uint32_t i = 0 ; i < 3 ; i++){
                     const float intensity = rnd(4.0f , 10.0f);
                     lights[i].diffuse = glm::vec3(0.55f , 0.20f , 1.0f) * intensity;
                     lights[i].lightRadius = rnd(15.0f , 30.0f);
@@ -561,15 +673,16 @@ namespace mox{
                 }
 
                 // the last one is the main one : the brightest and a soft white
-                lights[2].diffuse = glm::vec3(1.0f , 0.97f , 0.92f) * rnd(18.0f , 28.0f);
-                lights[2].lightRadius = rnd(35.0f , 50.0f);
-                lights[2].lightLinear = rnd(0.05f , 0.09f);
-                lights[2].lightQuadratic = rnd(0.015f , 0.03f);
+                lights[3].diffuse = glm::vec3(1.0f , 0.97f , 0.92f) * rnd(18.0f , 28.0f);
+                lights[3].lightRadius = rnd(35.0f , 50.0f);
+                lights[3].lightLinear = rnd(0.05f , 0.09f);
+                lights[3].lightQuadratic = rnd(0.015f , 0.03f);
 
 
-                lights[0].position = glm::vec3(5.0f , 5.0f , -7.0f);
-                lights[1].position = glm::vec3(-10.0f , 5.0f , 5.0f);
-                lights[2].position = glm::vec3(0.0f);
+                lights[0].position = glm::vec3(-23.0f , 4.0f , -1.0f);
+                lights[1].position = glm::vec3(2.2f , 3.7f , 27.0f);
+                lights[2].position = glm::vec3(-19.0f , 3.5 , 19);
+                lights[3].position = glm::vec3(0.0f);
                 allLights = std::move(lights);
 
                 buffers->lightBuffer->recordData(translateToSpan(allLights));
@@ -579,22 +692,23 @@ namespace mox{
 
         void updateMeshesPos() noexcept {
             const float time = glfwGetTime();
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 20.0f)) , 0.0f ));
-            model = glm::rotate(model  ,glm::radians(time * 20.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
-            model = glm::translate(model , glm::vec3(7.0f , 5.0f , 0.0f));
-            model = glm::scale(model , glm::vec3(0.3f));
-            meshes[1]->updateMatrix(model ,2);
+            // glm::mat4 model = glm::mat4(1.0f);
+            // model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 20.0f)) , 0.0f ));
+            // model = glm::rotate(model  ,glm::radians(time * 20.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
+            // model = glm::translate(model , glm::vec3(7.0f , 5.0f , 0.0f));
+            // model = glm::scale(model , glm::vec3(0.3f));
+            // meshes[1]->updateMatrix(model ,2);
         }
 
         void updateLightPoses() noexcept{
             const float time = glfwGetTime();
             glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 20.0f)) , 0.0f ));
-            model = glm::rotate(model  ,glm::radians(time * 20.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
-            model = glm::translate(model , glm::vec3(7.0f , 5.0f , 0.0f));
+            model = glm::translate(model , glm::vec3(-12.0f , 14.0f , 6.0f));
+            model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 40.0f)) , 0.0f ));
+            model = glm::rotate(model  ,glm::radians(time * 40.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
+            model = glm::translate(model , glm::vec3(20.0f , 0.0f , 0.0f));
             model = glm::scale(model , glm::vec3(0.3f));
-            allLights[2].position = model[3];
+            allLights[3].position = model[3];
         }
 
 
@@ -768,6 +882,8 @@ namespace mox{
             gui::NewFrame();
             gui::Begin("generalSettings");
             gui::Text("FPS :  %.1f , ms : %.3f " , general.dt > 1e-6f ? 1.0f / general.dt : 0.0f , general.dt * 1000.0f);
+            gui::Text("Player Position : X - %.1f  : Y - %.1f : Z -  %.1f" , context->user->position.x, context->user->position.y ,context->user->position.z);
+
             gui::Separator();
 
             if(gui::CollapsingHeader("General data")){
@@ -862,7 +978,7 @@ namespace mox{
             if(azimuth < 0.0f) azimuth += 360.0f;                                                   // 0 .. 360 , 0 is +X
 
             const glm::vec3 diffuse = sun.diffuse;
-            float intensity = std::max({diffuse.x , diffuse.y , diffuse.z});
+            static float intensity = std::max({diffuse.x , diffuse.y , diffuse.z});
             float color[3] = {sun.diffuse.x , sun.diffuse.y, sun.diffuse.z};
             if(intensity > 1e-6f){
                 color[0] = diffuse.x / intensity;
@@ -969,7 +1085,7 @@ namespace mox{
                 if(gui::Button("RAY TRACING")){
                     info.RT = 1;
                     info.PT = 0;
-                    requiredMode = RasterizationRequired;
+                    requiredMode = RayTracingRequired;
                 }
                 gui::SameLine();
 
@@ -1011,6 +1127,24 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
+            gui::BeginDisabled(info.PT && !info.RT);
+            {
+                if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
+                    info.ReSTIRGI = !info.ReSTIRGI;
+                }
+            }
+            gui::EndDisabled();
+            gui::Separator();
+
+            gui::BeginDisabled(info.PT && !info.RT);
+            {
+                if(gui::Button(info.ReSTIRGI_temporal ? "ReSTIR GI temporal: ON" : "ReSTIR GI temporal: OFF")){
+                    info.ReSTIRGI_temporal = !info.ReSTIRGI_temporal;
+                }
+            }
+            gui::EndDisabled();
+            gui::Separator();
+
             // fog render
             gui::BeginDisabled(info.PT);
             {
@@ -1046,6 +1180,7 @@ namespace mox{
         pGraphRender2 graph{};
         // here will be imgui
         pImgui2 imgui{};
+        pRayTracing rt{};
 
         std::vector<pMesh2> meshes{};
         std::vector<pModel2> models{};
@@ -1059,16 +1194,13 @@ namespace mox{
         uint32_t requiredMode = RasterizationRequired;
         std::vector<LightSource> allLights;
 
-        // the number of the lights of the scene ( createLights makes this many )
         static constexpr uint32_t lightCount = 3;
 
-        // the data of the buffers : they live here between the frames
         GeneralInfo generalSettings{};
         GeneralFeatures featureSettings{};
         FogVolume fogSettings{};
         SkyViewData skySettings{};
         SunSource sunSettings{};
-        // the colour of the glow of the fog and its intensity ( fogSettings.color is their product )
         glm::vec3 fogTint{0.35f , 0.45f , 0.60f};
         float fogGlow{0.25f};
     };

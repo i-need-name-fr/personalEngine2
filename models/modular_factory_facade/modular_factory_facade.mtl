@@ -1,0 +1,80 @@
+# File produced by Open Asset Import Library (http://www.assimp.sf.net)
+# (assimp v6.0.0)
+# PBR maps of this model ( the classic MTL knows only the diffuse and the normal map , the others are listed here ) :
+#   textures/modular_factory_facade_brick_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/modular_factory_facade_brick_diff_1k.jpg : diffuse / albedo
+#   textures/modular_factory_facade_brick_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+#   textures/modular_factory_facade_doors_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/modular_factory_facade_doors_diff_1k.jpg : diffuse / albedo
+#   textures/modular_factory_facade_doors_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+#   textures/modular_factory_facade_garage_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/modular_factory_facade_garage_diff_1k.jpg : diffuse / albedo
+#   textures/modular_factory_facade_garage_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+#   textures/modular_factory_facade_trim_01_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/modular_factory_facade_trim_01_diff_1k.jpg : diffuse / albedo
+#   textures/modular_factory_facade_trim_01_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+#   textures/modular_factory_facade_windows_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/modular_factory_facade_windows_diff_1k.jpg : diffuse / albedo
+#   textures/modular_factory_facade_windows_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+# source : Poly Haven ( polyhaven.com ) , CC0 . converted from glTF with assimp , the glTF is next to this file
+
+newmtl modular_factory_facade_trim_01
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_factory_facade_trim_01_diff_1k.jpg
+bump textures/modular_factory_facade_trim_01_nor_gl_1k.jpg
+map_bump textures/modular_factory_facade_trim_01_nor_gl_1k.jpg
+
+newmtl modular_factory_facade_windows
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_factory_facade_windows_diff_1k.jpg
+bump textures/modular_factory_facade_windows_nor_gl_1k.jpg
+map_bump textures/modular_factory_facade_windows_nor_gl_1k.jpg
+
+newmtl modular_factory_facade_windows_glass
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_factory_facade_windows_diff_1k.jpg
+bump textures/modular_factory_facade_windows_nor_gl_1k.jpg
+map_bump textures/modular_factory_facade_windows_nor_gl_1k.jpg
+
+newmtl modular_factory_facade_garage
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_factory_facade_garage_diff_1k.jpg
+bump textures/modular_factory_facade_garage_nor_gl_1k.jpg
+map_bump textures/modular_factory_facade_garage_nor_gl_1k.jpg
+
+newmtl modular_factory_facade_brick
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_factory_facade_brick_diff_1k.jpg
+bump textures/modular_factory_facade_brick_nor_gl_1k.jpg
+map_bump textures/modular_factory_facade_brick_nor_gl_1k.jpg
+
+newmtl modular_factory_facade_brick_doors
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/modular_factory_facade_doors_diff_1k.jpg
+bump textures/modular_factory_facade_doors_nor_gl_1k.jpg
+map_bump textures/modular_factory_facade_doors_nor_gl_1k.jpg
+
+newmtl $Material_6
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+

@@ -66,9 +66,11 @@ static const float PI = 3.14159265f;
 // the C++ side. A wrong index makes TraceRay() dispatch into a shader that
 // expects a different payload type.
 // ---------------------------------------------------------------------------
-// RayTracing pipeline: 2 hit groups, 3 miss shaders
+// RayTracing pipeline: 3 hit groups, 3 miss shaders
+// the SHADOW hit group is an any hit only ( the bodies of the lamps do not shadow ) : the shadow rays use it as RayContributionToHitGroupIndex
 #define RT_HITGROUP_GENERAL 0
 #define RT_HITGROUP_HITINFO 1
+#define RT_HITGROUP_SHADOW  2
 
 #define RT_MISS_GENERAL 0
 #define RT_MISS_HITINFO 1
@@ -356,11 +358,24 @@ struct ReservoirGI{
     float3 sampleNormal;
 
     uint M;
+
+    void update( ReservoirGI can ,float w , uint canM , float randomValue){
+        M += canM;
+        weightSum += w;
+        // same guarded form as ReservoirDI::update - no division by a possibly zero weightSum
+        if(weightSum > 0.0f && randomValue * weightSum < w){
+            samplePos = can.samplePos;
+            sampleNormal = can.sampleNormal;
+            radiance = can.radiance;
+            // the roughness of the sample point travels with the sample : it tells if the sample can be moved to another pixel
+            roughness = can.roughness;
+        }
+    }
 #endif
 
     float W;
     float weightSum;
-    float padding;
+    float roughness;
 };
 
 
@@ -447,6 +462,9 @@ struct GeneralFeatures{
     uint32_t RT;
     uint32_t PT;
 
+    uint32_t ReSTIRGI;
+    uint32_t ReSTIRGI_temporal;
+
     uint32_t currentMode;
 
     uint32_t randomValues;
@@ -479,6 +497,9 @@ struct GeneralFeatures{
 
     uint RT;
     uint PT;
+
+    uint ReSTIRGI;
+    uint ReSTIRGI_temporal;
 
     uint currentMode;
 
@@ -596,6 +617,22 @@ float3 offsetRay(float3 P , float3 N){
     return P + N * scale;
 }
 
+// the same , but with the origin given by the caller : WorldRayOrigin() is NOT allowed in a ray generation shader ( VUID-WorldRayOriginKHR-04431 ) ,
+// so a raygen passes the position of the camera : offsetRay(P , N , generalBuffer.playerPosition)
+float3 offsetRay(float3 P , float3 N , float3 origin){
+    const float scale = 0.001f + 0.003f * length(P - origin);
+    return P + N * scale;
+}
+
+// the shadow of a lamp does not end at its radius with a jump : it fades out between lightRadius and lightRadius * ( 1 + LIGHT_SHADOW_FADE ) .
+// 1 inside of the radius , 0 at the end of the fade . Forward+ puts a lamp into the lists of the tiles with the same enlarged radius , so the lamp is
+// there where its fading shadow still counts
+static const float LIGHT_SHADOW_FADE = 0.5f;
+
+float lightShadowReach(const float distance , const float lightRadius){
+    return 1.0f - smoothstep(lightRadius , lightRadius * (1.0f + LIGHT_SHADOW_FADE) , distance);
+}
+
 float luminance(float3 color) { return dot(color, float3(0.2126, 0.7152, 0.0722)); }
 
 
@@ -623,6 +660,49 @@ uint initSeed(uint2 pixel, uint frameIndex){
     uint seed = pixel.x * 1973u + pixel.y * 9277u + frameIndex * 26699u + 1u;
     rngNext(seed);
     return seed;
+}
+
+// randNoise : the numbers for the DIRECTIONS ( the error is mostly high frequency in the picture and evenly spread in time , so the denoisers and the
+// temporal accumulation have less to remove than with white noise ) . It is NOT for the choices of a reservoir ( rand * weightSum < w ) : those must stay
+// random , the neighbours are not allowed to repeat each other there
+// every invocation starts with initNoise( pixel , frameIndex ) . the state is private to the entry point : a hit shader has to call it itself
+static uint2 g_noisePixel = uint2(0u , 0u);
+static uint g_noiseFrame = 0u;
+static uint g_noiseDimension = 0u;
+
+void initNoise(uint2 pixel , uint frameIndex){
+    g_noisePixel = pixel;
+    g_noiseFrame = frameIndex;
+    g_noiseDimension = 0u;
+}
+
+// interleaved gradient noise ( Jimenez ) : the values of the neighbours are far from each other , without a texture
+float interleavedGradientNoise(float2 p){
+    return frac(52.9829189f * frac(dot(p , float2(0.06711056f , 0.00583715f))));
+}
+
+float randNoise(){
+    const uint d = g_noiseDimension++;
+    const float2 p = float2(g_noisePixel);
+
+    // in the picture : the dimensions 0..3 are the pattern , swapped and mirrored ( they do not repeat each other , the test gave a correlation 0 ) .
+    // the next ones are a hash of the pixel : not blue any more , but still independent
+    float spatial;
+    if(d == 0u)      spatial = interleavedGradientNoise(p);
+    else if(d == 1u) spatial = interleavedGradientNoise(p.yx);
+    else if(d == 2u) spatial = interleavedGradientNoise(float2(-p.x , p.y));
+    else if(d == 3u) spatial = interleavedGradientNoise(float2(p.y , -p.x));
+    else{
+        uint h = g_noisePixel.x * 1973u + g_noisePixel.y * 9277u + d * 26699u + 1u;
+        spatial = float(rngNext(h) >> 8u) * (1.0f / 16777216.0f);
+    }
+
+    // in time : the R2 sequence ( the plastic number ) , in integers , so it is exact for any frame . the even and the odd dimensions are the two
+    // coordinates of it , so a pair ( the two numbers of a direction ) covers the square evenly over the frames
+    const uint alpha = ((d & 1u) == 0u) ? 3242174889u : 2447445414u;
+    const float temporal = float((g_noiseFrame * alpha) >> 8u) * (1.0f / 16777216.0f);
+
+    return frac(spatial + temporal);
 }
 
 float D_GGX(float NdotH , float roughness){
@@ -692,6 +772,21 @@ float3 randomInHemisphere(inout uint seed , float3 normal){
     return localDir.x * tangent + localDir.y * bitangent + localDir.z * normal;
 }
 
+// the same direction , but from randNoise() ( initNoise() first ) instead of the seed
+float3 randomInHemisphere(float3 normal){
+    const float rand1 = randNoise();
+    const float rand2 = randNoise();
+
+    const float phi = 2.0f * PI * rand2;
+    const float cosTheta = sqrt(rand1);
+    const float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+    const float3 localDir = {sinTheta * cos(phi) , sinTheta * sin(phi) , cosTheta};
+
+    float3 tangent , bitangent;
+    buildONB(normal , tangent , bitangent);
+    return localDir.x * tangent + localDir.y * bitangent + localDir.z * normal;
+}
+
 // the i-th point of a Hammersley set of `count` points : the same points every time , evenly spread over the unit square ( no random )
 float2 Hammersley(uint i , uint count){
     return float2((float(i) + 0.5f) / float(count) , float(reversebits(i)) * 2.3283064365386963e-10f);
@@ -725,6 +820,14 @@ float3 GGX_halfVector(inout uint seed , float3 normal , float roughness){
     float3 tangent , bitangent;
     buildONB(normal , tangent , bitangent);
     return normalize(localDir.x * tangent + localDir.y * bitangent + localDir.z * normal);
+}
+
+// the same half vector , but from randNoise() ( initNoise() first ) instead of the seed
+float3 GGX_halfVector(float3 normal , float roughness){
+    // two separate statements : the order of the arguments of a constructor is not promised
+    const float rand1 = randNoise();
+    const float rand2 = randNoise();
+    return GGX_halfVectorFromXi(float2(rand1 , rand2) , normal , roughness);
 }
 
 float3 coneSamplingVector(inout uint seed , float3 L , float d, float r){

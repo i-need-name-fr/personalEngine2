@@ -137,12 +137,12 @@ float3 computeSSGI(uint2 currentPixel , out float visibility){
     prevHDRImage.GetDimensions(width, height);
     const uint2 screenSize = uint2(width,  height);
 
-    uint seed = initSeed(currentPixel , generalBuffer.frameIndex);
-
     for(uint i = 0u ; i < SAMPLES ; i++){
         // the no random version :
         // const float3 H = GGX_halfVectorFromXi(Hammersley(i , SAMPLES) , N , roughness);
-        const float3 H = GGX_halfVector(seed , N , roughness);
+        // the white noise version :
+        // const float3 H = GGX_halfVector(seed , N , roughness);
+        const float3 H = GGX_halfVector(N , roughness);
         const float3 dir = normalize(reflect(-V , H));
         Hit info = SSTraceRay(P , dir , cameraPos , 0.5f , 16);
 
@@ -240,6 +240,8 @@ void main(uint3 id : SV_DispatchThreadID){
     if(dot(normalImage[id.xy].xyz , normalImage[id.xy].xyz) < 0.5f) return;
 
     uint seed = initSeed(id.xy , generalBuffer.frameIndex);
+    // the numbers of the directions of SSGI ( randNoise ) : the pixel and the frame
+    initNoise(id.xy , generalBuffer.frameIndex);
 
     float3 reflectedColor = float3(0.0f , 0.0f,  0.0f);
     float3 indirectLight = reflectedColor; 

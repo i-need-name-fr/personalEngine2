@@ -1,0 +1,37 @@
+# File produced by Open Asset Import Library (http://www.assimp.sf.net)
+# (assimp v6.0.0)
+# PBR maps of this model ( the classic MTL knows only the diffuse and the normal map , the others are listed here ) :
+#   textures/rollershutter_door_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/rollershutter_door_diff_1k.jpg : diffuse / albedo
+#   textures/rollershutter_door_graffiti_diff_1k.jpg : diffuse / albedo
+#   textures/rollershutter_door_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+# source : Poly Haven ( polyhaven.com ) , CC0 . converted from glTF with assimp , the glTF is next to this file
+
+newmtl rollershutter_door
+Kd 1 1 1
+Ks 0.948543072 0.948543072 0.948543072
+Ke 0 0 0
+d 1
+Ni 1.45000005
+illum 1
+map_Kd textures/rollershutter_door_diff_1k.jpg
+bump textures/rollershutter_door_nor_gl_1k.jpg
+map_bump textures/rollershutter_door_nor_gl_1k.jpg
+
+newmtl rollershutter_door_graffiti
+Kd 1 1 1
+Ks 0.948543072 0.948543072 0.948543072
+Ke 0 0 0
+d 1
+Ni 1.45000005
+illum 1
+map_Kd textures/rollershutter_door_graffiti_diff_1k.jpg
+bump textures/rollershutter_door_nor_gl_1k.jpg
+map_bump textures/rollershutter_door_nor_gl_1k.jpg
+
+newmtl $Material_2
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+

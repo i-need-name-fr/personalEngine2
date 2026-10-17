@@ -1,0 +1,23 @@
+# File produced by Open Asset Import Library (http://www.assimp.sf.net)
+# (assimp v6.0.0)
+# PBR maps of this model ( the classic MTL knows only the diffuse and the normal map , the others are listed here ) :
+#   textures/large_iron_gate_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
+#   textures/large_iron_gate_diff_1k.jpg : diffuse / albedo
+#   textures/large_iron_gate_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+# source : Poly Haven ( polyhaven.com ) , CC0 . converted from glTF with assimp , the glTF is next to this file
+
+newmtl large_iron_gate
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+map_Kd textures/large_iron_gate_diff_1k.jpg
+bump textures/large_iron_gate_nor_gl_1k.jpg
+map_bump textures/large_iron_gate_nor_gl_1k.jpg
+
+newmtl $Material_1
+Kd 1 1 1
+Ke 0 0 0
+d 1
+illum 1
+
