@@ -101,12 +101,45 @@ struct [raypayload] RayPayLoad{
     bool fromReflection : read(closesthit , miss, caller) : write(closesthit , miss , caller) ;
 };
 
+// ---------------------------------------------------------------- the sun disc ( the same as in LightPass : the sky pixels of the rasterization have it )
+static const float SUN_ANGULAR_RADIUS = 0.00465f;
+static const float SUN_DISC_BRIGHTNESS = 100.0f;
+static const float SUN_DISC_MAX = 60000.0f;
+
+float3 sunTransmittanceToCamera(){
+    const float u = skyBuffer.sunCosZenith * 0.5f + 0.5f;
+    const float v = saturate(skyBuffer.cameraHeight / (ATMOSPHERE_RADIUS - PLANET_RADIUS));
+    return transmissionLUT.SampleLevel(samp , float2(u , v) , 0).rgb;
+}
+
+float3 AddSunDisc(float3 skyColor , float3 rayDir){
+    const float lightLength = length(sunBuffer.direction);
+    // the light is the direction where the light goes : the sun is on the other side
+    if(lightLength < 1e-5f) return skyColor;
+    const float3 toSun = -sunBuffer.direction / lightLength;
+
+    // nothing under the horizon
+    if(rayDir.y < 0.0f) return skyColor;
+
+    // the angle of one pixel from the projection ( projOnly[1][1] is 1 / tan( fov / 2 ) )
+    const float pixelAngle = 2.0f / (max(generalBuffer.projOnly[1][1] , 1e-3f) * float(max(generalBuffer.screenHeight , 1u)));
+    const float cosAngle = dot(rayDir , toSun);
+    if(cosAngle < cos(SUN_ANGULAR_RADIUS + pixelAngle)) return skyColor;
+
+    const float angle = acos(clamp(cosAngle , -1.0f , 1.0f));
+    const float coverage = saturate((SUN_ANGULAR_RADIUS + 0.5f * pixelAngle - angle) / pixelAngle);
+
+    const float3 disc = min(sunBuffer.diffuse * SUN_DISC_BRIGHTNESS * sunTransmittanceToCamera() , float3(SUN_DISC_MAX , SUN_DISC_MAX , SUN_DISC_MAX));
+    return skyColor + disc * coverage;
+}
+
 [shader("miss")]
 void main(inout RayPayLoad load){
     const float3 dir = WorldRayDirection();
     const uint2 id = DispatchRaysIndex().xy;
     const float3 color = skybox.SampleLevel(samp , dir , 0).xyz;
-    load.lightInfo.diffuse = color;
+    // the disc is in what the camera sees only : a ray of a reflection brings the plain sky ( a 60000 spot would be reflected by everything )
+    load.lightInfo.diffuse = load.fromReflection ? color : AddSunDisc(color , dir);
     load.lightInfo.specular = float3(0.0f ,0.0f , 0.0f);
     load.lightInfo.indirect = float3(0.0f ,0.0f , 0.0f);
     load.pixelInfo.pixelType = SKYBOX_PIXEL;

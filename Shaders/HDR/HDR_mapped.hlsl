@@ -32,6 +32,10 @@
 [[vk::image_format("r32f")]]
 [[vk::binding(11 , 0)]] RWTexture2D<float> filteredAOImage;
 
+// the shadow after the bilateral filter : only the SHADOW_MODE shows it
+[[vk::image_format("r32f")]]
+[[vk::binding(12 , 0)]] RWTexture2D<float> filteredShadowImage;
+
 
 float3 ACESFilm(float3 x)
 {
@@ -130,6 +134,13 @@ void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
     }else if(features.currentMode == AO_MODE){
         const float ao = filteredAOImage[id.xy].x;
         finalImage[id.xy] = float4(ao , ao , ao , 1.0f);
+        pixelCheck[id.xy] = UNDEFINED_PIXEL;
+        return;
+    }else if(features.currentMode == SHADOW_MODE){
+        // the scalar as it is in the image ( PostProcess takes it to the power of shadow thickness after it ) . 1 = lit , 0 = black . more than 1 is
+        // a bug of the formula ( a sum of two shadows ) : it is red
+        const float shadow = filteredShadowImage[id.xy].x;
+        finalImage[id.xy] = (shadow > 1.001f) ? float4(1.0f , 0.0f , 0.0f , 1.0f) : float4(shadow , shadow , shadow , 1.0f);
         pixelCheck[id.xy] = UNDEFINED_PIXEL;
         return;
     }

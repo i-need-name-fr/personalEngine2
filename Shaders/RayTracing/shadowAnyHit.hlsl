@@ -73,12 +73,16 @@
 
 struct [raypayload] ShadowRayPayLoad{
     bool inShadow : read(closesthit , miss, caller) : write(closesthit , miss , caller);
+    float depth : read(closesthit , miss, caller) : write(closesthit , miss , caller);
 };
 
 [shader("anyhit")]
 void main(inout ShadowRayPayLoad payload , in BuiltInTriangleIntersectionAttributes attr){
     const InstanceData instance = instanceLayout[InstanceID()];
 
+    // the bodies of the lamps do not cover anything . every other hit is accepted as it is : the rays that want only "is something there" end at the first
+    // accepted hit by their own flag ( RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH ) , and the rays of the shadow of the sun with a fade go on to the NEAREST
+    // hit ( an AcceptHitAndEndSearch here would stop them at the first one that the traversal found , not at the nearest )
     if(LUT_Buffer[instance.LUT_index].isLightSource != 0){
         IgnoreHit();
     }

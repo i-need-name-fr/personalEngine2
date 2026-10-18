@@ -71,7 +71,7 @@ namespace mox{
         const float minSpeed = 5.0f;
 
         uint32_t currentMode = 0;
-        // default , albedo , normal , depth , metallic , roughness , indirect light , filtered AO ( DEFAULT_MODE .. AO_MODE ) , the R key cycles through all of them
+        // default , albedo , normal , depth , metallic , roughness , indirect light , filtered AO , filtered shadow ( DEFAULT_MODE .. SHADOW_MODE ) , the R key cycles through all of them
         const uint32_t totalModes = TOTAL_VIEW_MODES;
 
         glm::vec3 calcRight() const noexcept{

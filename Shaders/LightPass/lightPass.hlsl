@@ -471,9 +471,7 @@ void main(uint3 id : SV_DispatchThreadID){
             specular += sunSpecular;
         }
 
-        // the balance of the picture ( ImGui : indirect share ) : the lamps are the direct light
-        diffuse *= generalBuffer.directWeight;
-        specular *= generalBuffer.directWeight;
+        // no weight of the direct light here for now ( directWeight is not applied : the clean colour )
 
         // demodulation : PostProcess multiplies the denoised diffuse by the same max( albedo , 0.02 )
         diffuse /= max(albedo , 0.02f);

@@ -118,6 +118,8 @@ void main(uint3 id : SV_DispatchThreadID){
     const float3 offset = pos + N * 0.0001f;
 
     float lightShadow = 1.0f;
+    // how much the lamps give to this pixel in total : the weight of lightShadow against sunShadow ( the same as in generalHit.hlsl )
+    float lightLuminance = 0.0f;
     const uint lightSamples = features.RayQueryLightSampleCount;
     if(lightSamples > 0u){
         uint lightOffset , lightCount;
@@ -159,6 +161,9 @@ void main(uint3 id : SV_DispatchThreadID){
 
             weightSum += weight;
             visibleSum += weight * visible;
+            // lightAttenuation : with the window of the radius , the same as the lighting itself ( LightPass , ReSTIR ) : at the edge of its radius a lamp
+            // does not light anything any more and does not weigh anything
+            lightLuminance += luminance(light.diffuse * lightAttenuation(light , dist)) * saturate(dot(N , L));
         }
 
         if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
@@ -166,27 +171,36 @@ void main(uint3 id : SV_DispatchThreadID){
     }
 
     float sunShadow = 1.0f;
+    float sunLuminance = 0.0f;
     const uint sunSamples = features.RayQuerySunSampleCount;
-    if(sunSamples > 0u){
+    // a sun that is off ( intensity 0 : it sets with the zenith ) is not traced and weighs nothing
+    if(sunBuffer.intensity > 0.0f){
         const float3 toSun = normalize(-sunBuffer.direction);
-        const float sunCosAlpha = cos(SUN_ANGULAR_RADIUS);
-        const float3 sunOrigin = pos + toSun * 0.01f;
 
-        float visible = 0.0f;
-        [loop]
-        for(uint i = 0 ; i < sunSamples ; i++){
-            uint seed = id.x * 832u + id.y * 293u  + generalBuffer.frameIndex * 2312u + i * 239u + 15485863u;
-            const float3 dir = sampleCone(toSun , sunCosAlpha , seed);
+        if(sunSamples > 0u){
+            const float sunCosAlpha = cos(SUN_ANGULAR_RADIUS);
+            const float3 sunOrigin = pos + toSun * 0.01f;
 
-            visible += (shadowTraceRay(dir , sunOrigin , 1000.0f)) ? 0.0f : 1.0f;
+            float visible = 0.0f;
+            [loop]
+            for(uint i = 0 ; i < sunSamples ; i++){
+                uint seed = id.x * 832u + id.y * 293u  + generalBuffer.frameIndex * 2312u + i * 239u + 15485863u;
+                const float3 dir = sampleCone(toSun , sunCosAlpha , seed);
+
+                visible += (shadowTraceRay(dir , sunOrigin , 1000.0f)) ? 0.0f : 1.0f;
+            }
+            sunShadow = visible / float(sunSamples);
         }
-        sunShadow = visible / float(sunSamples);
-        
+
+        // the same weight as in generalHit.hlsl
+        sunLuminance = luminance(sunBuffer.diffuse * sunBuffer.intensity) * smoothstep(0.0f , 0.7f , dot(toSun , N));
     }
-    // will go like this , we dont lerp any more , since it wont work as i expected
-    // now it will work like in теория вероятности , where we dont calculate straight the event , we find what is the chances of it not happening ( 1.0f - event )
-    float nonShadow = 1.0f - (sunShadow + lightShadow);
-    float rawShadow = 1.0f - nonShadow;
+
+    // the mean of the two shadows by what each of the sources gives to the pixel ( the energy that is left is exactly sun * sunShadow + lamps * lightShadow ) .
+    // when none of them gives anything there is nothing to weigh : no shadow ( 1 ) , not 0 / 0
+    const float totalWeight = sunLuminance + lightLuminance;
+    const float totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadow + lightLuminance * lightShadow) / totalWeight : 1.0f;
+    float rawShadow = totalShadow;
     float finalShadow;
 
     const float4 clipPos = mul(generalBuffer.prevViewProj , float4(pos,  1.0f));

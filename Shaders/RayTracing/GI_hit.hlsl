@@ -185,6 +185,7 @@ void main(inout HitRayPayLoad load , in BuiltInTriangleIntersectionAttributes at
     }
 
     // every field of the payload is written : the caller reads all of them
+    if(dot(normal , -WorldRayDirection()) < 0.0f) normal = -normal;
     load.didHit = true;
     load.worldPos = hitPoint;
     load.normal = normal;

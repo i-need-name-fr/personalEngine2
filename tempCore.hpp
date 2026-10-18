@@ -648,7 +648,8 @@ namespace mox{
 
                 SunSource sun{};
                 sun.direction = -toSun;
-                sun.diffuse = glm::vec3(1.0f , 0.95f , 0.85f) * 4.0f;
+                sun.intensity = 4.0f;
+                sun.diffuse = glm::vec3(1.0f , 0.95f , 0.85f) * sun.intensity;
                 sbuf->sunBuffer->recordData(std::span<SunSource>(&sun , 1));
 
                 // the angles of the sky view data : the same as the UI derives from the sun

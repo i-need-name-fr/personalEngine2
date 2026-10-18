@@ -1,5 +1,6 @@
 struct [raypayload] ShadowRayPayLoad{
     bool inShadow : read(closesthit , miss, caller) : write(closesthit , miss , caller);
+    float depth : read(closesthit , miss, caller) : write(closesthit , miss , caller);
 };
 
 [shader("miss")]

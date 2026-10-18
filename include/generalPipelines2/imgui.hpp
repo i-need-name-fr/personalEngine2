@@ -313,6 +313,7 @@ namespace mox{
             if(sunMoved){
                 const glm::vec3 toSun = directionToSun(sunElevation , sunAzimuth);
                 data.sun.direction = -toSun;
+                data.sun.intensity = sunIntensity;
                 data.sun.diffuse = sunColor * sunIntensity;
                 sunMoved = false;
             }
@@ -1251,7 +1252,7 @@ namespace mox{
 
             ImGui::SeparatorText("View");
 
-            static const char* modes[TOTAL_VIEW_MODES] = {"Final image" , "Albedo" , "Normal" , "Depth ( the farther , the redder )" , "Metallic" , "Roughness" , "Indirect light only" , "Ambient occlusion"};
+            static const char* modes[TOTAL_VIEW_MODES] = {"Final image" , "Albedo" , "Normal" , "Depth ( the farther , the redder )" , "Metallic" , "Roughness" , "Indirect light only" , "Ambient occlusion" , "Shadow ( 1 = lit , red = more than 1 )"};
             int mode = static_cast<int>(std::min(f.currentMode , static_cast<uint32_t>(TOTAL_VIEW_MODES - 1)));
             if(ImGui::Combo("Output" , &mode , modes , TOTAL_VIEW_MODES)){
                 f.currentMode = static_cast<uint32_t>(mode);

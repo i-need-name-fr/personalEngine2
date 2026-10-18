@@ -384,11 +384,15 @@ struct SunSource{
 
     alignas(16) glm::vec3 diffuse;
     alignas(16) glm::vec3 direction;
+    // the strength of the sun ( the scalar of diffuse = color * intensity ) . it sits in the padding after direction ( offset 28 ) : the size of the struct
+    // is still 32 bytes , so every shader that was compiled before sees the same layout
+    float intensity;
 
 #else
 
     float3 diffuse;
     float3 direction;
+    float intensity;
 
 #endif
 };
@@ -443,8 +447,11 @@ struct ForwardPlusInfo{
 // the ambient occlusion after the bilateral filter ( 1 = nothing covers the pixel , darker = more covered )
 #define AO_MODE 7
 
-// how many modes the R key cycles through ( 0 .. AO_MODE )
-#define TOTAL_VIEW_MODES 8
+// the shadow after the bilateral filter ( 1 = lit , darker = in the shadow , red = more than 1 ) : the number that PostProcess multiplies the direct light by
+#define SHADOW_MODE 8
+
+// how many modes the R key cycles through ( 0 .. SHADOW_MODE )
+#define TOTAL_VIEW_MODES 9
 
 struct GeneralFeatures{
 #ifdef __cplusplus
@@ -489,6 +496,13 @@ struct GeneralFeatures{
     // lightRadius * ( 1 + lightShadowFade ) ( see lightShadowReach ) . 0 - the shadow ends at the radius with a jump
     // appended at the END : the fields before it keep their offsets , so the shaders that do not read it stay valid
     float lightShadowFade;
+
+    // how many directions of the hemisphere the sky light ( ambient ) is averaged over per pixel and frame ( the denoiser and the history do the rest ) . 0 - none
+    uint32_t skyboxSampleCount;
+
+    // the shadow of the sun gets weaker with the distance to what covers the pixel ( along the ray to the sun ) : 0 at the covering object , 1 at this distance
+    // ( smoothstep ) . 0 - no fade , the shadow is 0 everywhere in the shade ( RT only , it needs the closest hit of the shadow ray )
+    float sunShadowFade;
 #else
 
     uint AO;
@@ -525,6 +539,10 @@ struct GeneralFeatures{
     uint ReSTIR;
 
     float lightShadowFade;
+
+    uint skyboxSampleCount;
+
+    float sunShadowFade;
 
 #endif
 };

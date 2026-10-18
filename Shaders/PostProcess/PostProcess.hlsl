@@ -165,9 +165,10 @@ void main(uint3 id : SV_DispatchThreadID){
     const float3 albedo = max(albedoImage[id.xy].xyz , 0.02f);
     const float3 direct = (diffuse + specular) * albedo;
     const float linearDepth = depthImage[id.xy].x;
-    const float shadow = max(pow(filteredShadowImage[id.xy].x , features.shadowThickness) , 0.00001f);
+    // the base of pow is cut BEFORE the power : pow( 0 , 0 ) is undefined ( NaN ) , and with shadow thickness 0 every pixel with the shadow 0 stayed black
+    const float shadow = max(pow(max(filteredShadowImage[id.xy].x , 0.0001f) , features.shadowThickness) , 0.00001f);
     const float AO = pow(filteredAmbientOcclusion[id.xy].x , features.AO_intens);
-    const float3 indirect = indirectImage[id.xy].xyz / max(albedo , 1e-20);
+    const float3 indirect = indirectImage[id.xy].xyz * albedo;
     float3 result = (direct * shadow + indirect) * AO;
     // the ambient light : the colour of the sky in the direction of the normal , times albedo
 

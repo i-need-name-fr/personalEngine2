@@ -23,7 +23,7 @@ namespace mox{
     //
     // the order of the groups = the numbers in shaderStructure.h ( RT_MISS_* and RT_HITGROUP_* ) :
     //   miss : 0 general , 1 hit info ( GI ) , 2 shadow
-    //   hit  : 0 general , 1 hit info ( GI ) , 2 shadow ( an any hit only )
+    //   hit  : 0 general , 1 hit info ( GI ) , 2 shadow ( the any hit , and the closest hit when shadowHitPath is not empty )
     // the GENERAL ones are optional : with no path the general miss is the GI miss and the general hit group is an empty one ( no shader )
     //
     // what the barriers of the pass say : the G buffer , the sky and the buffers of the scene are read , the images of the light ( diffuse ,
@@ -51,6 +51,7 @@ namespace mox{
             // hit shaders
             std::string giHitPath;           // RT_HITGROUP_HITINFO : the closest hit
             std::string shadowAnyHitPath;    // RT_HITGROUP_SHADOW : the any hit
+            std::string shadowHitPath;       // RT_HITGROUP_SHADOW , optional : the closest hit ( the group is an any hit only when it is empty )
             std::string generalHitPath;      // RT_HITGROUP_GENERAL , optional : an empty hit group when it is empty
         };
 
@@ -526,6 +527,8 @@ namespace mox{
                 if(!inputData.generalHitPath.empty()) generalHit.emplace(context , inputData.generalHitPath);
                 ShaderModule giHit(context , inputData.giHitPath);
                 ShaderModule shadowAnyHit(context , inputData.shadowAnyHitPath);
+                std::optional<ShaderModule> shadowHit;
+                if(!inputData.shadowHitPath.empty()) shadowHit.emplace(context , inputData.shadowHitPath);
 
                 // ------------------------------------------------------------ the stages and the groups
                 // the SBT stores no names , only the order : THIS ORDER is what RT_MISS_* and RT_HITGROUP_* mean
@@ -552,6 +555,7 @@ namespace mox{
                 const uint32_t generalHitStage = generalHit.has_value() ? addStage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR , generalHit->module) : VK_SHADER_UNUSED_KHR;
                 const uint32_t giHitStage = addStage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR , giHit.module);
                 const uint32_t shadowAnyHitStage = addStage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR , shadowAnyHit.module);
+                const uint32_t shadowHitStage = shadowHit.has_value() ? addStage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR , shadowHit->module) : VK_SHADER_UNUSED_KHR;
 
                 const auto generalGroup = [](const uint32_t stage){
                     VkRayTracingShaderGroupCreateInfoKHR group{};
@@ -587,7 +591,7 @@ namespace mox{
                     generalGroup(shadowMissStage) ,      // RT_MISS_SHADOW
                     hitGroup(generalHitStage , VK_SHADER_UNUSED_KHR) ,   // RT_HITGROUP_GENERAL
                     hitGroup(giHitStage , VK_SHADER_UNUSED_KHR) ,        // RT_HITGROUP_HITINFO
-                    hitGroup(VK_SHADER_UNUSED_KHR , shadowAnyHitStage)   // RT_HITGROUP_SHADOW
+                    hitGroup(shadowHitStage , shadowAnyHitStage)         // RT_HITGROUP_SHADOW
                 };
 
                 VkRayTracingPipelineCreateInfoKHR info{};

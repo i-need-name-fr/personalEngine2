@@ -144,11 +144,14 @@ namespace mox{
                 const auto result = createMeshes();
                 if(!result.has_value()) return result;
             }
+            setDefaultSettings();
 
             {
                 const auto result = createAllPasses();
                 if(!result.has_value()) return result;
             }
+
+
             return {};
         }
 
@@ -298,6 +301,7 @@ namespace mox{
                     info.rayGenerationPath = "../Shaders/RayTracing/rayGeneration.spv";
                     info.shadowMissPath = "../Shaders/RayTracing/shadowMiss.spv";
                     info.shadowAnyHitPath = "../Shaders/RayTracing/shadowAnyHit.spv";
+                    info.shadowHitPath = "../Shaders/RayTracing/shadowHit.spv";
                     info.giHitPath = "../Shaders/RayTracing/GI_hit.spv";
                     info.giMissPath = "../Shaders/RayTracing/GI_miss.spv";
                     info.manager = manager.get();
@@ -383,11 +387,11 @@ namespace mox{
             featureSettings.shadowThickness = 1.0f;
             featureSettings.temporalShadowK = 0.85f;
             featureSettings.light_sun_Proportion = 0.5f;
-            featureSettings.RT = 0;
+            featureSettings.RT = 1;
             featureSettings.PT = 0;
             featureSettings.currentMode = DEFAULT_MODE;
             featureSettings.randomValues = 1;
-            featureSettings.volumentricFog = 1;
+            featureSettings.volumentricFog = 0;
             featureSettings.ReSTIR = 1;
             featureSettings.IndirectShare = 0.5f;
             featureSettings.maxDepth = 50.0f;
@@ -395,6 +399,10 @@ namespace mox{
             featureSettings.ReSTIRGI_temporal = true;
             // the shadow of a lamp fades out over 0.5 of its radius beyond the radius
             featureSettings.lightShadowFade = 0.5f;
+            // the sky light is averaged over 2 directions of the hemisphere per pixel and frame
+            featureSettings.skyboxSampleCount = 2u;
+            // the shadow of the sun fades with the distance to what covers the pixel : it is fully gone at this distance ( in meters ) , 0 - no fade
+            featureSettings.sunShadowFade = 30.0f;
 
             // fog : a thin haze . gridSize is the number of the slices of the fog image , it is not a setting of the user
             fogSettings = FogVolume{};
@@ -417,7 +425,8 @@ namespace mox{
 
                 sunSettings = SunSource{};
                 sunSettings.direction = -toSun;
-                sunSettings.diffuse = glm::vec3(1.0f , 0.95f , 0.85f) * 4.0f;
+                sunSettings.intensity = 4.0f;
+                sunSettings.diffuse = glm::vec3(1.0f , 0.95f , 0.85f) * sunSettings.intensity;
 
                 const float horizontal = std::sqrt(toSun.x * toSun.x + toSun.z * toSun.z);
                 skySettings = SkyViewData{};
@@ -442,7 +451,6 @@ namespace mox{
                 info.asyncMultiThreadQueueCount =4;
                 info.multithreadQueueCount = 1;
                 context = std::make_shared<VulkanContext>(info);
-                setDefaultSettings();
                 renderImages = std::make_shared<FrameTargets>(context.get());
                 buffers = std::make_shared<SourceBuffers>(context.get());
                 {
@@ -554,19 +562,19 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<void> createModels() noexcept{
             try{
-                // stone 1
-                {
-                    Model2::CreateInfo info{};
-                    info.color = glm::vec3(0.0f);
-                    info.isALightObject = false;
-                    info.path = "../models/stone_01/stone_01.obj";
+                // // stone 1
+                // {
+                //     Model2::CreateInfo info{};
+                //     info.color = glm::vec3(0.0f);
+                //     info.isALightObject = false;
+                //     info.path = "../models/stone_01/stone_01.obj";
 
-                    models.push_back(std::make_shared<Model2>(info));
-                    glm::mat4 model(1.0f);
-                    model = glm::translate(model , glm::vec3(-2.0f));
-                    model = glm::scale(model , glm::vec3(50.0f));
-                    models[0]->setMatrix(model , 0);
-                }
+                //     models.push_back(std::make_shared<Model2>(info));
+                //     glm::mat4 model(1.0f);
+                //     model = glm::translate(model , glm::vec3(-2.0f));
+                //     model = glm::scale(model , glm::vec3(50.0f));
+                //     models[0]->setMatrix(model , 0);
+                // }
 
                 // stone 1
                 {
@@ -580,21 +588,21 @@ namespace mox{
                     glm::mat4 model(1.0f);
                     model = glm::translate(model , glm::vec3(-40.0f ,-2.0f, 0.0f));
                     model = glm::scale(model , glm::vec3(1.0f));
-                    models[1]->setMatrix(model , 0);
+                    models[0]->setMatrix(model , 0);
                 }
 
-                {
-                    Model2::CreateInfo info{};
-                    info.color = glm::vec3(0.0f);
-                    info.isALightObject = false;
-                    info.path = "../models/rock_09/rock_09.obj";
+                // {
+                //     Model2::CreateInfo info{};
+                //     info.color = glm::vec3(0.0f);
+                //     info.isALightObject = false;
+                //     info.path = "../models/rock_09/rock_09.obj";
 
-                    models.push_back(std::make_shared<Model2>(info));
-                    glm::mat4 model(1.0f);
-                    model = glm::translate(model , glm::vec3(-20.0f ,20.0f, 0.0f));
-                    model = glm::scale(model , glm::vec3(30.0f));
-                    models[2]->setMatrix(model , 0);
-                }
+                //     models.push_back(std::make_shared<Model2>(info));
+                //     glm::mat4 model(1.0f);
+                //     model = glm::translate(model , glm::vec3(-20.0f ,20.0f, 0.0f));
+                //     model = glm::scale(model , glm::vec3(30.0f));
+                //     models[2]->setMatrix(model , 0);
+                // }
 
 
             }
@@ -618,7 +626,7 @@ namespace mox{
                 // the first two : violet , not too bright , a random strength and reach
                 for(uint32_t i = 0 ; i < 3 ; i++){
                     const float intensity = rnd(4.0f , 10.0f);
-                    lights[i].diffuse = glm::vec3(0.55f , 0.20f , 1.0f) * intensity;
+                    lights[i].diffuse = glm::vec3(rnd(0.2f , 0.5f) , rnd(0.0f , 1.0f) , rnd(0.2f , 1.0f)) * intensity;
                     lights[i].lightRadius = rnd(15.0f , 30.0f);
                     lights[i].lightLinear = rnd(0.05f , 0.012f);
                     lights[i].lightQuadratic = rnd(0.02f , 0.004f);
@@ -626,9 +634,9 @@ namespace mox{
 
                 // the last one is the main one : the brightest and a soft white
                 lights[3].diffuse = glm::vec3(1.0f , 0.97f , 0.92f) * rnd(18.0f , 28.0f);
-                lights[3].lightRadius = rnd(35.0f , 50.0f);
+                lights[3].lightRadius = rnd(5.0f , 20.0f);
                 lights[3].lightLinear = rnd(0.05f , 0.09f);
-                lights[3].lightQuadratic = rnd(0.015f , 0.03f);
+                lights[3].lightQuadratic = rnd(0.055f , 0.1f);
 
 
                 lights[0].position = glm::vec3(-23.0f , 4.0f , -1.0f);
@@ -959,8 +967,9 @@ namespace mox{
                 const float phi = glm::radians(azimuth);
 
                 const glm::vec3 toSun(std::sin(theta) * std::cos(phi) , std::cos(theta) , std::sin(theta) * std::sin(phi));
-                intensity = glm::cos(glm::radians(glm::clamp(zenith , 0.0f  ,90.0f)));
+                intensity = glm::cos(glm::radians(glm::clamp(zenith , 0.0f  ,90.0f))) * 2.0f;
                 sun.direction = -toSun;                 // the light travels away from the sun
+                sun.intensity = intensity;
                 sun.diffuse = glm::vec3(color[0] , color[1] , color[2]) * intensity;
 
                 sky.sunCosZenith = std::cos(theta);     // the same as toSun.y
@@ -985,7 +994,7 @@ namespace mox{
                     info.AO = HBAO_REQUIRED;
                 }
                 gui::SameLine();
-                if(gui::Button("NONE")){
+                if(gui::Button("NO AO")){
                     info.AO = AO_NOT_REQUIRED;
                 }
                 gui::Separator();
@@ -1035,6 +1044,10 @@ namespace mox{
                 // how far beyond the radius of a lamp its shadow still counts ( in radii ) : 0 - it ends at the radius with a jump
                 gui::SliderFloat("light shadow fade" , &info.lightShadowFade , 0.0f , 2.0f);
                 gui::Separator();
+
+                // RT : the shadow of the sun gets weaker with the distance to what covers the pixel ( meters , 0 - no fade )
+                gui::SliderFloat("sun shadow fade" , &info.sunShadowFade , 0.0f , 200.0f);
+                gui::Separator();
             }
             gui::EndDisabled();
             gui::Separator();
@@ -1078,7 +1091,7 @@ namespace mox{
                 }
                 gui::SameLine();
 
-                if(gui::Button("NONE")){
+                if(gui::Button("NO MODE")){
                     info.indirectMode = NON_REQUIRED;
                 }
             }
@@ -1162,7 +1175,7 @@ namespace mox{
         uint32_t requiredMode = RasterizationRequired;
         std::vector<LightSource> allLights;
 
-        static constexpr uint32_t lightCount = 3;
+        static constexpr uint32_t lightCount = 4;
 
         GeneralInfo generalSettings{};
         GeneralFeatures featureSettings{};

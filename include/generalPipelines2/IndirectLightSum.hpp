@@ -85,10 +85,19 @@ namespace mox{
             image("metallicImage" , ImageType::RenderImage2);
             image("viewImage" , ImageType::RenderImage2);
             image("pixelCheck" , ImageType::RenderImage2);
+            image("multiScatter" , ImageType::RenderImage2);
             image("skybox" , ImageType::Skybox2);
 
             buffer("generalBuffer");
             buffer("generalFeatures");
+
+            // Forward+ : the lamps of the tile of the pixel ( the lists are written by the ForwardPlus pass )
+            buffer("tileLightIndices");
+            buffer("lightBuffer");
+            buffer("lightCountPerTile");
+            buffer("forwardInfo");
+
+            buffer("sunBuffer");
 
             return reqs;
         }
@@ -145,9 +154,12 @@ namespace mox{
                 GraphSlot<RenderImage2>{"HDRImage_0" , &HDRImage[0]} , GraphSlot<RenderImage2>{"HDRImage_1" , &HDRImage[1]} ,
                 GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} , GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} ,
                 GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} , GraphSlot<RenderImage2>{"viewImage" , &viewImage} ,
-                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
+                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} , GraphSlot<RenderImage2>{"multiScatter" , &multiScatter} ,
                 GraphSlot<Skybox2>{"skybox" , &skybox} ,
-                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"generalFeatures" , &features});
+                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"generalFeatures" , &features} ,
+                GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices} , GraphSlot<BufferBase2>{"lightBuffer" , &lightBuffer} ,
+                GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile} , GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo} ,
+                GraphSlot<BufferBase2>{"sunBuffer" , &sunBuffer});
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -164,7 +176,7 @@ namespace mox{
             constexpr VkAccessFlags2 write = VK_ACCESS_2_SHADER_WRITE_BIT;
             constexpr VkAccessFlags2 uniformRead = VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT;
 
-            std::array<VkImageMemoryBarrier2 , 13> imageBar;
+            std::array<VkImageMemoryBarrier2 , 14> imageBar;
 
             // the g buffer of this frame , the picture of the last frame and the sky : only read
             imageBar[0] = positionImage[id]->translateImage(read , stage);
@@ -185,10 +197,20 @@ namespace mox{
             // only read ( for now )
             imageBar[12] = pixelCheck->translateImage(read , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 2> bufBar;
+            // the LUT of the multiple scattering : only read
+            imageBar[13] = multiScatter->translateImage(read , stage);
+
+            std::array<VkBufferMemoryBarrier2 , 7> bufBar;
 
             bufBar[0] = generalBuffer->translateBuffer(uniformRead , stage);
             bufBar[1] = features->translateBuffer(uniformRead , stage);
+
+            // the lamps of the tiles : only read
+            bufBar[2] = tileLightIndices->translateBuffer(read , stage);
+            bufBar[3] = lightBuffer->translateBuffer(read , stage);
+            bufBar[4] = lightCountPerTile->translateBuffer(read , stage);
+            bufBar[5] = forwardInfo->translateBuffer(uniformRead , stage);
+            bufBar[6] = sunBuffer->translateBuffer(uniformRead , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -227,10 +249,16 @@ namespace mox{
         RenderImage2* metallicImage{nullptr};
         RenderImage2* viewImage{nullptr};
         RenderImage2* pixelCheck{nullptr};
+        RenderImage2* multiScatter{nullptr};
         Skybox2* skybox{nullptr};
 
         BufferBase2* generalBuffer{nullptr};
         BufferBase2* features{nullptr};
+        BufferBase2* tileLightIndices{nullptr};
+        BufferBase2* lightBuffer{nullptr};
+        BufferBase2* lightCountPerTile{nullptr};
+        BufferBase2* forwardInfo{nullptr};
+        BufferBase2* sunBuffer{nullptr};
 
         // the macro of the move operators already checks this == &input , the check here keeps the function safe on its own
         void processCopy(IndirectLightSum&& input) noexcept{
@@ -256,10 +284,16 @@ namespace mox{
             metallicImage = std::exchange(input.metallicImage , nullptr);
             viewImage = std::exchange(input.viewImage , nullptr);
             pixelCheck = std::exchange(input.pixelCheck , nullptr);
+            multiScatter = std::exchange(input.multiScatter , nullptr);
             skybox = std::exchange(input.skybox , nullptr);
 
             generalBuffer = std::exchange(input.generalBuffer , nullptr);
             features = std::exchange(input.features , nullptr);
+            tileLightIndices = std::exchange(input.tileLightIndices , nullptr);
+            lightBuffer = std::exchange(input.lightBuffer , nullptr);
+            lightCountPerTile = std::exchange(input.lightCountPerTile , nullptr);
+            forwardInfo = std::exchange(input.forwardInfo , nullptr);
+            sunBuffer = std::exchange(input.sunBuffer , nullptr);
 
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
@@ -286,10 +320,16 @@ namespace mox{
             metallicImage = nullptr;
             viewImage = nullptr;
             pixelCheck = nullptr;
+            multiScatter = nullptr;
             skybox = nullptr;
 
             generalBuffer = nullptr;
             features = nullptr;
+            tileLightIndices = nullptr;
+            lightBuffer = nullptr;
+            lightCountPerTile = nullptr;
+            forwardInfo = nullptr;
+            sunBuffer = nullptr;
 
             inputData = {};
             completedInit = false;
@@ -311,7 +351,7 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(16);
+                    std::vector<DescriptorLayoutData> data(22);
 
                     // 0 .. 10 : the images of the g buffer and the result
                     for(uint32_t i = 0 ; i <= 10 ; i++){
@@ -327,6 +367,18 @@ namespace mox{
 
                     // pixelCheck
                     data[15] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+
+                    // Forward+ : the lamps of the tiles
+                    data[16] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};   // tileLightIndices
+                    data[17] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};   // lightBuffer
+                    data[18] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};   // lightCountPerTile
+                    data[19] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};   // forwardInfo
+
+                    // the multiple scattering LUT ( the sampler of the sky cube , data[12] , reads it too )
+                    data[20] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
+
+                    // the sun
+                    data[21] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -350,7 +402,7 @@ namespace mox{
                 {
                     for(auto& id : {0 , 1}){
 
-                        std::vector<DescriptorData2> data(16);
+                        std::vector<DescriptorData2> data(22);
 
                         data[0] = DescriptorData2::createData(positionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
                         data[1] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
@@ -372,6 +424,15 @@ namespace mox{
                         data[14] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 14 , 0);
 
                         data[15] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 15 , 0);
+
+                        data[16] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 16 , 0);
+                        data[17] = DescriptorData2::createData(lightBuffer , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 17 , 0);
+                        data[18] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 18 , 0);
+                        data[19] = DescriptorData2::createData(forwardInfo , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 19 , 0);
+
+                        data[20] = DescriptorData2::createData(multiScatter , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 20 , 0);
+
+                        data[21] = DescriptorData2::createData(sunBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 21 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
