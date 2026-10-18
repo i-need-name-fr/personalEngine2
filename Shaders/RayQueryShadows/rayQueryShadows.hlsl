@@ -79,6 +79,19 @@ float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed){
     return localDir.x * tangent + localDir.y * bitangent + localDir.z * axis;
 }
 
+// a random point on the sphere of the lamp ( light.sourceRadius ) , on the half that looks at the shaded point : the shadow ray goes there , so the penumbra
+// comes from the size of the lamp ( the same function as in generalHit.hlsl ) . L goes FROM the point TO the lamp
+float3 randomInLightRadius(inout uint seed , LightSource light , const float3 L){
+    const float u = rand(seed) , v = rand(seed);
+    const float z = 1.0f - 2.0f * u;
+    const float phi = 2.0f * PI * v;
+    const float r = sqrt(saturate(1.0f - z * z));
+    float3 offset = light.sourceRadius * float3(cos(phi) * r , sin(phi) * r , z);
+    // the offsets that look the way of L are on the far side of the lamp : they are turned over
+    if(dot(offset , L) > 0.0f) offset = -offset;
+    return light.position + offset;
+}
+
 float lightAttenuation(LightSource light , float lightDistance){
     const float falloff = 1.0f / (1.0f + light.lightLinear * lightDistance + light.lightQuadratic * lightDistance * lightDistance);
     const float ratio = saturate(lightDistance / max(light.lightRadius , 1e-4f));
@@ -144,16 +157,17 @@ void main(uint3 id : SV_DispatchThreadID){
             const float weight = luminance(light.diffuse) * falloff * saturate(dot(N , L)) * reach;
             if(reach <= 0.0f || weight <= 0.0f) continue;
 
-            const float sinAlpha = min(light.lightRadius / max(dist , light.lightRadius) , MAX_LIGHT_CONE_SIN);
-            const float cosAlpha = sqrt(1.0f - sinAlpha * sinAlpha);
-
             float visible = 0.0f;
             [loop]
             for(uint i = 0 ; i < lightSamples ; i++){
                 uint seed = id.x * 832u + id.y * 293u  + generalBuffer.frameIndex * 2312u + i * 239u + l * 5683u;
-                const float3 dir = sampleCone(L , cosAlpha , seed);
+                // the ray goes to a point of the sphere of the lamp and ends there ( not at its centre )
+                const float3 samplePos = randomInLightRadius(seed , light , L);
+                const float3 toSample = samplePos - pos;
+                const float sampleDistance = length(toSample);
+                const float3 dir = toSample / max(sampleDistance , 1e-4f);
 
-                visible += (shadowTraceRay(dir , offset , dist)) ? 0.0f : 1.0f;
+                visible += (shadowTraceRay(dir , offset , sampleDistance)) ? 0.0f : 1.0f;
             }
             visible /= float(lightSamples);
             // beyond the radius the shadow of this lamp is weaker and weaker : 1 ( no shadow ) at the end of the fade
@@ -178,7 +192,8 @@ void main(uint3 id : SV_DispatchThreadID){
         const float3 toSun = normalize(-sunBuffer.direction);
 
         if(sunSamples > 0u){
-            const float sunCosAlpha = cos(SUN_ANGULAR_RADIUS);
+            // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra
+            const float sunCosAlpha = cos(sunBuffer.sourceRadius);
             const float3 sunOrigin = pos + toSun * 0.01f;
 
             float visible = 0.0f;

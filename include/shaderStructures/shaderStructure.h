@@ -269,6 +269,11 @@ struct LightSource{
     float lightQuadratic;
     float lightRadius;
 
+    // the size of the lamp itself ( the radius of the light sphere , meters ) : the angle of the cone to the lamp is sourceRadius / distance , it makes the
+    // penumbra . lightRadius is NOT it : that is how far the lamp lights . appended at the END : the struct is still 48 bytes ( it was 40 , padded ) , so the shaders
+    // that do not read it stay valid
+    float sourceRadius;
+
 #else
 
     float3 diffuse;
@@ -277,6 +282,8 @@ struct LightSource{
     float lightLinear;
     float lightQuadratic;
     float lightRadius;
+
+    float sourceRadius;
 
 #endif
 };
@@ -383,14 +390,18 @@ struct SunSource{
 #ifdef __cplusplus
 
     alignas(16) glm::vec3 diffuse;
+    // the size of the sun for the shadow : the half angle of the cone to the sun ( radians ) , the real sun is 0.00465 . the bigger , the softer the penumbra .
+    // it sits in the padding after diffuse ( offset 12 ) : the offsets of direction ( 16 ) and intensity ( 28 ) did not move and the struct is still 32 bytes ,
+    // so every shader that was compiled before sees the same layout
+    float sourceRadius;
     alignas(16) glm::vec3 direction;
-    // the strength of the sun ( the scalar of diffuse = color * intensity ) . it sits in the padding after direction ( offset 28 ) : the size of the struct
-    // is still 32 bytes , so every shader that was compiled before sees the same layout
+    // the strength of the sun ( the scalar of diffuse = color * intensity ) . it sits in the padding after direction ( offset 28 )
     float intensity;
 
 #else
 
     float3 diffuse;
+    float sourceRadius;
     float3 direction;
     float intensity;
 

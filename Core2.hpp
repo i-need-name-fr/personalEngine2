@@ -424,6 +424,8 @@ namespace mox{
                 const glm::vec3 toSun(std::cos(elevation) * std::cos(azimuth) , std::sin(elevation) , std::cos(elevation) * std::sin(azimuth));
 
                 sunSettings = SunSource{};
+                // the size of the sun for the shadow ( the half angle of the cone , radians ) : the real sun is 0.00465 , a bigger one makes a softer penumbra
+                sunSettings.sourceRadius = 0.00465f;
                 sunSettings.direction = -toSun;
                 sunSettings.intensity = 4.0f;
                 sunSettings.diffuse = glm::vec3(1.0f , 0.95f , 0.85f) * sunSettings.intensity;
@@ -624,25 +626,22 @@ namespace mox{
                 };
 
                 // the first two : violet , not too bright , a random strength and reach
-                for(uint32_t i = 0 ; i < 3 ; i++){
+                for(uint32_t i = 0 ; i < 4 ; i++){
                     const float intensity = rnd(4.0f , 10.0f);
                     lights[i].diffuse = glm::vec3(rnd(0.2f , 0.5f) , rnd(0.0f , 1.0f) , rnd(0.2f , 1.0f)) * intensity;
                     lights[i].lightRadius = rnd(15.0f , 30.0f);
                     lights[i].lightLinear = rnd(0.05f , 0.012f);
                     lights[i].lightQuadratic = rnd(0.02f , 0.004f);
+                    // the size of the lamp itself ( meters ) : the penumbra of its shadow
+                    lights[i].sourceRadius = rnd(1.0f , 2.0f);
                 }
 
-                // the last one is the main one : the brightest and a soft white
-                lights[3].diffuse = glm::vec3(1.0f , 0.97f , 0.92f) * rnd(18.0f , 28.0f);
-                lights[3].lightRadius = rnd(5.0f , 20.0f);
-                lights[3].lightLinear = rnd(0.05f , 0.09f);
-                lights[3].lightQuadratic = rnd(0.055f , 0.1f);
 
 
                 lights[0].position = glm::vec3(-23.0f , 4.0f , -1.0f);
                 lights[1].position = glm::vec3(2.2f , 3.7f , 27.0f);
                 lights[2].position = glm::vec3(-19.0f , 3.5 , 19);
-                lights[3].position = glm::vec3(0.0f);
+                lights[3].position = glm::vec3(-5.7f , 9.5f, -16.0f);
                 allLights = std::move(lights);
 
                 buffers->lightBuffer->recordData(translateToSpan(allLights));
@@ -662,13 +661,13 @@ namespace mox{
 
         void updateLightPoses() noexcept{
             const float time = glfwGetTime();
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model , glm::vec3(-12.0f , 14.0f , 6.0f));
-            model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 40.0f)) , 0.0f ));
-            model = glm::rotate(model  ,glm::radians(time * 40.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
-            model = glm::translate(model , glm::vec3(20.0f , 0.0f , 0.0f));
-            model = glm::scale(model , glm::vec3(0.3f));
-            allLights[3].position = model[3];
+            // glm::mat4 model = glm::mat4(1.0f);
+            // model = glm::translate(model , glm::vec3(-12.0f , 14.0f , 6.0f));
+            // model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 40.0f)) , 0.0f ));
+            // model = glm::rotate(model  ,glm::radians(time * 40.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
+            // model = glm::translate(model , glm::vec3(20.0f , 0.0f , 0.0f));
+            // model = glm::scale(model , glm::vec3(0.3f));
+            // allLights[3].position = model[3];
         }
 
 
@@ -961,6 +960,10 @@ namespace mox{
 
             gui::Text("Sun color : the color of the sun");
             changed |= gui::ColorEdit3("Sun color" , color);
+            gui::Separator();
+
+            // the size of the sun for the shadow : the half angle of the cone , radians ( the real sun is 0.00465 ) . the bigger , the softer the penumbra
+            gui::SliderFloat("Sun source radius" , &sun.sourceRadius , 0.0f , 0.1f , "%.4f");
 
             if(changed){
                 const float theta = glm::radians(zenith);

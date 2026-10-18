@@ -25,6 +25,7 @@ int main(){
     try{
         Core2 core(9);
         core.run();
+        
     }
     catch(std::exception &e){
         std::cerr << e.what() << '\n';

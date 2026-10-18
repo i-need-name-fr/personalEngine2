@@ -457,6 +457,34 @@ float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed){
     return localDir.x * tangent + localDir.y * bitangent + localDir.z * axis;
 }
 
+float3 randomInLightRadius(inout uint seed  , LightSource light , const float3 L){
+    const float u = rand(seed) , v = rand(seed);
+    const float z = 1.0f - 2 * u;
+    const float phi = 2.0f * PI * v;
+    const float r = sqrt(saturate(1.0f - z * z));
+    const float x = cos(phi) * r;
+    const float y = sin(phi) * r;
+    const float R = light.sourceRadius;
+    float3 offset = R * float3(x ,y ,z);
+    // L goes FROM the point TO the lamp , the visible half of the sphere is the one that looks back at the point : the offsets that look the way of L ( dot > 0 )
+    // are on the far side of the lamp , they are turned over ( it was dot < 0 : the far half was chosen )
+    const float facing = dot(offset , L);
+    if(facing > 0.0f) offset = -offset;
+    return light.position + offset;
+}
+
+float calculateShadowInSphere(inout uint seed , LightSource light , const float3 P , const float3 N){
+    float3 L = light.position - P;
+    const float d = length(L);
+    L = normalize(L);
+    const float3 randomPos = randomInLightRadius(seed , light , L);
+    // the ray ends at the chosen point of the sphere , not at its centre ( offsetRay wants the position of the camera as the third argument , not a distance )
+    const float3 toSample = randomPos - P;
+    const float sampleDistance = length(toSample);
+    const float3 dir = toSample / max(sampleDistance , 1e-4f);
+    return calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , dir , sampleDistance);
+}
+
 float3 stretchView(const float3 V , const float a){
     return normalize(float3(a  * V.x , V.y * a , V.z));
 }
@@ -642,7 +670,7 @@ namespace ReSTIRGI{
             computeLight(data ,L , diffuse , specular );
 
             const float NdotL = saturate(dot(data.N , L));  
-            float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , dist);
+            float shadow = calculateShadowInSphere(seed , light , data.P , data.N);
             float window = lightAttenuation(light, dist);
             result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
         }
@@ -852,7 +880,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         if(features.RayQuerySunSampleCount > 0 ){
             sunShadow =0.0f;
             const float3 toSun = normalize(-sunBuffer.direction);
-            const float sunCosAlpha = cos(SUN_ANGULAR_RADIUS);
+            // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra .
+            // the disc in the sky still has SUN_ANGULAR_RADIUS
+            const float sunCosAlpha = cos(sunBuffer.sourceRadius);
             const float3 sunOrigin = pos + toSun * 0.01f;
             [loop]
             for(uint i = 0 ; i < features.RayQuerySunSampleCount ; i++){
@@ -896,8 +926,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 const float cosAlpha = sqrt(1.0f - sinAlpha * sinAlpha);
                 [loop]
                 for(uint j = 0 ; j < features.RayQueryLightSampleCount ;j++){
-                    const float3 dir = sampleCone(L , cosAlpha , load.seed);
-                    float currentShadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , dir , d);
+                    float currentShadow = calculateShadowInSphere(load.seed , light , info.P , info.N);
                     shadow += currentShadow;
                 }
                 shadow /= float(features.RayQueryLightSampleCount);
