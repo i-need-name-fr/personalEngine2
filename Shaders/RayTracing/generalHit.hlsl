@@ -267,12 +267,14 @@ float calculateShadowAtt(float3 position , float3 direction , float maxDistance)
     ShadowRayPayLoad shadow;
     shadow.inShadow = true;
     shadow.depth = maxDistance;
-    TraceRay(TLAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_NON_OPAQUE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
-    float k = 1.0f / shadow.depth;
-    k = 1.0f - k;
-    // the far object is , the lower shadow affect it , will look more like an ambient tbn
-    const float data = (shadow.inShadow )? clamp(k , 0.0f , 1.0f) : 1.0f;
-    return data;
+    // no ACCEPT_FIRST_HIT : the depth has to be the one of the NEAREST blocker ( the first accepted hit can be a farther one ) , as in calculateSunShadow
+    TraceRay(TLAS, RAY_FLAG_FORCE_NON_OPAQUE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
+    float data = 1.0f;
+    if(!shadow.inShadow) return data;
+    // VISIBILITY of the lamp along this ray : r = depth / distance to the lamp . a blocker at the pixel ( r -> 0 ) gives 0 ( the full shadow ) , a blocker at the lamp
+    // ( r -> 1 ) gives 1 ( no shadow ) . it was 1 - r : the contact shadow was the brightest one and the far one the darkest
+    const float r = saturate(shadow.depth / max(maxDistance , 1e-20f));
+    return r;
 }
 
 // the shadow of the sun with a fade : how much of the sun reaches the pixel along this ray . 1 - nothing covers it , 0 - covered at once . the shadow gets weaker
@@ -356,8 +358,9 @@ float calculateShadowInSphere(inout uint seed , LightSource light , const float3
     const float3 toSample = randomPos - P;
     const float sampleDistance = length(toSample);
     const float3 dir = toSample / max(sampleDistance , 1e-4f);
-    return calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , dir , sampleDistance);
+    return calculateShadowAtt(offsetRay(P , N , generalBuffer.playerPosition) , dir , sampleDistance);
 }
+
 
 
 float3 stretchView(const float3 V , const float a){
@@ -601,6 +604,7 @@ namespace ReSTIRGI{
             res.radiance = brdf;
 
             const float3 fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
+            
             const float  p_hat = luminance(res.radiance * fcos);
             res.weightSum = p_hat / pdf;
             res.W = 1.0f / pdf;    
@@ -634,9 +638,6 @@ namespace ReSTIRGI{
         ReservoirGI r = (ReservoirGI)0;
 
         ReservoirGI prevGI = prevReSTIRGIBuffer[bufferIndex(prevCoord)];
-        if(current.roughness < 0.4 || prevGI.roughness < 0.4f){
-            if(!(current.roughness < 0.4f && prevGI.roughness < 0.4f)) return current;
-        }
 
         const uint M_CAP = 30u;
         prevGI.M = min(prevGI.M , M_CAP * max(current.M , 1u));
@@ -731,10 +732,6 @@ namespace ReSTIRGI{
             }
             ReservoirGI n = prevReSTIRGIBuffer[bufferIndex(pixel)];
             if(n.M == 0u || n.W <= 0.0f) continue;
-            if(current.roughness < 0.4 || n.roughness < 0.4f){
-                if(!(current.roughness < 0.4f && n.roughness < 0.4f)) continue;
-            }
-
             {
                 float3 dir = n.samplePos - a.samplePos;
                 const float d = length(dir);
@@ -1041,6 +1038,8 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         totalIndirect += gi.radiance * ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic) * gi.W;
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour
+    
+    const float indirectLum = luminance(totalIndirect / max(info.albedo, 0.002f));
 
     if(sunBuffer.intensity > 0.0f){
         // sun
@@ -1050,7 +1049,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         const float3 diff = sunBuffer.diffuse;
         float3 diffuse = 0.0f;
         float3 specular = 0.0f;
-        
+        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f, 0.7f , dot(L , info.N));
         computeLight(info , L , diffuse , specular);
         // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
         if(features.RayQuerySunSampleCount > 0 && sunNdotL > 0.0f){
@@ -1062,14 +1061,15 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             [loop]
             for(uint i = 0 ; i < features.RayQuerySunSampleCount ; i++){
                 const float3 dir = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
-                sunShadow += calculateSunShadow(offsetRay(info.P , info.N , generalBuffer.playerPosition) , dir , 1000.0f , features.sunShadowFade);
+                float rawShadow = calculateSunShadow(offsetRay(info.P , info.N , generalBuffer.playerPosition) , dir , 1000.0f , features.sunShadowFade);
+                rawShadow = (sunLuminance * rawShadow + indirectLum) / max(indirectLum + sunLuminance , 1e-20);
+                sunShadow += rawShadow;
             }
 
             sunShadow /= float(features.RayQuerySunSampleCount);
         }
         totalDiffuse += diffuse * diff * sunNdotL;
         totalSpecular += specular * diff * sunNdotL;
-        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f, 0.7f , dot(L , info.N));
     }
 
     float lightLuminance = 0.0f;
@@ -1097,17 +1097,20 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 if(reach <= 0.0f || weight <= 0.0f) continue;
                 const float sinAlpha = min(light.lightRadius / max(d , light.lightRadius) , MAX_LIGHT_CONE_SIN);
                 const float cosAlpha = sqrt(1.0f - sinAlpha * sinAlpha);
+                const float att = lightAttenuation(light , d);
+                const float currentLightLum = luminance(light.diffuse * att * reach) * saturate(dot(info.N , L));
+
                 [loop]
                 for(uint j = 0 ; j < features.RayQueryLightSampleCount ;j++){
-                    float currentShadow = calculateShadowInSphere(load.seed , light , info.P , info.N) + 0.2f;
+                    float currentShadow = calculateShadowInSphere(load.seed , light , info.P , info.N);
+                    currentShadow = (currentLightLum * currentShadow + indirectLum) / max(indirectLum + currentLightLum , 1e-20);
                     shadow += clamp(currentShadow , 0.0f , 1.0f);
                 }
                 shadow /= float(features.RayQueryLightSampleCount);
                 shadow = lerp(1.0f , shadow , reach);
                 weightSum += weight;
                 visibleSum += weight * shadow;
-                const float att = lightAttenuation(light , d);
-                lightLuminance += luminance(light.diffuse * att) * saturate(dot(info.N , L));
+                lightLuminance += currentLightLum;
             }
             if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
 

@@ -41,6 +41,7 @@ float NormalizeHitDistance(float hitDistance, float viewZ, float roughness) {
 
 static const float MAX_ACCUM_FRAMES = 32.0f;
 static const float MAX_RADIUS_PIXELS = 32.0f;
+static const float MAX_HIT_DISTANCE = 50.0f;
 static const float DEPTH_SIGMA = 8.0f;
 static const float NORMAL_POWER = 128.0f;
 
@@ -73,13 +74,12 @@ void main(uint3 id : SV_DispatchThreadID){
     float historyCount = frameCount[id.xy].x;
     float hitDistance = inputImage[id.xy].a;
 
-    if(hitDistance >= 999.0f){
+    // a sample that went to the sky has hitDistance ~1000 ( GI_miss.hlsl ) : the pixel used to skip the spatial filter , while its neighbours were blurred , so the pixels
+    // with the sky sample stayed noisy ( at sunset : bright orange dots ) . now the distance is capped and the pixel is filtered like the others
+    hitDistance = min(hitDistance , MAX_HIT_DISTANCE);
 
-        inputImage[id.xy]= outputImage[id.xy];
-        return;
-    }
-
-    float radius = ComputeBlurRadius(NormalizeHitDistance(hitDistance , depthImage[id.xy].x , 0) ,historyCount );
+    // MAX_RADIUS_PIXELS was only a factor : a big normalized distance gave a radius of hundreds of pixels
+    float radius = min(ComputeBlurRadius(NormalizeHitDistance(hitDistance , depthImage[id.xy].x , 0) ,historyCount ) , MAX_RADIUS_PIXELS);
     
     float3 centerNormal = normalImage[id.xy].xyz;
     float centerDepth = depthImage[id.xy].x;
