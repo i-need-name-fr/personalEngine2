@@ -166,7 +166,9 @@ void main(uint3 id : SV_DispatchThreadID){
     const float3 direct = (diffuse + specular) * albedo;
     const float linearDepth = depthImage[id.xy].x;
     // the base of pow is cut BEFORE the power : pow( 0 , 0 ) is undefined ( NaN ) , and with shadow thickness 0 every pixel with the shadow 0 stayed black
-    const float shadow = max(pow(max(filteredShadowImage[id.xy].x , 0.0001f) , features.shadowThickness) , 0.00001f);
+    // no minimum here : it would let the light of a lamp that a wall covers through the wall . shadowMinimum is applied to the shadow of the SUN only , before the
+    // shadow scalar is made ( generalHit.hlsl , rayQueryShadows.hlsl ) : the sky fills the shadow of the sun , nothing fills the shadow of a lamp
+    const float shadow = saturate(pow(max(filteredShadowImage[id.xy].x , 0.0001f) , features.shadowThickness));
     const float AO = pow(filteredAmbientOcclusion[id.xy].x , features.AO_intens);
     const float3 indirect = indirectImage[id.xy].xyz * albedo;
     float3 result = (direct * shadow + indirect) * AO;

@@ -191,7 +191,8 @@ void main(uint3 id : SV_DispatchThreadID){
     if(sunBuffer.intensity > 0.0f){
         const float3 toSun = normalize(-sunBuffer.direction);
 
-        if(sunSamples > 0u){
+        // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
+        if(sunSamples > 0u && dot(toSun , N) > 0.0f){
             // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra
             const float sunCosAlpha = cos(sunBuffer.sourceRadius);
             const float3 sunOrigin = pos + toSun * 0.01f;
@@ -213,8 +214,10 @@ void main(uint3 id : SV_DispatchThreadID){
 
     // the mean of the two shadows by what each of the sources gives to the pixel ( the energy that is left is exactly sun * sunShadow + lamps * lightShadow ) .
     // when none of them gives anything there is nothing to weigh : no shadow ( 1 ) , not 0 / 0
+    // the shadow of the SUN is not darker than shadowMinimum ( the sky fills it ) , the shadow of a lamp can be 0 : a lamp that a wall covers gives nothing behind it
+    const float sunShadowLifted = lerp(features.shadowMinimum , 1.0f , sunShadow);
     const float totalWeight = sunLuminance + lightLuminance;
-    const float totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadow + lightLuminance * lightShadow) / totalWeight : 1.0f;
+    const float totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
     float rawShadow = totalShadow;
     float finalShadow;
 

@@ -238,151 +238,7 @@ float targetPdf_DI(uint lightIndex , GeneralObjectInfo info){
     return luminance(candidate.diffuse * brdfValue * attenuation);
 }
 
-void finalizeReservoir_DI(inout ReservoirDI r , GeneralObjectInfo info){
-    // an undefined light has no p_hat : lightBuffer must not be read with this index
-    if(r.chosenIndex == 9999u){
-        r.W = 0.0f;
-        return;
-    }
-    const float p_hat = targetPdf_DI(r.chosenIndex , info);
-    r.W = (p_hat > 1e-6f && r.M > 0u) ? r.weightSum / (float(r.M) * p_hat) : 0.0f;
-}
 
-void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjectInfo info, uint lightIndicesCount , uint lightOffset){
-    res.W = 0.0f;
-    res.M = 0;
-    res.weightSum = 0.0f;
-    res.chosenIndex = 9999u;   // undefined : no light is chosen
-    res.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-    res.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-    if(lightIndicesCount == 0u) return;
-
-    float bestPdf = 0.0f;
-    for(uint i = 0 ; i < lightIndicesCount ; i++){
-        const uint lightIndex = tileLightIndices[lightOffset + i];
-        const LightSource light = lightBuffer[lightIndex];
-
-        float3 toLight = light.position - info.P;
-        const float lightDistance = length(toLight);
-        toLight /= max(lightDistance , 1e-4f);
-
-        float3 candidateDiffuse;
-        float3 candidateSpecular;
-        computeLight(info , toLight , candidateDiffuse , candidateSpecular);
-
-        const float3 radiance = light.diffuse * lightAttenuation(light , lightDistance) * max(dot(info.N , toLight) , 0.0001f);
-        candidateDiffuse *= radiance;
-        candidateSpecular *= radiance;
-
-        res.diffuseColor.xyz += candidateDiffuse;
-        res.specularColor.xyz += candidateSpecular;
-
-        const float p_hat = luminance(candidateDiffuse + candidateSpecular);
-        res.weightSum += p_hat;
-        // a light wins only with p_hat > 0
-        if(p_hat > bestPdf){
-            bestPdf = p_hat;
-            res.chosenIndex = lightIndex;
-        }
-    }
-
-    // nothing reaches the pixel : no light is chosen ( M = 0 , W = 0 ) , and finalizeReservoir_DI is not called with an undefined index
-    if(res.chosenIndex == 9999u) return;
-
-    res.M = 1u;
-    finalizeReservoir_DI(res , info);
-}
-
-ReservoirDI combineReservoir_DI(ReservoirDI a , ReservoirDI b , inout uint seed){
-    ReservoirDI result;
-    if(a.chosenIndex == 9999) return b;
-    if(b.chosenIndex == 9999) return a;
-
-    result.M = a.M + b.M;
-    result.weightSum = a.weightSum + b.weightSum;
-    result.chosenIndex = a.chosenIndex;
-    result.W = 0.0f;   // recomputed by finalizeReservoir_DI
-
-    if(result.weightSum > 0.0f && rand(seed) * result.weightSum < b.weightSum){
-        result.chosenIndex = b.chosenIndex;
-    }
-    return result;
-}
-
-void temporalReuse_DI(inout ReservoirDI w , inout uint seed , uint2 prevPixel, GeneralObjectInfo info){
-    const ReservoirDI prev = prevReSTIRDIBuffer[bufferIndex(prevPixel)];
-    if(prev.M == 0u) return;
-
-    const uint M_clamped = min(prev.M , 20u * max(w.M , 1u));
-
-    ReservoirDI pRes;
-    pRes.M = M_clamped;
-    pRes.chosenIndex = prev.chosenIndex;
-    if(prev.chosenIndex == 9999) return;
-    // canonical ReSTIR weight of a reused sample: p_hat_here * W * M
-    pRes.weightSum = prev.W * float(M_clamped) * targetPdf_DI(prev.chosenIndex , info);
-    pRes.W = 0.0f;
-
-    w = combineReservoir_DI(w , pRes , seed);
-    finalizeReservoir_DI(w ,info);
-}
-
-void spatialReuse_DI(inout ReservoirDI r , inout uint seed , uint2 currentPixel, GeneralObjectInfo info){
-    const uint numSpatialSamples = 5u;
-    const float spatialRadius = 30.0f;   // in pixels
-
-    for(uint s = 0u; s < numSpatialSamples; s++){
-        const float rand1 = rand(seed);
-        const float rand2 = rand(seed);
-        const float phi = 2.0f * PI * rand2;
-
-        const float radius = sqrt(rand1) * spatialRadius;
-        const int2 neighborPixel = int2(currentPixel) + int2(cos(phi) * radius , sin(phi) * radius);
-        // signed compare - casting to uint first made the "< 0" test dead
-        if(neighborPixel.x < 0 || neighborPixel.y < 0 ||
-           neighborPixel.x >= (int)generalBuffer.screenWidth || neighborPixel.y >= (int)generalBuffer.screenHeight){
-            continue;
-        }
-
-        const ReservoirDI stored = prevReSTIRDIBuffer[bufferIndex((uint2)neighborPixel)];
-        if(stored.M == 0u || stored.W <= 0.0f) continue;
-        if(stored.chosenIndex == 9999) continue;
-        // Geometric rejection used to read normalOutputImage/depthOutputImage of
-        // the neighbour, which other invocations of this very dispatch are still
-        // writing - a data race. Re-evaluating the target function at THIS pixel
-        // rejects unusable neighbours without touching the shared G-buffer.
-        const float p_hat = targetPdf_DI(stored.chosenIndex , info);
-        if(p_hat <= 0.0f) continue;
-
-        ReservoirDI neighborRes;
-        neighborRes.chosenIndex = stored.chosenIndex;
-        neighborRes.M = stored.M;
-        neighborRes.W = 0.0f;
-        // the stored.W factor was missing here while temporalReuse_DI had it
-        neighborRes.weightSum = stored.W * float(stored.M) * p_hat;
-
-        r = combineReservoir_DI(r , neighborRes , seed);
-        finalizeReservoir_DI(r ,info);
-    }
-}
-
-ReservoirDI ReSTIR_DI_generation(uint2 currentPixel , float2 prevUV , inout uint seed , GeneralObjectInfo info,  uint lightIndicesCount , uint lightOffset){
-    const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
-    const uint2 prevCoords = (uint2)clamp(prevUV * float2(generalBuffer.screenWidth , generalBuffer.screenHeight) ,
-                                          float2(0.0f , 0.0f) ,
-                                          float2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
-
-    // every light is visited in generateReservoir_DI , so there is nothing to collect from the last frame or from the neighbours . ( the reuse picks between
-    // the reservoirs by a random number : it would bring the flashes back )
-    ReservoirDI r;
-    generateReservoir_DI(r , seed , info , lightIndicesCount , lightOffset);
-    const uint M_CAP = 500u;
-    if(r.M > M_CAP){
-        r.weightSum *= float(M_CAP) / float(r.M);
-        r.M = M_CAP;
-    }
-    return r;
-}
 
 // shadow calc
 float calculateShadows(float3 position , float3 direction , float maxDistance){
@@ -473,6 +329,24 @@ float3 randomInLightRadius(inout uint seed  , LightSource light , const float3 L
     return light.position + offset;
 }
 
+float3 randomInSunRadius(inout uint seed  , SunSource light , const float3 L){
+    const float u = rand(seed) , v = rand(seed);
+    const float z = 1.0f - 2 * u;
+    const float phi = 2.0f * PI * v;
+    const float r = sqrt(saturate(1.0f - z * z));
+    const float x = cos(phi) * r;
+    const float y = sin(phi) * r;
+    const float R = light.sourceRadius;
+    float3 offset = R * float3(x ,y ,z);
+    // L goes FROM the point TO the lamp , the visible half of the sphere is the one that looks back at the point : the offsets that look the way of L ( dot > 0 )
+    // are on the far side of the lamp , they are turned over ( it was dot < 0 : the far half was chosen )
+    const float facing = dot(offset , L);
+    if(facing > 0.0f) offset = -offset;
+    // the sun is at infinity : its "sphere" is a disc of the angular radius R on the unit sphere of directions , so the result is a DIRECTION ( the centre L plus the offset , normalized ) ,
+    // not the offset alone ( it was a vector of length ~0.005 : dot(N , L) and the light went to 0 )
+    return normalize(normalize(L) + offset);
+}
+
 float calculateShadowInSphere(inout uint seed , LightSource light , const float3 P , const float3 N){
     float3 L = light.position - P;
     const float d = length(L);
@@ -484,6 +358,7 @@ float calculateShadowInSphere(inout uint seed , LightSource light , const float3
     const float3 dir = toSample / max(sampleDistance , 1e-4f);
     return calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , dir , sampleDistance);
 }
+
 
 float3 stretchView(const float3 V , const float a){
     return normalize(float3(a  * V.x , V.y * a , V.z));
@@ -665,11 +540,15 @@ namespace ReSTIRGI{
             const float3 V = normalize(x1Pos - info.worldPos);
             data.V = V;
             float3 L = light.position - data.P;
-            const float dist = length(L);
             L = normalize(L);
-            computeLight(data ,L , diffuse , specular );
+            float3 lightPos = randomInLightRadius(seed , light , L);
+            float3 realL = lightPos - info.worldPos;
+            const float dist = length(realL);
+            realL = normalize(realL);
+            
+            computeLight(data ,realL , diffuse , specular );
 
-            const float NdotL = saturate(dot(data.N , L));  
+            const float NdotL = saturate(dot(data.N , realL));  
             float shadow = calculateShadowInSphere(seed , light , data.P , data.N);
             float window = lightAttenuation(light, dist);
             result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
@@ -677,10 +556,11 @@ namespace ReSTIRGI{
         if(sunBuffer.intensity > 0.0f){
             float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
             // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
-            const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , -sunBuffer.direction , 1000.0f);
-            computeLight(data , -sunBuffer.direction , sunDiffuse , sunSpecular);
+            const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
+            const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+            computeLight(data , L , sunDiffuse , sunSpecular);
             //
-            result += (sunDiffuse) *  clamp(dot(data.N , -sunBuffer.direction),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+            result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
         }
 
         // the sky light of the point x2 itself : a point in the shadow of the sun is not black , the sky lights it ( without it every ray of GI that hit
@@ -782,6 +662,101 @@ namespace ReSTIRGI{
         return r;
     }
 
+    ReservoirGI combineGIJacobian(ReservoirGI a, ReservoirGI b , GeneralObjectInfo main, const float3 nP , inout uint seed){
+        ReservoirGI output = (ReservoirGI)0;
+
+        float3 Q = b.samplePos;
+        float3 Q_normal = b.sampleNormal;
+
+        float3 dirFromQ = Q - nP;
+        float distN = length(dirFromQ);
+        float cosN = abs(dot(normalize(-dirFromQ), Q_normal));
+        float3 dirFromMine = Q - main.P;
+        float distMine = length(dirFromMine);
+        float cosMine = abs(dot(normalize(-dirFromMine),  Q_normal));
+        float jacobian = (cosMine * distN * distN) / max(cosN * distMine * distMine , 1e-20);
+
+        jacobian = clamp(jacobian , 0.0f , 10.0f);
+
+        output = b;
+        // the neighbour counts for at most 20 samples : without the cap M grew without limit ( every frame it takes the M of 8 neighbours that took the M of their neighbours ) ,
+        // overflowed , and the weights became inf / NaN . the NaN stays in the history of the denoiser forever : the whole picture went black
+        output.M = min(b.M , 20u);
+        output.W *= jacobian;
+
+        float3 L = normalize(Q - main.P);
+        float p_hat = luminance(output.radiance * evalDiffuse(main.albedo , main.N , L , main.metallic));
+        float weight = p_hat * output.W * float(output.M);
+
+        a.update(output , weight , output.M , rand(seed));
+        {
+            // p_hat of the CHOSEN sample ( a.radiance , a.samplePos ) : it used output.radiance ( the neighbour's ) , which is another sample when the reservoir kept its own
+            float3 L = normalize(a.samplePos - main.P);
+            float p_hat = luminance(a.radiance * evalDiffuse(main.albedo , main.N , L , main.metallic));
+            a.W = (p_hat > 1e-6f) ? a.weightSum / (float(a.M) * p_hat) : 0.0f;
+        }
+        return a;
+    }
+
+    uint pickRandomNumber(inout uint seed , uint totalCount){
+        return uint(float(totalCount) * rand(seed));
+    }
+
+    ReservoirGI spatialReuse(ReservoirGI a , GeneralObjectInfo main , inout uint seed){
+
+        ReservoirGI current = a;
+
+        uint2 id = DispatchRaysIndex().xy;
+        uint2 size = DispatchRaysDimensions().xy;
+        [unroll]
+        for(uint i = 0 ; i < 8 ; i++){
+            const uint index = pickRandomNumber(seed , 16);
+            // PoissonDisk is in the unit disc : in pixels it is the radius times it ( without the radius int2( offset ) is 0 or +-1 : the neighbour was the pixel itself )
+            float2 offset = PoissonDisk[index];
+            int2 pixel = id + int2(offset);
+            if(any(pixel >= size) || any(pixel < 0)) continue;
+            float3 P = positionImage[pixel].xyz;
+            float3 N = normalImage[pixel].xyz;
+
+
+            if(dot(N , main.N) < 0.9f) continue;
+            if(abs(length(P - main.P)) > 2.0f) continue;
+            {
+                float3 dir = P - a.samplePos;
+                const float d = length(dir);
+                dir = normalize(dir);
+
+                const float occlusionCheck = calculateShadows(offsetRay(a.samplePos , a.sampleNormal , generalBuffer.playerPosition) , dir , d);
+                if(occlusionCheck != 1.0f) continue;
+            }
+            ReservoirGI n = prevReSTIRGIBuffer[bufferIndex(pixel)];
+            if(n.M == 0u || n.W <= 0.0f) continue;
+            if(current.roughness < 0.4 || n.roughness < 0.4f){
+                if(!(current.roughness < 0.4f && n.roughness < 0.4f)) continue;
+            }
+
+            {
+                float3 dir = n.samplePos - a.samplePos;
+                const float d = length(dir);
+                dir = normalize(dir);
+
+                const float occlusionCheck = calculateShadows(offsetRay(a.samplePos , a.sampleNormal , generalBuffer.playerPosition) , dir , d);
+                if(occlusionCheck != 1.0f) continue;
+            }
+
+            current = combineGIJacobian(current , n , main, P , seed);
+        }
+
+        // the total M is capped too ( the weights are scaled together with it , W does not change ) : the reservoir goes to the buffer of the next frame
+        const uint M_CAP = 30u;
+        if(current.M > M_CAP){
+            current.weightSum *= float(M_CAP) / float(current.M);
+            current.M = M_CAP;
+        }
+
+        return current;
+    }
+
     ReservoirGI ReSTIR_GI_generation(inout uint seed , GeneralObjectInfo info){
         ReservoirGI res = (ReservoirGI)0;
         if(!features.ReSTIRGI){
@@ -793,6 +768,11 @@ namespace ReSTIRGI{
         uint2 pixel = DispatchRaysIndex().xy;
 
         res = generateReservoirGI(info , pixel  , seed);
+
+        if(features.ReSTIRGI_spatial){
+            // the result has to be taken : spatialReuse works on a copy ( it returns the new reservoir ) , without this the call changed nothing
+            res = spatialReuse(res , info , seed);
+        }
         if(features.ReSTIRGI_temporal){
             uint2 size = DispatchRaysDimensions().xy;
             float4 clipPos = mul(generalBuffer.prevViewProj , float4(info.P , 1.0f));
@@ -808,6 +788,8 @@ namespace ReSTIRGI{
             }
         }
 
+
+
         return res;
     }
 }
@@ -819,6 +801,161 @@ float indirectDistanceWeight(float hitDistance){
     return 1.0f / (1.0f + ratio * ratio);
 }
 static const float MAX_LIGHT_CONE_SIN = 0.05f;
+
+void finalizeReservoir_DI(inout ReservoirDI r , GeneralObjectInfo info){
+    // an undefined light has no p_hat : lightBuffer must not be read with this index
+    if(r.chosenIndex == 9999u){
+        r.W = 0.0f;
+        return;
+    }
+    const float p_hat = targetPdf_DI(r.chosenIndex , info);
+    r.W = (p_hat > 1e-6f && r.M > 0u) ? r.weightSum / (float(r.M) * p_hat) : 0.0f;
+}
+
+void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjectInfo info, uint lightIndicesCount , uint lightOffset){
+    res.W = 0.0f;
+    res.M = 0;
+    res.weightSum = 0.0f;
+    res.chosenIndex = 9999u;   // undefined : no light is chosen
+    res.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
+    res.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
+    if(lightIndicesCount == 0u) return;
+
+    float bestPdf = 0.0f;
+    for(uint i = 0 ; i < lightIndicesCount ; i++){
+        const uint lightIndex = tileLightIndices[lightOffset + i];
+        const LightSource light = lightBuffer[lightIndex];
+
+        float3 toLight = light.position - info.P;
+        const float lightDistance = length(toLight);
+        toLight /= max(lightDistance , 1e-4f);
+        const float3 lightPos = randomInLightRadius(seed , light , toLight);
+        float3 dir = lightPos - info.P;
+        const float d = length(dir);
+        dir = normalize(dir);
+        float3 candidateDiffuse;
+        float3 candidateSpecular;
+        const float shadow = calculateShadowInSphere(seed  , light , info.P , info.N);
+        computeLight(info , dir , candidateDiffuse , candidateSpecular);
+
+        float3 radiance = 0.0f;
+        if(shadow == 1.0f){
+            radiance = light.diffuse * lightAttenuation(light , d) * max(dot(info.N , dir) , 0.0001f);
+        }else{
+            radiance = info.albedo * 0.001f;
+        }
+        candidateDiffuse *= radiance;
+        candidateSpecular *= radiance;
+
+        res.diffuseColor.xyz += candidateDiffuse;
+        res.specularColor.xyz += candidateSpecular;
+
+        const float p_hat = luminance(candidateDiffuse + candidateSpecular);
+        res.weightSum += p_hat;
+        // a light wins only with p_hat > 0
+        if(p_hat > bestPdf){
+            bestPdf = p_hat;
+            res.chosenIndex = lightIndex;
+        }
+    }
+
+    // nothing reaches the pixel : no light is chosen ( M = 0 , W = 0 ) , and finalizeReservoir_DI is not called with an undefined index
+    if(res.chosenIndex == 9999u) return;
+
+    res.M = 1u;
+    finalizeReservoir_DI(res , info);
+}
+
+ReservoirDI combineReservoir_DI(ReservoirDI a , ReservoirDI b , inout uint seed){
+    ReservoirDI result;
+    if(a.chosenIndex == 9999) return b;
+    if(b.chosenIndex == 9999) return a;
+
+    result.M = a.M + b.M;
+    result.weightSum = a.weightSum + b.weightSum;
+    result.chosenIndex = a.chosenIndex;
+    result.W = 0.0f;   // recomputed by finalizeReservoir_DI
+
+    if(result.weightSum > 0.0f && rand(seed) * result.weightSum < b.weightSum){
+        result.chosenIndex = b.chosenIndex;
+    }
+    return result;
+}
+
+void temporalReuse_DI(inout ReservoirDI w , inout uint seed , uint2 prevPixel, GeneralObjectInfo info){
+    const ReservoirDI prev = prevReSTIRDIBuffer[bufferIndex(prevPixel)];
+    if(prev.M == 0u) return;
+
+    const uint M_clamped = min(prev.M , 20u * max(w.M , 1u));
+
+    ReservoirDI pRes;
+    pRes.M = M_clamped;
+    pRes.chosenIndex = prev.chosenIndex;
+    if(prev.chosenIndex == 9999) return;
+    // canonical ReSTIR weight of a reused sample: p_hat_here * W * M
+    pRes.weightSum = prev.W * float(M_clamped) * targetPdf_DI(prev.chosenIndex , info);
+    pRes.W = 0.0f;
+
+    w = combineReservoir_DI(w , pRes , seed);
+    finalizeReservoir_DI(w ,info);
+}
+
+void spatialReuse_DI(inout ReservoirDI r , inout uint seed , uint2 currentPixel, GeneralObjectInfo info){
+    const uint numSpatialSamples = 5u;
+    const float spatialRadius = 30.0f;   // in pixels
+
+    for(uint s = 0u; s < numSpatialSamples; s++){
+        const float rand1 = rand(seed);
+        const float rand2 = rand(seed);
+        const float phi = 2.0f * PI * rand2;
+
+        const float radius = sqrt(rand1) * spatialRadius;
+        const int2 neighborPixel = int2(currentPixel) + int2(cos(phi) * radius , sin(phi) * radius);
+        // signed compare - casting to uint first made the "< 0" test dead
+        if(neighborPixel.x < 0 || neighborPixel.y < 0 ||
+           neighborPixel.x >= (int)generalBuffer.screenWidth || neighborPixel.y >= (int)generalBuffer.screenHeight){
+            continue;
+        }
+
+        const ReservoirDI stored = prevReSTIRDIBuffer[bufferIndex((uint2)neighborPixel)];
+        if(stored.M == 0u || stored.W <= 0.0f) continue;
+        if(stored.chosenIndex == 9999) continue;
+        // Geometric rejection used to read normalOutputImage/depthOutputImage of
+        // the neighbour, which other invocations of this very dispatch are still
+        // writing - a data race. Re-evaluating the target function at THIS pixel
+        // rejects unusable neighbours without touching the shared G-buffer.
+        const float p_hat = targetPdf_DI(stored.chosenIndex , info);
+        if(p_hat <= 0.0f) continue;
+
+        ReservoirDI neighborRes;
+        neighborRes.chosenIndex = stored.chosenIndex;
+        neighborRes.M = stored.M;
+        neighborRes.W = 0.0f;
+        // the stored.W factor was missing here while temporalReuse_DI had it
+        neighborRes.weightSum = stored.W * float(stored.M) * p_hat;
+
+        r = combineReservoir_DI(r , neighborRes , seed);
+        finalizeReservoir_DI(r ,info);
+    }
+}
+
+ReservoirDI ReSTIR_DI_generation(uint2 currentPixel , float2 prevUV , inout uint seed , GeneralObjectInfo info,  uint lightIndicesCount , uint lightOffset){
+    const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
+    const uint2 prevCoords = (uint2)clamp(prevUV * float2(generalBuffer.screenWidth , generalBuffer.screenHeight) ,
+                                          float2(0.0f , 0.0f) ,
+                                          float2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
+
+    // every light is visited in generateReservoir_DI , so there is nothing to collect from the last frame or from the neighbours . ( the reuse picks between
+    // the reservoirs by a random number : it would bring the flashes back )
+    ReservoirDI r;
+    generateReservoir_DI(r , seed , info , lightIndicesCount , lightOffset);
+    const uint M_CAP = 500u;
+    if(r.M > M_CAP){
+        r.weightSum *= float(M_CAP) / float(r.M);
+        r.M = M_CAP;
+    }
+    return r;
+}
 
 float3 traceRayReflection(const float3 direction , const float3 position , out float hitDistance){
 
@@ -868,99 +1005,6 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     float3 nextDir = 0.0f;
     float sunLuminance = 0.0f;
 
-    if(sunBuffer.intensity > 0.0f){
-        // sun
-        // the direction of the sun is the direction of the LIGHT : the vector to the sun is the opposite one , and it has to be a unit vector
-        const float3 L = normalize(-sunBuffer.direction);
-        const float sunNdotL = saturate(dot(info.N , L));
-        const float3 diff = sunBuffer.diffuse;
-        float3 diffuse = 0.0f;
-        float3 specular = 0.0f;
-        computeLight(info , L , diffuse , specular);
-        if(features.RayQuerySunSampleCount > 0 ){
-            sunShadow =0.0f;
-            const float3 toSun = normalize(-sunBuffer.direction);
-            // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra .
-            // the disc in the sky still has SUN_ANGULAR_RADIUS
-            const float sunCosAlpha = cos(sunBuffer.sourceRadius);
-            const float3 sunOrigin = pos + toSun * 0.01f;
-            [loop]
-            for(uint i = 0 ; i < features.RayQuerySunSampleCount ; i++){
-                const float3 dir = sampleCone(toSun , sunCosAlpha , load.seed);
-                sunShadow += calculateSunShadow(offsetRay(info.P , info.N , generalBuffer.playerPosition) , dir , 1000.0f , features.sunShadowFade);
-            }
-
-            sunShadow /= float(features.RayQuerySunSampleCount);
-        }
-        totalDiffuse += diffuse * diff * sunNdotL;
-        totalSpecular += specular * diff * sunNdotL;
-        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f, 0.7f , dot(-sunBuffer.direction , info.N));
-    }
-
-    float lightLuminance = 0.0f;
-    {
-        // lights
-        if(features.RayQueryLightSampleCount > 0 && lightCount > 0){
-            // the weighted mean over the lamps of the tile ( the same as RayQueryShadows ) : a lamp that does not reach the pixel ( weight 0 , it is in the
-            // list of the tile only because the test of the tile is conservative ) must not count at all . before it was skipped by continue , but the
-            // sum was still divided by lightCount , so it counted as a full shadow : the ellipses of the radii and the rectangles of the tiles
-            float weightSum = 0.0f;
-            float visibleSum = 0.0f;
-            [loop]
-            for(uint i = 0 ; i < lightCount ;i++){
-                const uint tileLightIndex = lightOffset + i;
-                const uint lightID = tileLightIndices[tileLightIndex];
-                LightSource light = lightBuffer[lightID];
-                float3 L = light.position - info.P;
-                const float d = length(L);
-                L = normalize(L);
-                float shadow = 0.0f;
-                // the shadow of a lamp fades out beyond its radius ( lightShadowReach : 1 inside of the radius , 0 at lightRadius * ( 1 + lightShadowFade ) ) instead
-                // of ending with a jump . the weight has no window of the radius any more : the window is in the reach
-                const float reach = lightShadowReach(d , light.lightRadius , features.lightShadowFade);
-                const float falloff = 1.0f / (1.0f + light.lightLinear * d + light.lightQuadratic * d * d);
-                // the weight fades with the reach too : a lamp that ends its fade leaves the mean without a jump
-                const float weight = luminance(light.diffuse) * falloff * saturate(dot(info.N , L)) * reach;
-                if(reach <= 0.0f || weight <= 0.0f) continue;
-                const float sinAlpha = min(light.lightRadius / max(d , light.lightRadius) , MAX_LIGHT_CONE_SIN);
-                const float cosAlpha = sqrt(1.0f - sinAlpha * sinAlpha);
-                [loop]
-                for(uint j = 0 ; j < features.RayQueryLightSampleCount ;j++){
-                    float currentShadow = calculateShadowInSphere(load.seed , light , info.P , info.N);
-                    shadow += currentShadow;
-                }
-                shadow /= float(features.RayQueryLightSampleCount);
-                // beyond the radius the shadow of this lamp is weaker and weaker : 1 ( no shadow ) at the end of the fade
-                shadow = lerp(1.0f , shadow , reach);
-                weightSum += weight;
-                visibleSum += weight * shadow;
-                // lightAttenuation : with the window of the radius , the same as the lighting itself ( LightPass , ReSTIR ) . without the window the lamp
-                // had a weight at the edge of its radius where it does not light anything any more , and its shadow was seen there as an arc
-                const float att = lightAttenuation(light , d);
-                lightLuminance += luminance(light.diffuse * att) * saturate(dot(info.N , L));
-            }
-            if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
-            // how much the lamps give to this pixel in total ( luminance * falloff * cos * reach of every lamp ) : the weight of lightShadow against sunShadow
-
-        }
-
-        totalDiffuse += di.diffuseColor.xyz;
-        totalSpecular += di.specularColor.xyz;
-    }
-
-
-    // the mean of the two shadows by what each of the sources gives to the pixel . when none of them gives anything ( the sun is off , the lamps are not traced
-    // or do not reach ) there is nothing to weigh : no shadow ( 1 ) . it used to be 0 / 1e-20 = 0 : the whole direct light of the lamps went out
-    const float totalWeight = sunLuminance + lightLuminance;
-    totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadow + lightLuminance * lightShadow) / totalWeight : 1.0f;
-
-    // temporal occlusion for shadow
-    if(validUV){
-        const float prevShadow = prevShadowImage[prevPixel].x;
-        totalShadow = lerp(totalShadow , prevShadow , features.temporalShadowK);
-    }
-    // now the GI
-
     const bool needSpecular = (info.roughness < 0.5f || info.metallic >= 0.7f);
     const bool needDiffuse  = ((1.0f - info.metallic) > 0.3f);
 
@@ -978,7 +1022,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
             float distance;
             const float3 radiance = traceRayReflection(L , rayOrigin , distance);
-            const float3 reflectedColor = radiance * fcos / pdf * info.metallic;
+            const float3 reflectedColor = (1.0f - info.roughness) * info.metallic * radiance * fcos / pdf;
             nextDir = L;
             totalSpecular += reflectedColor;
             specularHitDistance = distance;
@@ -997,6 +1041,90 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         totalIndirect += gi.radiance * ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic) * gi.W;
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour
+
+    if(sunBuffer.intensity > 0.0f){
+        // sun
+        // the direction of the sun is the direction of the LIGHT : the vector to the sun is the opposite one , and it has to be a unit vector
+        const float3 L = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
+        const float sunNdotL = saturate(dot(info.N , L));
+        const float3 diff = sunBuffer.diffuse;
+        float3 diffuse = 0.0f;
+        float3 specular = 0.0f;
+        
+        computeLight(info , L , diffuse , specular);
+        // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
+        if(features.RayQuerySunSampleCount > 0 && sunNdotL > 0.0f){
+            sunShadow =0.0f;
+            // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra .
+            // the disc in the sky still has SUN_ANGULAR_RADIUS
+            const float sunCosAlpha = cos(sunBuffer.sourceRadius);
+            const float3 sunOrigin = pos + L * 0.01f;
+            [loop]
+            for(uint i = 0 ; i < features.RayQuerySunSampleCount ; i++){
+                const float3 dir = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
+                sunShadow += calculateSunShadow(offsetRay(info.P , info.N , generalBuffer.playerPosition) , dir , 1000.0f , features.sunShadowFade);
+            }
+
+            sunShadow /= float(features.RayQuerySunSampleCount);
+        }
+        totalDiffuse += diffuse * diff * sunNdotL;
+        totalSpecular += specular * diff * sunNdotL;
+        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f, 0.7f , dot(L , info.N));
+    }
+
+    float lightLuminance = 0.0f;
+    {
+        // lights
+        if(features.RayQueryLightSampleCount > 0 && lightCount > 0){
+            float weightSum = 0.0f;
+            float visibleSum = 0.0f;
+            [loop]
+            for(uint i = 0 ; i < lightCount ;i++){
+                const uint tileLightIndex = lightOffset + i;
+                const uint lightID = tileLightIndices[tileLightIndex];
+                LightSource light = lightBuffer[lightID];
+                float3 L = light.position - info.P;
+                L = normalize(L);
+                const float3 lightPos = randomInLightRadius(load.seed , light , L);
+                float3 dir = lightPos - info.P;
+                const float d = length(dir);
+                dir = normalize(dir);
+                float shadow = 0.0f;
+                const float reach = lightShadowReach(d , light.lightRadius , features.lightShadowFade);
+                const float falloff = 1.0f / (1.0f + light.lightLinear * d + light.lightQuadratic * d * d);
+                // the weight fades with the reach too : a lamp that ends its fade leaves the mean without a jump
+                const float weight = luminance(light.diffuse) * falloff * saturate(dot(info.N , dir)) * reach;
+                if(reach <= 0.0f || weight <= 0.0f) continue;
+                const float sinAlpha = min(light.lightRadius / max(d , light.lightRadius) , MAX_LIGHT_CONE_SIN);
+                const float cosAlpha = sqrt(1.0f - sinAlpha * sinAlpha);
+                [loop]
+                for(uint j = 0 ; j < features.RayQueryLightSampleCount ;j++){
+                    float currentShadow = calculateShadowInSphere(load.seed , light , info.P , info.N) + 0.2f;
+                    shadow += clamp(currentShadow , 0.0f , 1.0f);
+                }
+                shadow /= float(features.RayQueryLightSampleCount);
+                shadow = lerp(1.0f , shadow , reach);
+                weightSum += weight;
+                visibleSum += weight * shadow;
+                const float att = lightAttenuation(light , d);
+                lightLuminance += luminance(light.diffuse * att) * saturate(dot(info.N , L));
+            }
+            if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
+
+        }
+
+        totalDiffuse += di.diffuseColor.xyz;
+        totalSpecular += di.specularColor.xyz;
+    }
+
+
+    const float sunShadowLifted = lerp(features.shadowMinimum , 1.0f , sunShadow);
+    const float totalWeight = sunLuminance + lightLuminance;
+    totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
+    if(validUV){
+        const float prevShadow = prevShadowImage[prevPixel].x;
+        totalShadow = lerp(totalShadow , prevShadow , features.temporalShadowK);
+    }
 
     const float3 albedoSafe = max(info.albedo , 0.02f);
     const float3 diffuseOut = (totalDiffuse) / albedoSafe;

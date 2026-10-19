@@ -128,9 +128,13 @@ namespace mox{
                     di.W = 0.0f;
                     di.weightSum = 0.0f;
                     std::vector<ReservoirDI> data(context->sc->extent.width * context->sc->extent.height , di );
-                    ReSTIRDIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info);
+                    // the reservoirs START EMPTY ( M = 0 , W = 0 ) : the data was made above but never given to the buffer , and a device buffer is not zeroed by itself .
+                    // the garbage of the memory ( huge or NaN W ) was read by the temporal reuse of the pixel and , worse , by the spatial reuse of its neighbours , who
+                    // copied it and kept it for ever
+                    ReSTIRDIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , static_cast<void*>(data.data()));
                     info.size = sizeof(ReservoirGI) * context->sc->extent.width * context->sc->extent.height;
-                    ReSTIRGIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info);
+                    const std::vector<ReservoirGI> emptyGI(static_cast<size_t>(context->sc->extent.width) * context->sc->extent.height , ReservoirGI{});
+                    ReSTIRGIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , const_cast<void*>(static_cast<const void*>(emptyGI.data())));
                 }
 
                 {   

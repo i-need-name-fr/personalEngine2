@@ -488,6 +488,7 @@ struct GeneralFeatures{
 
     uint32_t ReSTIRGI;
     uint32_t ReSTIRGI_temporal;
+    uint32_t ReSTIRGI_spatial;
 
     uint32_t currentMode;
 
@@ -514,6 +515,9 @@ struct GeneralFeatures{
     // the shadow of the sun gets weaker with the distance to what covers the pixel ( along the ray to the sun ) : 0 at the covering object , 1 at this distance
     // ( smoothstep ) . 0 - no fade , the shadow is 0 everywhere in the shade ( RT only , it needs the closest hit of the shadow ray )
     float sunShadowFade;
+
+    // how dark a shadow can get : PostProcess puts the shadow of the direct light between this ( full shadow ) and 1 ( lit ) . 0 - the shadow is black
+    float shadowMinimum;
 #else
 
     uint AO;
@@ -536,6 +540,7 @@ struct GeneralFeatures{
 
     uint ReSTIRGI;
     uint ReSTIRGI_temporal;
+    uint ReSTIRGI_spatial;
 
     uint currentMode;
 
@@ -554,6 +559,8 @@ struct GeneralFeatures{
     uint skyboxSampleCount;
 
     float sunShadowFade;
+
+    float shadowMinimum;
 
 #endif
 };

@@ -397,12 +397,15 @@ namespace mox{
             featureSettings.maxDepth = 50.0f;
             featureSettings.ReSTIRGI = true;
             featureSettings.ReSTIRGI_temporal = true;
+            featureSettings.ReSTIRGI_spatial = false;
             // the shadow of a lamp fades out over 0.5 of its radius beyond the radius
             featureSettings.lightShadowFade = 0.5f;
             // the sky light is averaged over 2 directions of the hemisphere per pixel and frame
             featureSettings.skyboxSampleCount = 2u;
             // the shadow of the sun fades with the distance to what covers the pixel : it is fully gone at this distance ( in meters ) , 0 - no fade
             featureSettings.sunShadowFade = 30.0f;
+            // the shadow of the direct light is never darker than this ( 0 - black , 1 - no shadow )
+            featureSettings.shadowMinimum = 0.2f;
 
             // fog : a thin haze . gridSize is the number of the slices of the fog image , it is not a setting of the user
             fogSettings = FogVolume{};
@@ -1051,6 +1054,10 @@ namespace mox{
                 // RT : the shadow of the sun gets weaker with the distance to what covers the pixel ( meters , 0 - no fade )
                 gui::SliderFloat("sun shadow fade" , &info.sunShadowFade , 0.0f , 200.0f);
                 gui::Separator();
+
+                // how dark a shadow of the direct light can get : 0 - black , 1 - no shadow
+                gui::SliderFloat("shadow minimum" , &info.shadowMinimum , 0.0f , 1.0f);
+                gui::Separator();
             }
             gui::EndDisabled();
             gui::Separator();
@@ -1128,6 +1135,16 @@ namespace mox{
             }
             gui::EndDisabled();
             gui::Separator();
+
+            gui::BeginDisabled(info.PT && !info.RT);
+            {
+                if(gui::Button(info.ReSTIRGI_spatial ? "ReSTIR GI spatial: ON" : "ReSTIR GI spatial: OFF")){
+                    info.ReSTIRGI_spatial = !info.ReSTIRGI_spatial;
+                }
+            }
+            gui::EndDisabled();
+            gui::Separator();
+
 
             // fog render
             gui::BeginDisabled(info.PT);
