@@ -28,8 +28,7 @@ struct PsOutput{
     float  pixelCheck : SV_Target6;   // r32f , COLOR_PIXEL where something was drawn
 };
 
-// true : the normal maps are OpenGL style ( green up ) , false : DirectX style ( green down )
-static const bool NORMAL_MAP_OPENGL = false;
+// the normal maps are OpenGL style ( green up ) or DirectX style ( green down ) : generalBuffer.normalMapOpenGL ( ImGui ) , the same flag as in RayTracing/GI_hit.hlsl
 
 float2 calculateParallax(float2 currentUV , float3 V , int depthID){
     if(depthID == NON_VALID_SLOT) return currentUV;
@@ -66,7 +65,8 @@ PsOutput main(VsOutput input){
         float3 n;
         n.xy = allTextures[nID].Sample(samp , uv).xy * 2.0f - 1.0f;
         n.z = sqrt(saturate(1.0f - dot(n.xy , n.xy)));
-        n.y = NORMAL_MAP_OPENGL ? -n.y : n.y;
+        // OpenGL maps ( green up ) are used as they are with this TBN , the DirectX ones ( green down ) are flipped . ( it was the other way round : every map was inverted )
+        n.y = (generalBuffer.normalMapOpenGL) ? n.y : -n.y;
         n = normalize(mul(n , TBN));
         output.normal = float4(n , 1.0f);
     }else{

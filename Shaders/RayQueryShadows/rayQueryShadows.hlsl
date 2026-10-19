@@ -34,9 +34,15 @@
 [[vk::binding(14 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
 [[vk::binding(15 , 0)]] ConstantBuffer<ForwardPlusInfo> forwardInfo;
 
+// the indirect light of the LAST frame ( the pass runs before the indirect pass of this frame ) : its luminance is k , the light that fills a shadow ( see the shadow formula in main )
+[[vk::image_format("rgba16f")]]
+[[vk::binding(16 , 0)]] RWTexture2D<float4> prevIndirectImage;
 
 
-bool shadowTraceRay(float3 direction , float3 startPos , const float tMax){
+
+// true when something ( but a body of a lamp ) is in the way . depth is the distance to the NEAREST blocker , it is only looked for when needDepth is true
+// ( without it the first blocker ends the search ) . the same as the closest hit shadowHit.hlsl of the RT path , which writes RayTCurrent()
+bool shadowTraceRay(float3 direction , float3 startPos , const float tMax , const bool needDepth , out float depth){
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_NON_OPAQUE> rayQuery;
 
@@ -46,6 +52,9 @@ bool shadowTraceRay(float3 direction , float3 startPos , const float tMax){
     ray.TMax = tMax;
     ray.TMin = 0.01f;
 
+    depth = tMax;
+    bool blocked = false;
+
     rayQuery.TraceRayInline(TLAS , RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES , 0xFF , ray);
 
     while(rayQuery.Proceed()){
@@ -54,11 +63,16 @@ bool shadowTraceRay(float3 direction , float3 startPos , const float tMax){
         const InstanceData instance = instanceLayouts[rayQuery.CandidateInstanceID()];
         if(luts[instance.LUT_index].isLightSource != 0) continue;
 
-        rayQuery.CommitNonOpaqueTriangleHit();
-        return true;
+        blocked = true;
+        if(!needDepth){
+            rayQuery.Abort();
+            break;
+        }
+        // the candidates do not come in the order of the distance
+        depth = min(depth , rayQuery.CandidateTriangleRayT());
     }
 
-    return false;
+    return blocked;
 }
 
 
@@ -130,6 +144,21 @@ void main(uint3 id : SV_DispatchThreadID){
     const float3 N = normalImage[id.xy].xyz;
     const float3 offset = pos + N * 0.0001f;
 
+    // the reprojection to the last frame : the temporal filter of the shadow and the fill light k read from there
+    const float4 clipPos = mul(generalBuffer.prevViewProj , float4(pos,  1.0f));
+    const float3 prevPos = clipPos.xyz / clipPos.w;
+    float2 prevUV = prevPos.xy * 0.5f + 0.5f;
+    prevUV.y = 1.0f - prevUV.y;
+    const bool validUV = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f)));
+    const uint2 prevPixel = validUV ? min(uint2(max(prevUV * float2(screenSize) - 0.5f , 0.0f)) , screenSize - 1u) : id.xy;
+
+    // k : the light that fills a shadow ( the luminance of the indirect light ) . a shadow is the lack of ONE source , so how dark it is depends on what share of the
+    // light of the pixel the source gives : S = ( a * v + k ) / ( a + k ) , a - the luminance of the source , v - its visibility . a weak source ( a << k ) leaves
+    // almost no shadow , a strong one ( a >> k ) a full one . the same as in generalHit.hlsl , but the indirect light is the one of the last frame ( denoised )
+    float indirectLum = luminance(prevIndirectImage[prevPixel].xyz);
+    if(!isfinite(indirectLum)) indirectLum = 0.0f;
+    indirectLum = max(indirectLum , 0.0f);
+
     float lightShadow = 1.0f;
     // how much the lamps give to this pixel in total : the weight of lightShadow against sunShadow ( the same as in generalHit.hlsl )
     float lightLuminance = 0.0f;
@@ -157,6 +186,9 @@ void main(uint3 id : SV_DispatchThreadID){
             const float weight = luminance(light.diffuse) * falloff * saturate(dot(N , L)) * reach;
             if(reach <= 0.0f || weight <= 0.0f) continue;
 
+            // a : what the lamp gives to the pixel ( lightAttenuation : with the window of the radius , the same as the lighting itself )
+            const float currentLightLum = luminance(light.diffuse * lightAttenuation(light , dist) * reach) * saturate(dot(N , L));
+
             float visible = 0.0f;
             [loop]
             for(uint i = 0 ; i < lightSamples ; i++){
@@ -167,7 +199,15 @@ void main(uint3 id : SV_DispatchThreadID){
                 const float sampleDistance = length(toSample);
                 const float3 dir = toSample / max(sampleDistance , 1e-4f);
 
-                visible += (shadowTraceRay(dir , offset , sampleDistance)) ? 0.0f : 1.0f;
+                // the visibility of the lamp along this ray : r = depth / the distance to the lamp . a blocker at the pixel ( r -> 0 ) is the full shadow ,
+                // a blocker at the lamp ( r -> 1 ) is no shadow : the farther the blocker is from the pixel , the weaker the shadow
+                float depth;
+                float v = 1.0f;
+                if(shadowTraceRay(dir , offset , sampleDistance , true , depth)){
+                    v = saturate(depth / max(sampleDistance , 1e-20f));
+                }
+                v = (currentLightLum * v + indirectLum) / max(indirectLum + currentLightLum , 1e-20f);
+                visible += saturate(v);
             }
             visible /= float(lightSamples);
             // beyond the radius the shadow of this lamp is weaker and weaker : 1 ( no shadow ) at the end of the fade
@@ -175,13 +215,10 @@ void main(uint3 id : SV_DispatchThreadID){
 
             weightSum += weight;
             visibleSum += weight * visible;
-            // lightAttenuation : with the window of the radius , the same as the lighting itself ( LightPass , ReSTIR ) : at the edge of its radius a lamp
-            // does not light anything any more and does not weigh anything
-            lightLuminance += luminance(light.diffuse * lightAttenuation(light , dist)) * saturate(dot(N , L));
+            lightLuminance += currentLightLum;
         }
 
         if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
-        lightShadow = pow(lightShadow , 2.0f);
     }
 
     float sunShadow = 1.0f;
@@ -191,11 +228,16 @@ void main(uint3 id : SV_DispatchThreadID){
     if(sunBuffer.intensity > 0.0f){
         const float3 toSun = normalize(-sunBuffer.direction);
 
+        // a : what the sun gives to the pixel ( the same weight as in generalHit.hlsl : the colour of the sun has its intensity already , it is not multiplied again )
+        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f , 0.7f , dot(toSun , N));
+
         // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
         if(sunSamples > 0u && dot(toSun , N) > 0.0f){
             // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra
             const float sunCosAlpha = cos(sunBuffer.sourceRadius);
             const float3 sunOrigin = pos + toSun * 0.01f;
+            // the shadow of the sun is weaker with the distance from the pixel to the blocker : gone at sunShadowFade meters ( 0 - no fade )
+            const float fadeDistance = features.sunShadowFade;
 
             float visible = 0.0f;
             [loop]
@@ -203,13 +245,16 @@ void main(uint3 id : SV_DispatchThreadID){
                 uint seed = id.x * 832u + id.y * 293u  + generalBuffer.frameIndex * 2312u + i * 239u + 15485863u;
                 const float3 dir = sampleCone(toSun , sunCosAlpha , seed);
 
-                visible += (shadowTraceRay(dir , sunOrigin , 1000.0f)) ? 0.0f : 1.0f;
+                float depth;
+                float v = 1.0f;
+                if(shadowTraceRay(dir , sunOrigin , 1000.0f , fadeDistance > 0.0f , depth)){
+                    v = (fadeDistance > 0.0f) ? smoothstep(0.0f , fadeDistance , depth) : 0.0f;
+                }
+                v = (sunLuminance * v + indirectLum) / max(indirectLum + sunLuminance , 1e-20f);
+                visible += saturate(v);
             }
             sunShadow = visible / float(sunSamples);
         }
-
-        // the same weight as in generalHit.hlsl
-        sunLuminance = luminance(sunBuffer.diffuse * sunBuffer.intensity) * smoothstep(0.0f , 0.7f , dot(toSun , N));
     }
 
     // the mean of the two shadows by what each of the sources gives to the pixel ( the energy that is left is exactly sun * sunShadow + lamps * lightShadow ) .
@@ -221,14 +266,7 @@ void main(uint3 id : SV_DispatchThreadID){
     float rawShadow = totalShadow;
     float finalShadow;
 
-    const float4 clipPos = mul(generalBuffer.prevViewProj , float4(pos,  1.0f));
-    const float3 prevPos = clipPos.xyz / clipPos.w;
-    float2 prevUV = prevPos.xy * 0.5f + 0.5f;
-    prevUV.y = 1.0f - prevUV.y;
-
-    bool validUV = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f)));
     if(validUV){
-        const uint2 prevPixel = uint2(  prevUV * float2(screenSize) -0.5f);
         const float prevShadow = prevShadowImage[prevPixel].x;
         finalShadow = lerp(rawShadow , prevShadow , features.temporalShadowK);
     }else{

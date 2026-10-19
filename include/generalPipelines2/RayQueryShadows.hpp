@@ -36,7 +36,7 @@ namespace mox{
 
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
-            std::vector<GraphParameterInfo> reqs(16);
+            std::vector<GraphParameterInfo> reqs(18);
 
             reqs[0].type = moxGraphTypeBuffer;
             reqs[0].name = "generalBuffer";
@@ -96,6 +96,15 @@ namespace mox{
             reqs[15].type = moxGraphTypeBuffer;
             reqs[15].name = "forwardInfo";
 
+            // the indirect light of the last frame : its luminance fills the shadows ( the pass runs before the indirect pass of this frame )
+            reqs[16].type = moxGraphTypeImage;
+            reqs[16].name = "indirectImage_0";
+            reqs[16].imageSpecification.type = ImageType::RenderImage2;
+
+            reqs[17].type = moxGraphTypeImage;
+            reqs[17].name = "indirectImage_1";
+            reqs[17].imageSpecification.type = ImageType::RenderImage2;
+
             return reqs;
         }
 
@@ -152,7 +161,8 @@ namespace mox{
                 GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
                 GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
                 GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices} , GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile} ,
-                GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo});
+                GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo} ,
+                GraphSlot<RenderImage2>{"indirectImage_0" , &indirectImage[0]} , GraphSlot<RenderImage2>{"indirectImage_1" , &indirectImage[1]});
             if(!bound.has_value()) return bound;
 
             // the features are read by the CPU ( requestExecution ) : the buffer has to be a DeviceReadableBuffer . bit_cast does not check the type , it takes
@@ -170,13 +180,15 @@ namespace mox{
         [[nodiscard]] [[gnu::hot]] const ErrorDataOutput<void> translateBarriers(VkCommandBuffer& cmd) noexcept override final{
             const uint8_t currentImage = inputData.context->sc->frameIndex %2;
 
-            std::array<VkImageMemoryBarrier2 , 5> images;
+            std::array<VkImageMemoryBarrier2 , 6> images;
 
             images[0] = shadowImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             images[1] = shadowImage[!currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             images[2] = pixelCheck->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             images[3] = positionImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             images[4] = normalImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            // the indirect light of the last frame
+            images[5] = indirectImage[!currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
             std::array<VkBufferMemoryBarrier2 , 10> buffers;
 
@@ -193,7 +205,7 @@ namespace mox{
             buffers[8] = lightCountPerTile->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[9] = forwardInfo->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
-            auto dep = TypicalDependency<10 , 5>(images.data() , buffers.data());
+            auto dep = TypicalDependency<10 , 6>(images.data() , buffers.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -219,6 +231,7 @@ namespace mox{
         RenderImage2* shadowImage[2]{nullptr , nullptr};
         RenderImage2* positionImage[2]{nullptr , nullptr};
         RenderImage2* normalImage[2]{nullptr , nullptr};
+        RenderImage2* indirectImage[2]{nullptr , nullptr};
 
         RenderImage2* pixelCheck{nullptr};
 
@@ -228,7 +241,7 @@ namespace mox{
 
                 pipe = std::make_shared<ShaderPipe>(context);
                 {
-                    std::vector<DescriptorLayoutData> data(16);
+                    std::vector<DescriptorLayoutData> data(17);
                     data[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
@@ -253,6 +266,9 @@ namespace mox{
                     data[14] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[15] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
+                    // the indirect light of the last frame
+                    data[16] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -274,7 +290,7 @@ namespace mox{
 
                 {
                     for(auto id : {0  ,1}){
-                        std::vector<DescriptorData2> data(16);
+                        std::vector<DescriptorData2> data(17);
                         data[0] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
                         data[1] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
                         data[2] = DescriptorData2::createData(sunBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
@@ -296,6 +312,9 @@ namespace mox{
                         data[13] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
                         data[14] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 14 , 0);
                         data[15] = DescriptorData2::createData(forwardInfo , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 15 , 0);
+
+                        // the indirect light of the frame before this one ( the same parity rule as the shadow image of the last frame )
+                        data[16] = DescriptorData2::createData(indirectImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 16 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
@@ -351,6 +370,7 @@ namespace mox{
                 shadowImage[i] = std::exchange(input.shadowImage[i] , nullptr);
                 positionImage[i] = std::exchange(input.positionImage[i] , nullptr);
                 normalImage[i] = std::exchange(input.normalImage[i] , nullptr);
+                indirectImage[i] = std::exchange(input.indirectImage[i] , nullptr);
             }
             pixelCheck = std::exchange(input.pixelCheck , nullptr);
 
@@ -377,6 +397,7 @@ namespace mox{
                 shadowImage[i] = nullptr;
                 positionImage[i] = nullptr;
                 normalImage[i] = nullptr;
+                indirectImage[i] = nullptr;
             }
             pixelCheck = nullptr;
 

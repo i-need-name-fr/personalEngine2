@@ -998,6 +998,12 @@ namespace mox{
 
             ImGui::SliderFloat("Exposure" , &data.general.exposure , 0.1f , 8.0f , "%.2f");
 
+            bool normalMapOpenGL = data.general.normalMapOpenGL != 0u;
+            if(ImGui::Checkbox("Normal maps are OpenGL style" , &normalMapOpenGL)){
+                data.general.normalMapOpenGL = normalMapOpenGL ? 1u : 0u;
+            }
+            helpMarker("The green channel of the normal maps : OpenGL ( green up ) or DirectX ( green down ). If the light on the bumps looks inverted , flip it.");
+
             // the speed of the camera ( WASD / Space / Shift ) lives in the Player , not in a buffer : it is changed directly
             if(auto& user = inputData.context->user; user){
                 ImGui::SliderFloat("Camera speed" , &user->speed , user->minSpeed , user->maxSpeed , "%.1f m/s");

@@ -88,8 +88,7 @@ struct [raypayload] HitRayPayLoad{
 // the closest hit of the GI rays : it fills the payload with what the shader of the G buffer would have written for this surface ( the same
 // material , the same normal map , the same parallax ) , so the secondary hit looks like the primary one
 
-// true : the normal maps are OpenGL style ( green up ) , false : DirectX style ( green down ) . THE SAME VALUE AS IN DeferredRender/fragmentShader.hlsl
-static const bool NORMAL_MAP_OPENGL = false;
+// the normal maps are OpenGL style ( green up ) or DirectX style ( green down ) : generalBuffer.normalMapOpenGL ( ImGui ) , THE SAME FLAG as in DeferredRender/fragmentShader.hlsl
 
 struct HitSurface{
     float3 normal;
@@ -162,7 +161,8 @@ void main(inout HitRayPayLoad load , in BuiltInTriangleIntersectionAttributes at
         float3 n;
         n.xy = allTextures[nID].SampleLevel(typicalSampler , uv , 0).xy * 2.0f - 1.0f;
         n.z = sqrt(saturate(1.0f - dot(n.xy , n.xy)));
-        n.y = NORMAL_MAP_OPENGL ? -n.y : n.y;
+        // OpenGL maps ( green up ) are used as they are with this TBN , the DirectX ones ( green down ) are flipped . ( it was the other way round : every map was inverted )
+        n.y = (generalBuffer.normalMapOpenGL != 0u) ? n.y : -n.y;
         normal = normalize(mul(n , TBN));
     }
 

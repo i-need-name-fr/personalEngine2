@@ -171,7 +171,7 @@ void main(uint3 id : SV_DispatchThreadID){
     const float shadow = saturate(pow(max(filteredShadowImage[id.xy].x , 0.0001f) , features.shadowThickness));
     const float AO = pow(filteredAmbientOcclusion[id.xy].x , features.AO_intens);
     const float3 indirect = indirectImage[id.xy].xyz * albedo;
-    float3 result = (direct * shadow + indirect) * AO;
+    float3 result = direct * shadow * AO + indirect;
     // the ambient light : the colour of the sky in the direction of the normal , times albedo
 
     if(features.currentMode == INDIRECT_MODE){

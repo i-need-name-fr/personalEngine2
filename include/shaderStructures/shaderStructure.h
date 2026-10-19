@@ -222,6 +222,10 @@ struct GeneralInfo{
     // SSDO / SSGI are on : the ambient light is a part of their rays ( the rays that escape bring it ) , PostProcess does not add it again
     uint32_t ambientInIndirect;
 
+    // 1 : the normal maps are OpenGL style ( green up ) , the green channel is flipped when the normal is built ; 0 : DirectX style . appended at the END : it takes the 4 bytes
+    // of padding after ambientInIndirect , so the struct is still 592 bytes and the shaders that do not read it stay valid
+    uint32_t normalMapOpenGL;
+
 
 #else
 
@@ -253,6 +257,8 @@ struct GeneralInfo{
     float directWeight;
     float indirectWeight;
     uint ambientInIndirect;
+
+    uint normalMapOpenGL;
 
 
 #endif

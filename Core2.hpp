@@ -372,6 +372,8 @@ namespace mox{
             generalSettings.directWeight = 0.5f;
             generalSettings.indirectWeight = 0.5f;
             generalSettings.ambientInIndirect = 1;
+            // the normal maps of the project are OpenGL style ( the raster and the RT shaders read this one flag )
+            generalSettings.normalMapOpenGL = 1;
 
             // features
             featureSettings = GeneralFeatures{};
@@ -891,6 +893,12 @@ namespace mox{
             if(gui::SliderFloat("Light Proportion" , &prop , 0.0f , 1.0f)){
                 info.directWeight = 1.0f - prop;
                 info.indirectWeight = prop;
+            }
+            gui::Separator();
+            // the green channel of the normal maps : OpenGL ( up ) or DirectX ( down ) . the raster and the RT shaders both read it
+            bool normalMapOpenGL = info.normalMapOpenGL != 0u;
+            if(gui::Checkbox("Normal maps are OpenGL style" , &normalMapOpenGL)){
+                info.normalMapOpenGL = normalMapOpenGL ? 1u : 0u;
             }
         }
 
