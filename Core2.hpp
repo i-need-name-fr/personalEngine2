@@ -400,16 +400,11 @@ namespace mox{
             featureSettings.ReSTIRGI = true;
             featureSettings.ReSTIRGI_temporal = true;
             featureSettings.ReSTIRGI_spatial = false;
-            // the shadow of a lamp fades out over 0.5 of its radius beyond the radius
             featureSettings.lightShadowFade = 0.5f;
-            // the sky light is averaged over 2 directions of the hemisphere per pixel and frame
             featureSettings.skyboxSampleCount = 2u;
-            // the shadow of the sun fades with the distance to what covers the pixel : it is fully gone at this distance ( in meters ) , 0 - no fade
             featureSettings.sunShadowFade = 30.0f;
-            // the shadow of the direct light is never darker than this ( 0 - black , 1 - no shadow )
             featureSettings.shadowMinimum = 0.2f;
 
-            // fog : a thin haze . gridSize is the number of the slices of the fog image , it is not a setting of the user
             fogSettings = FogVolume{};
             fogSettings.center = glm::vec3(0.0f);
             fogSettings.halfExtent = glm::vec3(1000.0f);
@@ -449,6 +444,8 @@ namespace mox{
             forwardData.TILE_PER_ROW = (context->sc->extent.width + forwardData.TILE_SIZE - 1) / forwardData.TILE_SIZE;
             forwardData.TILE_TOTAL_AMOUNT = forwardData.TILE_PER_ROW * ((context->sc->extent.height + forwardData.TILE_SIZE - 1) / forwardData.TILE_SIZE);
             forwardData.totalLights = lightCount;
+
+            requiredMode = RayTracingRequired;
         }
 
         [[nodiscard]] ErrorDataOutput<void> createAllSources() noexcept{
@@ -510,10 +507,6 @@ namespace mox{
 
                 // all meshes and models
                 {
-                    // obviously first one is the cube , who would guessed
-                    // cube will have 4 places, first is the floor , other 3 are the light sources , 2 of them are static
-                    // the floor : half of its side ( metres ) and the size of one tile of the texture ( metres ) . the UV of the cube go from 0 to 1 over a face , so they are
-                    // multiplied by the number of the tiles on the side , and the sampler of the textures ( REPEAT ) repeats the texture instead of stretching it
                     constexpr float floorHalfSize = 100.0f;
                     constexpr float floorTileSize = 4.0f;
                     std::vector<Vertex> floorVertices = cube::vertices;
@@ -849,7 +842,7 @@ namespace mox{
             gui::NewFrame();
             gui::Begin("generalSettings");
             gui::Text("FPS :  %.1f , ms : %.3f " , general.dt > 1e-6f ? 1.0f / general.dt : 0.0f , general.dt * 1000.0f);
-            gui::Text("Player Position : X - %.1f  : Y - %.1f : Z -  %.1f" , context->user->position.x, context->user->position.y ,context->user->position.z);
+            gui::Text("Player Position : X > %.1f  : Y > %.1f : Z >  %.1f" , context->user->position.x, context->user->position.y ,context->user->position.z);
 
             gui::Separator();
 

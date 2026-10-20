@@ -147,12 +147,10 @@ void main(uint3 id : SV_DispatchThreadID){
     if(any(id.xy >= screenSize)) return;
 
     const float2 uv = (float2(id.xy) + 0.5f) / float2(screenSize);
-    // the world direction of the ray of this pixel ( the y of the screen goes down , the one of the ndc goes up )
     const float3 worldDir = ComputePixelRayDirection(id.xy , screenSize , generalBuffer.invViewProj , generalBuffer.playerPosition);
 
     if(pixelCheck[id.xy] == SKYBOX_PIXEL || features.PT){
         float3 sky = diffuseImage[id.xy].xyz;
-        // the fog covers the sky too , else the far things would be in the fog and the sky behind them would not : a seam on the horizon
         if(!features.PT && features.volumentricFog){
             sky = applyFog(sky , FOG_SKY_DISTANCE , worldDir , uv);
         }
@@ -163,16 +161,12 @@ void main(uint3 id : SV_DispatchThreadID){
     const float3 diffuse = diffuseImage[id.xy].xyz;
     const float3 specular = specularImage[id.xy].xyz;
     const float3 albedo = max(albedoImage[id.xy].xyz , 0.02f);
-    const float3 direct = (diffuse + specular) * albedo;
+    const float3 direct = diffuse * albedo + specular;
     const float linearDepth = depthImage[id.xy].x;
-    // the base of pow is cut BEFORE the power : pow( 0 , 0 ) is undefined ( NaN ) , and with shadow thickness 0 every pixel with the shadow 0 stayed black
-    // no minimum here : it would let the light of a lamp that a wall covers through the wall . shadowMinimum is applied to the shadow of the SUN only , before the
-    // shadow scalar is made ( generalHit.hlsl , rayQueryShadows.hlsl ) : the sky fills the shadow of the sun , nothing fills the shadow of a lamp
     const float shadow = saturate(pow(max(filteredShadowImage[id.xy].x , 0.0001f) , features.shadowThickness));
     const float AO = pow(filteredAmbientOcclusion[id.xy].x , features.AO_intens);
     const float3 indirect = indirectImage[id.xy].xyz * albedo;
     float3 result = direct * shadow * AO + indirect;
-    // the ambient light : the colour of the sky in the direction of the normal , times albedo
 
     if(features.currentMode == INDIRECT_MODE){
         // a debug view : no fog on it
