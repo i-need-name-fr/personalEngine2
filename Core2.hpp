@@ -137,6 +137,11 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<void> init() noexcept{
             {
+                const auto result = createFolders();
+                if(!result.has_value()) return result;
+            }
+
+            {
                 const auto result = createAllSources();
                 if(!result.has_value()) return result;
             }
@@ -152,6 +157,24 @@ namespace mox{
                 if(!result.has_value()) return result;
             }
 
+
+            return {};
+        }
+
+        [[nodiscard]] ErrorDataOutput<void> createFolders() noexcept{
+            const std::string pipeCache = "../PipelineCache";
+            const std::string shaderCache = "../ShaderModuleCache";
+            try{
+
+                namespace fs = std::filesystem;
+                if(fs::exists(pipeCache) && fs::exists(shaderCache)) return {};
+
+                fs::create_directory(pipeCache);
+                fs::create_directory(shaderCache);
+            }
+            catch(std::exception &e){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create or check existance of folders for cache"});
+            }
 
             return {};
         }
