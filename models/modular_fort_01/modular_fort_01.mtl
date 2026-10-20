@@ -10,6 +10,7 @@
 #   textures/modular_fort_01_wall_arm_1k.jpg : ARM = R ambient occlusion , G roughness , B metallic ( one texture , the channels are separate maps )
 #   textures/modular_fort_01_wall_diff_1k.jpg : diffuse / albedo
 #   textures/modular_fort_01_wall_nor_gl_1k.jpg : normal map , OpenGL style ( green up )
+#   textures/modular_fort_01_*_rough_1k.png : roughness only ( the G channel of the *_arm_1k.jpg maps , gray ) , named in the materials by map_Pr
 # source : Poly Haven ( polyhaven.com ) , CC0 . converted from glTF with assimp , the glTF is next to this file
 
 newmtl modular_fort_01_wall_1
@@ -20,6 +21,7 @@ illum 1
 map_Kd textures/modular_fort_01_wall_diff_1k.jpg
 bump textures/modular_fort_01_wall_nor_gl_1k.jpg
 map_bump textures/modular_fort_01_wall_nor_gl_1k.jpg
+map_Pr textures/modular_fort_01_wall_rough_1k.png
 
 newmtl modular_fort_01_trim_1
 Kd 1 1 1
@@ -29,6 +31,7 @@ illum 1
 map_Kd textures/modular_fort_01_trim_diff_1k.jpg
 bump textures/modular_fort_01_trim_nor_gl_1k.jpg
 map_bump textures/modular_fort_01_trim_nor_gl_1k.jpg
+map_Pr textures/modular_fort_01_trim_rough_1k.png
 
 newmtl modular_fort_01_plaster_1
 Kd 1 1 1
@@ -38,6 +41,7 @@ illum 1
 map_Kd textures/modular_fort_01_plaster_diff_1k.jpg
 bump textures/modular_fort_01_plaster_nor_gl_1k.jpg
 map_bump textures/modular_fort_01_plaster_nor_gl_1k.jpg
+map_Pr textures/modular_fort_01_plaster_rough_1k.png
 
 newmtl $Material_3
 Kd 1 1 1

@@ -107,7 +107,6 @@ namespace mox{
 
     private:
 
-        // shared_ptr : a Mesh2 is created in place and never moved
         std::vector<std::shared_ptr<Mesh2>> meshes{};
         std::string directory{};
 
@@ -116,7 +115,6 @@ namespace mox{
             directory = std::move(input.directory);
         }
 
-        // a name that can be compared : lower case , spaces and underscores are the same , one kind of slash
         [[nodiscard]] static std::string normalizeKey(std::string name) noexcept{
             for(auto& c : name){
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -126,8 +124,6 @@ namespace mox{
             return name;
         }
 
-        // the file `name` in the folder `folder` : as it is written , and if there is no such file , a file of the folder with the same
-        // name in any letter case and with spaces / underscores swapped ( an MTL of Blender names the image datablock , not the file )
         [[nodiscard]] static std::string resolveIn(const std::filesystem::path &folder , std::string name){
             namespace fs = std::filesystem;
             std::error_code ec;
@@ -154,8 +150,6 @@ namespace mox{
             return resolveIn(std::filesystem::path(directory.empty() ? "." : directory) , name);
         }
 
-        // the texture of the material for the first of the types that has one . an MTL does not use the types the way the names
-        // suggest ( see processMesh ) , so several types are tried . a name that is written but does not lead to a file is logged
         [[nodiscard]] std::string findTexturePath(const aiMaterial* material , std::initializer_list<aiTextureType> types) const{
             if(!material) return NonTexturePath;
 
@@ -243,7 +237,6 @@ namespace mox{
 
             for(uint32_t face = 0 ; face < mesh->mNumFaces ; face++){
                 const aiFace &currentFace = mesh->mFaces[face];
-                // Triangulate makes everything a triangle , lines and points that are left are not drawn
                 if(currentFace.mNumIndices != 3) continue;
                 for(uint32_t i = 0 ; i < 3 ; i++){
                     info.inputIndices.push_back(currentFace.mIndices[i]);
@@ -256,8 +249,6 @@ namespace mox{
                 return std::shared_ptr<Mesh2>{nullptr};
             }
 
-            // Mesh2 computes the tangents itself ( from the indices and the UVs , a mirrored part gets a flipped frame ) , the ones of assimp
-            // are not read : they depend on whether they were computed before or after the flip of the UVs
             info.needsCalcTBN = true;
 
             info.emission = data.emission;
@@ -274,24 +265,17 @@ namespace mox{
 
             if(mesh->mMaterialIndex < scene->mNumMaterials){
                 const aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
-                // what an OBJ / MTL file ( Blender ) calls what :
-                //   map_Kd -> DIFFUSE      map_Bump / bump -> HEIGHT ( a normal map in a Blender export ) , norm -> NORMALS
-                //   disp -> DISPLACEMENT   map_Ns -> SHININESS ( the roughness image )   map_refl -> REFLECTION ( the metallic image )
-                //   map_Pr / map_Pm are the PBR extension ( DIFFUSE_ROUGHNESS / METALNESS )
                 info.diffusePath = findTexturePath(material , {aiTextureType_DIFFUSE , aiTextureType_BASE_COLOR});
                 info.normalPath = findTexturePath(material , {aiTextureType_NORMALS , aiTextureType_NORMAL_CAMERA , aiTextureType_HEIGHT});
                 info.depthPath = findTexturePath(material , {aiTextureType_DISPLACEMENT});
                 info.roughnessPath = findTexturePath(material , {aiTextureType_DIFFUSE_ROUGHNESS , aiTextureType_SHININESS});
                 info.metallicPath = findTexturePath(material , {aiTextureType_METALNESS , aiTextureType_REFLECTION});
-
-                // the MTL did not name some maps : look next to the color map ( Foo_Color.png -> Foo_Normal.png ... )
                 if(info.normalPath == NonTexturePath) info.normalPath = findSiblingMap(info.diffusePath , {"Normal" , "NormalGL" , "Nrm"});
                 if(info.depthPath == NonTexturePath) info.depthPath = findSiblingMap(info.diffusePath , {"Displacement" , "Height" , "Depth" , "Disp"});
                 if(info.roughnessPath == NonTexturePath) info.roughnessPath = findSiblingMap(info.diffusePath , {"Roughness" , "Rough"});
                 if(info.metallicPath == NonTexturePath) info.metallicPath = findSiblingMap(info.diffusePath , {"Metallic" , "Metalness" , "Metal"});
-
-                // still nothing : a packed ARM map ( R occlusion , G roughness , B metallic ) . the occlusion is not read , roughness and metallic are
-                // two textures of the same file ( the channel is taken when the texture is loaded , the shaders read the red of them as always )
+                if(info.roughnessPath != NonTexturePath) info.roughnessChannel = 0;
+                if(info.metallicPath != NonTexturePath) info.metallicChannel = 0;
                 if(info.roughnessPath == NonTexturePath || info.metallicPath == NonTexturePath){
                     const std::string packed = findPackedARM(info.diffusePath);
                     if(packed != NonTexturePath){

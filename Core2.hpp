@@ -364,16 +364,12 @@ namespace mox{
             return {};
         }
 
-        // the default settings : the data of the buffers lives in the members of the class and keeps its values between the frames ( the UI edits them ,
-        // updateData only sends them to the GPU ) . what is made every frame ( the matrices , the frame index , the position of the player ... ) is not here
         void setDefaultSettings() noexcept{
-            // general : the exposure and the balance between the direct and the indirect light
             generalSettings = GeneralInfo{};
             generalSettings.exposure = 1.6f;
             generalSettings.directWeight = 0.5f;
             generalSettings.indirectWeight = 0.5f;
             generalSettings.ambientInIndirect = 1;
-            // the normal maps of the project are OpenGL style ( the raster and the RT shaders read this one flag )
             generalSettings.normalMapOpenGL = 1;
 
             // features
