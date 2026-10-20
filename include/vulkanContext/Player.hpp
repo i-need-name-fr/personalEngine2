@@ -176,20 +176,34 @@ namespace mox{
             if(!window) return;
             Player* user = reinterpret_cast<Player*>(glfwGetWindowUserPointer(window));
             if(user->openedMenu) return;
-            user->processMouseInput(xpos , ypos);
+            if(user->holdedMouse){
+                user->processMouseInput(xpos , ypos);
+            }
+
+        }
+
+        static void mouseKeyCallBack(GLFWwindow* window , int key , int action , [[maybe_unused]] int mode){
+            if(!window) return;
+            Player* user = reinterpret_cast<Player*>(glfwGetWindowUserPointer(window));
+
+            if(key == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS){
+                user->holdedMouse = true;                
+                glfwSetInputMode(window ,GLFW_CURSOR ,GLFW_CURSOR_DISABLED  );
+            }
+            if(key == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE){
+                user->holdedMouse = false;               
+                glfwSetInputMode(window ,GLFW_CURSOR ,GLFW_CURSOR_NORMAL);
+                user->firstMouseSample = true;
+            }
         }
 
         static void keyCallBack(GLFWwindow* window , int key , int scancode , int action, int mode){
             if(!window) return;
             Player* user = reinterpret_cast<Player*>(glfwGetWindowUserPointer(window));
             if(key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) glfwSetWindowShouldClose(window , true);
-            if(key == GLFW_KEY_F && action == GLFW_PRESS){
-                user->openedMenu = !user->openedMenu;
-                glfwSetInputMode(window , GLFW_CURSOR ,
-                                 user->openedMenu ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
-                user->resetMouseAnchor();
-            }
             if(key == GLFW_KEY_R && action == GLFW_PRESS) user->currentMode = (user->currentMode + 1) % user->totalModes;
         }
+
+        uint8_t holdedMouse = false;
     };
 }

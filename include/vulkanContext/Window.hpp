@@ -5,7 +5,7 @@
 namespace mox{
 
     class Window{
-        ErrorDataOutput<void> init(void* inputData , GLFWcursorposfun mouse , GLFWkeyfun key ){
+        ErrorDataOutput<void> init(void* inputData , GLFWcursorposfun mouse , GLFWkeyfun key , GLFWmousebuttonfun mouseKey){
             if(!glfwInit()) throw std::runtime_error("lol");
             glfwWindowHint(GLFW_CLIENT_API , GLFW_NO_API);
             glfwWindowHint(GLFW_MAXIMIZED , GLFW_TRUE);
@@ -21,6 +21,7 @@ namespace mox{
             glfwSetWindowUserPointer(window , inputData);
             glfwSetCursorPosCallback(window , mouse);
             glfwSetKeyCallback(window , key);
+            if(mouseKey) glfwSetMouseButtonCallback(window , mouseKey);
             return {};
         }
 
@@ -31,13 +32,14 @@ namespace mox{
         struct WindowCreateInfo{
             GLFWcursorposfun mouse; 
             GLFWkeyfun key;
+            GLFWmousebuttonfun mousePos;
             void* pUser;
         };
 
         Window(const WindowCreateInfo& info){
             if(!info.mouse || !info.key) throw std::runtime_error("functions for key and mouse call backs are nullptr");
             std::cout << "creating the window!\n";
-            auto result = init(info.pUser , info.mouse , info.key);
+            auto result = init(info.pUser , info.mouse , info.key,  info.mousePos);
             if(result.has_value()){
 
                 ErrorDataType res = {MOX_ERROR_TYPE_SUCCESS , "window has been created successfully"};

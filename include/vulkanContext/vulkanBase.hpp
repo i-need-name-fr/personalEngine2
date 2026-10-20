@@ -50,13 +50,12 @@ namespace mox{
                 user = std::make_shared<Player>();
 
                 mox::Window::WindowCreateInfo windowInfo{};
-
                 windowInfo.pUser = user.get();
                 windowInfo.key = Player::keyCallBack;
                 windowInfo.mouse = Player::mousePosCallBack;
-
+                windowInfo.mousePos = Player::mouseKeyCallBack;
                 window = std::make_shared<Window>(windowInfo);
-
+                glfwSetInputMode(window->window , GLFW_CURSOR , GLFW_CURSOR_NORMAL);
                 instance = std::make_shared<Instance>();
 
                 Surface::SurfaceCreateInfo surfaceInfo{};
