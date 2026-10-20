@@ -82,6 +82,7 @@ float computeEss(float roughness){
 [[vk::image_format("r32f")]]
 [[vk::binding( 0 , 0)]] RWTexture1D<float> result;
 
+[shader("compute")]
 [numthreads(64, 1 , 1)]
 void main(uint3 id : SV_DispatchThreadID){
     uint lutSize;

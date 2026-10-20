@@ -1,7 +1,7 @@
 #pragma once
 
 #include <random>
-#include "../ShaderPipe/ShaderPipe.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 
@@ -155,7 +155,7 @@ namespace mox{
         VulkanContext* context{nullptr};
         std::string path;
 
-        pShaderPipe pipe{nullptr};
+        pShaderPipeType pipe{nullptr};
         // device local only : the kernel is written once ( through a staging buffer ) and then only read by the shader
         pGeneralBuffer2<BufferType::Device , false> kernel{nullptr};
 
@@ -239,7 +239,7 @@ namespace mox{
                     kernel = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , translateToSpan(samples));
                 }
 
-                pipe = std::make_shared<ShaderPipe>(context);
+                pipe = std::make_shared<ShaderPipeType>(context);
 
                 {
                     // the order is the one of the bindings of the shader , binding 0 is the depth image that the shader declares but does not use
@@ -292,7 +292,7 @@ namespace mox{
                 }
 
                 {
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context = context;
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;

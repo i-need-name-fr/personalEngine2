@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ShaderPipe/ShaderPipe.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../Image2/TextureManager2.hpp"
@@ -350,7 +350,7 @@ namespace mox{
 
     private:
 
-        pShaderPipe pipe{nullptr};
+        pShaderPipeType pipe{nullptr};
 
         VulkanContext* context{nullptr};
         TextureManager2* manager{nullptr};
@@ -414,7 +414,7 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<void> processInit(const CreateInfo& input) noexcept{
             try{
-                pipe = std::make_shared<ShaderPipe>(context);
+                pipe = std::make_shared<ShaderPipeType>(context);
 
                 // descriptor sets first
                 {   
@@ -466,7 +466,7 @@ namespace mox{
                 pipe->shaders.resize(2);
                 {
                     // vertex
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context = context;
                     info.currentStage = VK_SHADER_STAGE_VERTEX_BIT;
                     info.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -474,12 +474,12 @@ namespace mox{
                     info.layouts = {pipe->descriptorLayouts[0].get() , manager->layout.get()};
                     info.pushes = {};
 
-                    pipe->shaders[0]=  std::make_shared<ShaderObject>(info);
+                    pipe->shaders[0]=  std::make_shared<ShaderObjectType>(info);
                 }
 
                 {
                     // fragment
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context = context;
                     info.currentStage = VK_SHADER_STAGE_FRAGMENT_BIT;
                     info.nextStage = 0;
@@ -487,7 +487,7 @@ namespace mox{
                     info.layouts = {pipe->descriptorLayouts[0].get() , manager->layout.get()};
                     info.pushes = {};
 
-                    pipe->shaders[1]=  std::make_shared<ShaderObject>(info);
+                    pipe->shaders[1]=  std::make_shared<ShaderObjectType>(info);
                 }
 
                 {

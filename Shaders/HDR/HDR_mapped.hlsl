@@ -88,6 +88,7 @@ float ComputeAverageLuminance(RWStructuredBuffer<uint> histogram , uint localInd
     return exp2(avgLogLum);   // обратно из log-пространства в реальную яркость
 }
 
+[shader("compute")]
 [numthreads(8, 8 ,1)]
 void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
     uint width , height;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ShaderPipe/ShaderPipe.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../Image2/TextureManager2.hpp"
@@ -154,7 +154,7 @@ namespace mox{
         RenderImage2* HDRImage[2]{nullptr , nullptr};
         BufferBase2* history{nullptr};
 
-        pShaderPipe pipe{nullptr};
+        pShaderPipeType pipe{nullptr};
 
         std::string pathToFile{};
 
@@ -183,7 +183,7 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createPipe() noexcept{
             try{
 
-                pipe = std::make_shared<ShaderPipe>(context);
+                pipe = std::make_shared<ShaderPipeType>(context);
                 // descriptor layout
                 {
                     std::vector<DescriptorLayoutData> data(2);
@@ -227,7 +227,7 @@ namespace mox{
                 }
 
                 {
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context = context;
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;
@@ -236,7 +236,7 @@ namespace mox{
                     info.layouts = {pipe->descriptorLayouts[0].get()};
 
                     pipe->shaders.resize(1);
-                    pipe->shaders[0] = std::make_shared<ShaderObject>(info);
+                    pipe->shaders[0] = std::make_shared<ShaderObjectType>(info);
                 }
             }
             catch(std::exception &e){

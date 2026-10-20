@@ -71,6 +71,7 @@ static const uint DIR_SAMPLES  = SQRT_SAMPLES * SQRT_SAMPLES;
 static const uint MS_STEPS     = 20; 
 static const float GROUND_ALBEDO = 0.3;
 
+[shader("compute")]
 [numthreads(8, 8, 1)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {

@@ -4,6 +4,7 @@
 #define VMA_IMPLEMENTATION
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define STB_IMAGE_IMPLEMENTATION
+#define SPIRV_COMPILATION_REQUIRED
 
 #include <iostream>
 #include "include/Buffer2/GeneralBuffer.hpp"

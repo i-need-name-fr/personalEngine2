@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ShaderPipe/ShaderPipe.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 
@@ -208,7 +208,7 @@ namespace mox{
         VulkanContext* context{nullptr};
         std::string path;
 
-        pShaderPipe pipe = nullptr;
+        pShaderPipeType pipe = nullptr;
 
         RenderImage2* depthImage[2]{nullptr , nullptr};
         RenderImage2* normalImage[2]{nullptr , nullptr};
@@ -269,7 +269,7 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<void> createPipe() noexcept{
             try{
-                pipe = std::make_shared<ShaderPipe>(context);
+                pipe = std::make_shared<ShaderPipeType>(context);
 
                 {
                     std::vector<DescriptorLayoutData> data(6);
@@ -347,7 +347,7 @@ namespace mox{
                 }
 
                 {
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context=  context;
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;

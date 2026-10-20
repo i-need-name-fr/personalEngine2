@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../Image2/RenderImage2.hpp"
-#include "../ShaderPipe/ShaderPipe.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 
 namespace mox{
 
@@ -52,7 +52,7 @@ namespace mox{
 
     private:    
 
-        pShaderPipe pipe{nullptr};
+        pShaderPipeType pipe{nullptr};
 
         [[nodiscard]] ErrorDataOutput<void> processTexture(CreateInfo &input) noexcept{
             cmdFunctionType function = [&](VkCommandBuffer &cmd) -> void{
@@ -70,7 +70,7 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<void> createPipe(CreateInfo &input) noexcept{
             try{
-                pipe = std::make_shared<ShaderPipe>(input.context);
+                pipe = std::make_shared<ShaderPipeType>(input.context);
 
                 {
                     DescriptorLayoutData data{};
@@ -104,7 +104,7 @@ namespace mox{
                 }
 
                 {
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context = input.context;
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;

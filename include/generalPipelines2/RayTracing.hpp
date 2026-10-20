@@ -6,7 +6,7 @@
 #include "../AS2/AccelerationStructureBase.hpp"
 #include "../Object2/Mesh2.hpp"
 #include "../Buffer2/SBT2.hpp"
-#include "../ShaderModule/ShaderModule.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../Sampler/Sampler.hpp"
 #include "../Image2/TextureManager2.hpp"
 
@@ -517,17 +517,17 @@ namespace mox{
                 }
 
                 // ------------------------------------------------------------ the shaders
-                ShaderModule rayGeneration(context , inputData.rayGenerationPath);
+                ShaderModuleType rayGeneration(context , inputData.rayGenerationPath);
 
-                ShaderModule generalMiss(context , inputData.generalMissPath.empty() ? inputData.giMissPath : inputData.generalMissPath);
-                ShaderModule giMiss(context , inputData.giMissPath);
-                ShaderModule shadowMiss(context , inputData.shadowMissPath);
+                ShaderModuleType generalMiss(context , inputData.generalMissPath.empty() ? inputData.giMissPath : inputData.generalMissPath);
+                ShaderModuleType giMiss(context , inputData.giMissPath);
+                ShaderModuleType shadowMiss(context , inputData.shadowMissPath);
 
-                std::optional<ShaderModule> generalHit;
+                std::optional<ShaderModuleType> generalHit;
                 if(!inputData.generalHitPath.empty()) generalHit.emplace(context , inputData.generalHitPath);
-                ShaderModule giHit(context , inputData.giHitPath);
-                ShaderModule shadowAnyHit(context , inputData.shadowAnyHitPath);
-                std::optional<ShaderModule> shadowHit;
+                ShaderModuleType giHit(context , inputData.giHitPath);
+                ShaderModuleType shadowAnyHit(context , inputData.shadowAnyHitPath);
+                std::optional<ShaderModuleType> shadowHit;
                 if(!inputData.shadowHitPath.empty()) shadowHit.emplace(context , inputData.shadowHitPath);
 
                 // ------------------------------------------------------------ the stages and the groups

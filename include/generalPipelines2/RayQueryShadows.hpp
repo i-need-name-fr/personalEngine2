@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ShaderPipe/ShaderPipe.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../AS2/AccelerationStructureBase.hpp"
@@ -215,7 +215,7 @@ namespace mox{
 
     private:
 
-        pShaderPipe pipe{nullptr};
+        pShaderPipeType pipe{nullptr};
         CreateInfo inputData{};
 
         BufferBase2* generalBuffer{nullptr};
@@ -239,7 +239,7 @@ namespace mox{
             VulkanContext* context = inputData.context;
             try{
 
-                pipe = std::make_shared<ShaderPipe>(context);
+                pipe = std::make_shared<ShaderPipeType>(context);
                 {
                     std::vector<DescriptorLayoutData> data(17);
                     data[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
@@ -326,7 +326,7 @@ namespace mox{
                 }
 
                 {
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context = context;
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;

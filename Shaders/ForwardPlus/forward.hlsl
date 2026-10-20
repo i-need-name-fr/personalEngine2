@@ -80,6 +80,7 @@ groupshared float4 tilePlanes[4];
 // one workgroup = one tile ( the dispatch is TILE_PER_ROW x rows ) , its 256 threads walk over all the lights.
 // it used to be 1D : a thread was a light ( its GLOBAL id ) and a group was a tile of a 2D grid that was
 // never dispatched , so only the first few tiles were processed and they saw only a slice of the lights
+[shader("compute")]
 [numthreads(256 , 1 , 1)]
 void main(uint3 groupId : SV_GroupID , uint localIndex : SV_GroupIndex){
 

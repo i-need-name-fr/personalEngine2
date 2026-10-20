@@ -31,6 +31,7 @@
 
 #include "include/GraphRender2/GraphRender2.hpp"
 #include "include/generalPipelines2/RayTracing.hpp"
+#include "include/RTCompileObjects/RTCompileObjects.hpp"
 
 namespace gui = ImGui;
 
@@ -174,16 +175,16 @@ namespace mox{
                 {
                     AtmosphereScattering::CreateInfo info{};
                     info.context = context.get();
-                    info.skyView = "../Shaders/atmosphereScattering/SkyViewLUT.spv";
-                    info.transition = "../Shaders/atmosphereScattering/transitionCube.spv";
+                    info.skyView = getShaderPath("../Shaders/atmosphereScattering/SkyViewLUT");
+                    info.transition = getShaderPath("../Shaders/atmosphereScattering/transitionCube");
                     atmosphere = std::make_shared<AtmosphereScattering>(info);
                 }
 
                 {
                     DeferredRender::CreateInfo info{};
                     info.context = context.get();
-                    info.fragment = "../Shaders/DeferredRender/fragmentShader.spv";
-                    info.vertex = "../Shaders/DeferredRender/vertexShader.spv";
+                    info.fragment = getShaderPath("../Shaders/DeferredRender/fragmentShader");
+                    info.vertex = getShaderPath("../Shaders/DeferredRender/vertexShader");
                     info.manager = manager.get();
 
                     render = std::make_shared<DeferredRender>(info);
@@ -192,7 +193,7 @@ namespace mox{
                 {
                     ForwardPlus::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/ForwardPlus/forward.spv";
+                    info.path = getShaderPath("../Shaders/ForwardPlus/forward");
                     info.generalData = forwardData;
 
                     forward = std::make_shared<ForwardPlus>(info);
@@ -201,7 +202,7 @@ namespace mox{
                 {
                     AmbientOcclusion::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/AmbientOcclusion/AmbientOcclusion.spv";
+                    info.path = getShaderPath("../Shaders/AmbientOcclusion/AmbientOcclusion");
 
                     ao = std::make_shared<AmbientOcclusion>(info);
                 }
@@ -210,7 +211,7 @@ namespace mox{
                     RayQueryShadows::CreateInfo info{};
                     info.context = context.get();
                     info.as = tlas.get();
-                    info.path = "../Shaders/RayQueryShadows/rayQueryShadows.spv";
+                    info.path = getShaderPath("../Shaders/RayQueryShadows/rayQueryShadows");
 
                     shadows = std::make_shared<RayQueryShadows>(info);
                 }
@@ -218,7 +219,7 @@ namespace mox{
                 {
                     BilateralFiltering::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/BF_singular/bilateralFilteringSingular.spv";
+                    info.path = getShaderPath("../Shaders/BF_singular/bilateralFilteringSingular");
 
                     bilateral = std::make_shared<BilateralFiltering>(info);
                 }
@@ -226,7 +227,7 @@ namespace mox{
                 {
                     VolumentricRender::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/volumentricRender/fogCalc.spv";
+                    info.path = getShaderPath("../Shaders/volumentricRender/fogCalc");
 
                     fog = std::make_shared<VolumentricRender>(info);
                 }
@@ -234,7 +235,7 @@ namespace mox{
                 {
                     LightPass::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/LightPass/lightPass.spv";
+                    info.path = getShaderPath("../Shaders/LightPass/lightPass");
 
                     lightPass = std::make_shared<LightPass>(info);
                 }
@@ -242,7 +243,7 @@ namespace mox{
                 {
                     IndirectLightSum::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/indirectShader/indirectCalc.spv";
+                    info.path = getShaderPath("../Shaders/indirectShader/indirectCalc");
 
                     indirect = std::make_shared<IndirectLightSum>(info);
                 }
@@ -250,8 +251,8 @@ namespace mox{
                 {
                     ReBLUR::CreateInfo info{};
                     info.context = context.get();
-                    info.spatial = "../Shaders/denoiser/ReBLUR_spatial.spv";
-                    info.temporal = "../Shaders/denoiser/ReBLUR_temporal.spv";
+                    info.spatial = getShaderPath("../Shaders/denoiser/ReBLUR_spatial");
+                    info.temporal = getShaderPath("../Shaders/denoiser/ReBLUR_temporal");
 
                     reblur = std::make_shared<ReBLUR>(info);
                 }
@@ -259,8 +260,8 @@ namespace mox{
                 {
                     ReLAX::CreateInfo info{};
                     info.context = context.get();
-                    info.spatial = "../Shaders/denoiser/ReLAX_spatial.spv";
-                    info.temporal = "../Shaders/denoiser/ReLAX_temporal.spv";
+                    info.spatial = getShaderPath("../Shaders/denoiser/ReLAX_spatial");
+                    info.temporal = getShaderPath("../Shaders/denoiser/ReLAX_temporal");
 
                     relax = std::make_shared<ReLAX>(info);
                 }
@@ -268,7 +269,7 @@ namespace mox{
                 {
                     PostProcess::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/PostProcess/PostProcess.spv";
+                    info.path = getShaderPath("../Shaders/PostProcess/PostProcess");
 
                     post = std::make_shared<PostProcess>(info);
                 }
@@ -276,7 +277,7 @@ namespace mox{
                 {
                     AEHDR::CreateInfo info{};
                     info.context = context.get();
-                    info.path = "../Shaders/HDR/autoExposure.spv";
+                    info.path = getShaderPath("../Shaders/HDR/autoExposure");
 
                     aehdr = std::make_shared<AEHDR>(info);
                 }
@@ -284,7 +285,7 @@ namespace mox{
                 {
                     HDR::CreateInfo info{};
                     info.context = context.get();
-                    info.path =  "../Shaders/HDR/HDR_mapped.spv";
+                    info.path =  getShaderPath("../Shaders/HDR/HDR_mapped");
                     hdr = std::make_shared<HDR>(info);
                 }
 
@@ -296,14 +297,14 @@ namespace mox{
                     RayTracing::CreateInfo info{};
                     info.as = tlas.get();
                     info.context = context.get();
-                    info.generalHitPath = "../Shaders/RayTracing/generalHit.spv";
-                    info.generalMissPath = "../Shaders/RayTracing/generalMiss.spv";
-                    info.rayGenerationPath = "../Shaders/RayTracing/rayGeneration.spv";
-                    info.shadowMissPath = "../Shaders/RayTracing/shadowMiss.spv";
-                    info.shadowAnyHitPath = "../Shaders/RayTracing/shadowAnyHit.spv";
-                    info.shadowHitPath = "../Shaders/RayTracing/shadowHit.spv";
-                    info.giHitPath = "../Shaders/RayTracing/GI_hit.spv";
-                    info.giMissPath = "../Shaders/RayTracing/GI_miss.spv";
+                    info.generalHitPath = getShaderPath("../Shaders/RayTracing/generalHit");
+                    info.generalMissPath = getShaderPath("../Shaders/RayTracing/generalMiss");
+                    info.rayGenerationPath = getShaderPath("../Shaders/RayTracing/rayGeneration");
+                    info.shadowMissPath = getShaderPath("../Shaders/RayTracing/shadowMiss");
+                    info.shadowAnyHitPath = getShaderPath("../Shaders/RayTracing/shadowAnyHit");
+                    info.shadowHitPath = getShaderPath("../Shaders/RayTracing/shadowHit");
+                    info.giHitPath = getShaderPath("../Shaders/RayTracing/GI_hit");
+                    info.giMissPath = getShaderPath("../Shaders/RayTracing/GI_miss");
                     info.manager = manager.get();
 
                     rt = std::make_shared<RayTracing>(info);
@@ -467,7 +468,7 @@ namespace mox{
                 MultiScatter::CreateInfo mlInfo{};
                 mlInfo.context = context.get();
                 mlInfo.image = renderImages->multiScatter.get();
-                mlInfo.path = "../Shaders/MultiScatter/MultiScatter.spv";
+                mlInfo.path = getShaderPath("../Shaders/MultiScatter/MultiScatter");
 
                 MultiScatter scatter(mlInfo);
 
@@ -475,14 +476,14 @@ namespace mox{
                 TransmissionLUTPipe::CreateInfo transInfo{};
                 transInfo.context = context.get();
                 transInfo.image = renderImages->transmissionLUT.get();
-                transInfo.path = "../Shaders/atmosphereScattering/transmissionLUT.spv";
+                transInfo.path = getShaderPath("../Shaders/atmosphereScattering/transmissionLUT");
 
                 TransmissionLUTPipe trans(transInfo);
 
                 // multiscatterLUT
                 MultiScatterLUTPipe::CreateInfo mulLUTInfo{};
                 mulLUTInfo.context = context.get();
-                mulLUTInfo.path = "../Shaders/atmosphereScattering/multiScattering.spv";
+                mulLUTInfo.path = getShaderPath("../Shaders/atmosphereScattering/multiScattering");
                 mulLUTInfo.transmission = renderImages->transmissionLUT.get();
                 mulLUTInfo.image = renderImages->multiScatterLUT.get();
 

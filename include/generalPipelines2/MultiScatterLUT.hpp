@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ShaderPipe/ShaderPipe.hpp"
+#include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../Sampler/Sampler.hpp"
 
 namespace mox{
@@ -63,14 +63,14 @@ namespace mox{
 
     private:
 
-        pShaderPipe pipe{nullptr};
+        pShaderPipeType pipe{nullptr};
         pSampler sampler{nullptr};
 
         [[nodiscard]] ErrorDataOutput<void> createPipe(const CreateInfo& input) noexcept{
 
             try{
 
-                pipe = std::make_shared<ShaderPipe>(input.context);
+                pipe = std::make_shared<ShaderPipeType>(input.context);
 
                 {
                     Sampler::CreateInfo info{};
@@ -108,7 +108,7 @@ namespace mox{
                 // we dont need descriptor buffer
 
                 {
-                    ShaderObject::CreateInfo info{};
+                    ShaderObjectType::CreateInfo info{};
                     info.context = input.context;
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;
