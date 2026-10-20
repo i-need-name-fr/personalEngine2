@@ -3,3 +3,4 @@ log.txt
 .cache/
 task.txt
 ShaderModuleCache/
+PipelineCache/
