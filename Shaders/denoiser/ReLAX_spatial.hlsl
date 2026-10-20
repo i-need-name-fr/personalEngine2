@@ -72,6 +72,10 @@ float normalPowerForRoughness(float roughness){
     return lerp(256.0f , 16.0 , roughness);
 }
 
+uint randomNumberIn(inout uint seed , const uint totalCount){
+    return uint(rand(seed) * float(totalCount));
+}
+
 [shader("compute")]
 [numthreads(8, 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID){
@@ -106,8 +110,10 @@ void main(uint3 id : SV_DispatchThreadID){
     float weight= 1.0f;
 
     [unroll]
-    for(uint i = 0 ; i < 16 ; i++){
-        float2 offset = PoissonDisk[i] * radius;
+    for(uint i = 0 ; i < 32 ; i++){
+        uint seed = id.x * 3942u  + id.y * 32849u + 239u * i;
+        const uint random = randomNumberIn(seed , 16);
+        float2 offset = PoissonDisk[random] * radius;
         int2 samplePos = int2(id.xy) + int2(offset);
         if(any(samplePos < int2(0 , 0)) || any(samplePos >= int2(screenSize))) continue;
 

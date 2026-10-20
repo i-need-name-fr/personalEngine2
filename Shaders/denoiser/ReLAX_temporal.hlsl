@@ -43,7 +43,7 @@
 [[vk::binding(15 , 0)]] ConstantBuffer<GeneralFeatures> features;
 [[vk::binding(16 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
 
-static const float MAX_ACCUM_FRAMES = 32.0f;
+static const float MAX_ACCUM_FRAMES = 64.0f;
 
 float3 ReconstructWorldPos(float2 uv , float depth , float4x4 invViewProj){
     float2 ndc = uv * 2.0f - 1.0f;

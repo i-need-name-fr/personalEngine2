@@ -31,7 +31,7 @@
 [[vk::image_format("r32f")]]
 [[vk::binding(12, 0)]] RWTexture2D<float> pixelCheck;
 
-static const float MAX_ACCUM_FRAMES = 32.0f;
+static const float MAX_ACCUM_FRAMES = 64.0f;
 
 #include "../../include/ShaderStructures/ShaderStructure.h"
 

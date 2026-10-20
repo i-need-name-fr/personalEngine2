@@ -56,6 +56,10 @@ float ComputeBlurRadius(float normalizedHitDist, float historyCount) {
     return baseRadius * lerp(0.25, 1.0, historyFactor); // не даём радиусу упасть в 0 совсем
 }
 
+uint randomNumberIn(inout uint seed , const uint totalCount){
+    return uint(rand(seed) * float(totalCount));
+}
+
 [shader("compute")]
 [numthreads(8, 8 , 1)]
 void main(uint3 id : SV_DispatchThreadID){
@@ -87,9 +91,12 @@ void main(uint3 id : SV_DispatchThreadID){
     float3 sum = center;
     float weight= 1.0f;
 
+
     [unroll]
-    for(uint i = 0 ; i < 16 ; i++){
-        float2 offset = PoissonDisk[i] * radius;
+    for(uint i = 0 ; i < 32 ; i++){
+        uint seed = id.x * 3942u  + id.y * 32849u + 239u * i;
+        const uint random = randomNumberIn(seed , 16);
+        float2 offset = PoissonDisk[random] * radius;
         int2 samplePos = int2(id.xy) + int2(offset);
         if(any(samplePos < int2(0 , 0)) || any(samplePos >= int2(screenSize))) continue;
 
@@ -100,8 +107,6 @@ void main(uint3 id : SV_DispatchThreadID){
         float normalW = pow(saturate(dot(sNormal , centerNormal)) , NORMAL_POWER);
 
         float w = depthW * normalW;
-        // neighbours come from temporal's output (outputDiffuse) , never from inputDiffuse -
-        // other invocations of this dispatch are writing inputDiffuse right now
         sum += outputImage[samplePos].xyz * w;
         weight += w;
     }
