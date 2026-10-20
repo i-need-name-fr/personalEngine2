@@ -93,7 +93,14 @@ namespace mox{
             }   
 
             if(layouts.size() != data.layouts.size()) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create shader object , due to some descriptor layouts being nullptr"});
-            const bool diffStatus = checkValidTemp(data.filePath) && checkValidShaderStructure();
+            // the header is asked FIRST and always : with && it was skipped when the hlsl itself changed , the stamp of the header was then saved below ( commit )
+            // before any other shader had compared with it , and those shaders took their old binaries
+            const bool structureValid = checkValidShaderStructure();
+            // no .spv -> it has to be compiled ( the .bin alone is not enough : the other mode of the build loads the .spv )
+            std::string spvName{} , spvFolder{};
+            parseFilePath(data.filePath , spvFolder , spvName);
+            const bool spvExists = std::filesystem::exists(getCompiledShaderPath(spvName , spvFolder));
+            const bool diffStatus = checkValidTemp(data.filePath) && structureValid && spvExists;
             if(diffStatus){
 
                 auto buffer = getCacheData(data.filePath);

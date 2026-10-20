@@ -152,7 +152,10 @@ namespace mox{
 
         ErrorDataOutput<void> createShaderModule(const std::string path) noexcept {
             if(!std::filesystem::exists(path)) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , std::format("failed to compile the shader , since the file name is not valid -> Path: {}", path)});
-            const bool diffStatus = checkValidTemp(path) && checkValidShaderStructure();
+            // the header is asked FIRST and always : with && it was skipped when the hlsl itself changed , the stamp of the header was then saved below ( commit )
+            // before any other shader had compared with it , and those shaders took their old binaries
+            const bool structureValid = checkValidShaderStructure();
+            const bool diffStatus = checkValidTemp(path) && structureValid;
             if(diffStatus){
                 std::string fileName{} , filePath;
                 parseFilePath(path , filePath , fileName);
