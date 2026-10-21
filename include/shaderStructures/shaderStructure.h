@@ -496,6 +496,8 @@ struct GeneralFeatures{
     uint32_t ReSTIRGI_temporal;
     uint32_t ReSTIRGI_spatial;
 
+    uint32_t RadianceCascade;
+
     uint32_t currentMode;
 
     uint32_t randomValues;
@@ -547,6 +549,8 @@ struct GeneralFeatures{
     uint ReSTIRGI;
     uint ReSTIRGI_temporal;
     uint ReSTIRGI_spatial;
+
+    uint RadianceCascade;
 
     uint currentMode;
 
@@ -644,7 +648,7 @@ namespace DDGI{
 
         float3 position;
         uint totalProbes;
-        uint firstProbe
+        uint firstProbe;
 
 #endif
         float padding0;
@@ -697,24 +701,31 @@ namespace RC{
     struct CascadeInfo{
 #ifdef __cplusplus
         uint32_t PROBES_PER_CASCADE;
-        uint32_t PROBE_RESOLUTION;
+        // the probes of the cascade are a 3D grid of GRID_SIZE ^ 3 nodes ( the index of a node is x + GRID_SIZE * ( y + GRID_SIZE * z ) )
+        uint32_t GRID_SIZE;
         uint32_t PROBE_RAY_COUNT;
         uint32_t CASCADE_X;
 
         uint32_t CASCADE_Y;   
         uint32_t PROBE_OFFSET;
+        uint32_t BLOCK_SIZE;
 
 #else
         uint PROBES_PER_CASCADE;
-        uint PROBE_RESOLUTION;
+        uint GRID_SIZE;
         uint PROBE_RAY_COUNT;
         uint CASCADE_X;
         
         uint CASCADE_Y;   
         uint PROBE_OFFSET;
+        uint BLOCK_SIZE;
+
 #endif  
-        float requiredRadius2;
-        float padding1;
+        // the distance between two nodes of the grid ( meters ) . the grid is snapped to it : the nodes stay at the same places of the world while the player moves
+        float CELL_SIZE;
+        // the interval of the rays of the cascade along the ray from its probe : [ INTERVAL_START , INTERVAL_END ] ( meters ) . the end of a cascade is the start of the next one
+        float INTERVAL_START;
+        float INTERVAL_END;
     };
 
     struct GeneralProbeInfo{
@@ -1052,6 +1063,17 @@ float2 octahedralEncode(float3 dir){
     }
     return result * 0.5f + 0.5f;
 
+}
+
+// the distance along a ray ( dir is a unit vector ) from a point INSIDE of a sphere to the point where the ray leaves it . 0 if the ray does not meet the sphere .
+// Radiance Cascade : the interval of a ray of a cascade ends on the sphere of the next cascade , and the combine pass continues the ray from that point
+float raySphereExit(float3 origin , float3 dir , float3 center , float radius){
+    const float3 oc = origin - center;
+    const float b = dot(oc , dir);
+    const float c = dot(oc , oc) - radius * radius;
+    const float discriminant = b * b - c;
+    if(discriminant < 0.0f) return 0.0f;
+    return max(-b + sqrt(discriminant) , 0.0f);
 }
 
 // the exact inverse of octahedralEncode : uv in [0 , 1] -> a unit direction

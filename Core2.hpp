@@ -355,7 +355,7 @@ namespace mox{
                     imgui.get()
                 };
 
-                GraphPass2* ordeк2[] = {
+                GraphPass2* orderRT[] = {
                     atmosphere.get() ,   // the sky : the sky view LUT and the cube
                     render.get() ,       // the g buffer
                     forward.get() ,      // the lamps of every tile
@@ -376,7 +376,7 @@ namespace mox{
                     if(!result.has_value()) return result;
                 }
 
-                for(GraphPass2* pass : ordeк2){
+                for(GraphPass2* pass : orderRT){
                     const auto result = graph->addGraphPass2(pass , RayTracingPath);
                     if(!result.has_value()) return result;
                 }
@@ -554,7 +554,6 @@ namespace mox{
                     model = glm::scale(model , glm::vec3(floorHalfSize , 2.0f , floorHalfSize));
                     meshes[0]->updateMatrix( model, 0);
                 }
-
 
                 {
                     const auto result = createLights();
@@ -1139,7 +1138,7 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
-            gui::BeginDisabled(info.PT && !info.RT);
+            gui::BeginDisabled(info.PT || !info.RT);
             {
                 if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
                     info.ReSTIRGI = !info.ReSTIRGI;
@@ -1148,7 +1147,7 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
-            gui::BeginDisabled(info.PT && !info.RT);
+            gui::BeginDisabled(info.PT || !info.RT);
             {
                 if(gui::Button(info.ReSTIRGI_temporal ? "ReSTIR GI temporal: ON" : "ReSTIR GI temporal: OFF")){
                     info.ReSTIRGI_temporal = !info.ReSTIRGI_temporal;
@@ -1157,7 +1156,7 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
-            gui::BeginDisabled(info.PT && !info.RT);
+            gui::BeginDisabled(info.PT || !info.RT);
             {
                 if(gui::Button(info.ReSTIRGI_spatial ? "ReSTIR GI spatial: ON" : "ReSTIR GI spatial: OFF")){
                     info.ReSTIRGI_spatial = !info.ReSTIRGI_spatial;

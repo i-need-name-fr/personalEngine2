@@ -419,6 +419,21 @@ namespace mox{
             needsUpdate = true;
         }
 
+        void changeMatrixStatus(const uint32_t index , const bool status) noexcept{
+            if(index >= instanceLayoutIndices.size()){
+                static uint32_t totalMessageCount = 0;
+                if(totalMessageCount < 10){
+                    std::cerr << std::format("couldnt update matrix for mesh , since the matrix index is out of range, message count -> {}", totalMessageCount ) << '\n';
+                    totalMessageCount++;
+                }
+                return;
+            }
+            const uint32_t id = instanceLayoutIndices[index];
+            totalInstanceLayouts[id].needsToBeDraw = status;
+            
+            needsUpdate = true;
+        }
+
         void deleteMatrix(const uint32_t index) noexcept{
             std::lock_guard<std::mutex> guard(m);
             if(index >= instanceLayoutIndices.size()){

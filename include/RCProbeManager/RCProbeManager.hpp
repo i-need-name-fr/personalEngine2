@@ -5,6 +5,7 @@
 #include "../DescriptorLayout/DescriptorLayout.hpp"
 #include "../Buffer2/GeneralBuffer.hpp"
 #include <algorithm>
+#include <cmath>
 #include <random>
 #include <ranges>
 
@@ -17,11 +18,12 @@ namespace mox{
         SetTypicalOperators(RCProbeManager)
         SetTypicalTransferOperators(RCProbeManager)
 
+        // the grid of every cascade : GRID_SIZE nodes on an axis , the cell of the cascade 0 is BASE_CELL_SIZE meters , every next cascade is twice bigger
+        static constexpr uint32_t GRID_SIZE = 32;
+        static constexpr float BASE_CELL_SIZE = 1.5f;
+
         void updatePoses(VkCommandBuffer& cmd , const glm::vec3 playerPos) noexcept{
-            for(auto&& [readProbe , probe] : std::views::zip(generalProbesOffsets , generalProbes)){
-                probe = readProbe;
-                probe.position = readProbe.position + playerPos;
-            }
+            computeProbePositions(playerPos);
             probesBuffer->updateBufferCmd(cmd , translateToSpan(generalProbes) , VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
         }
 
@@ -29,11 +31,12 @@ namespace mox{
         pDescriptorLayout layout{};
         pGeneralBuffer2<BufferType::Device , true> probesBuffer{nullptr};
         // will be fixed , since it contains only ray cast and resolution of cascade
-        pGeneralBuffer2<BufferType::Device , false> cascadeBuffer{nullptr};
+        pGeneralBuffer2<BufferType::Device , true> cascadeBuffer{nullptr};
         // probably fixed too 
-        pGeneralBuffer2<BufferType::Device , false> generalProbeBuffer{nullptr};
+        pGeneralBuffer2<BufferType::Device , true> generalProbeBuffer{nullptr};
 
         std::vector<pRenderImage2> cascades{};
+        std::vector<RC::ProbeInfo> generalProbesOffsets;
 
         struct CreateInfo{
             VulkanContext* context;
@@ -79,6 +82,7 @@ namespace mox{
             layout = std::move(input.layout);
             generalProbesOffsets = std::move(input.generalProbesOffsets);
             generalProbes = std::move(input.generalProbes);
+            cellSizes = std::move(input.cellSizes);
 
         }
 
@@ -92,73 +96,74 @@ namespace mox{
             layout = nullptr;
         }
 
-        void updatePosesCreation(const glm::vec3 playerPos) noexcept{
+        // the world positions of the probes : the grid of a cascade is SNAPPED to its cell ( the centre is the player rounded down to the cell ) , so a probe stays at the
+        // same place of the world while the player moves inside of a cell , and moves by a whole cell when he crosses its border . validProbe is 1 again for all the probes
+        // ( the rays of the frame take it away from the probes that are inside of an object )
+        void computeProbePositions(const glm::vec3 playerPos) noexcept{
             generalProbes.resize(generalProbesOffsets.size());
             for(auto&& [readProbe , probe] : std::views::zip(generalProbesOffsets , generalProbes)){
+                const float cell = cellSizes[readProbe.cascadeID];
+                const glm::vec3 snapped = glm::floor(playerPos / cell) * cell;
                 probe = readProbe;
-                probe.position = readProbe.position + playerPos;
+                probe.position = snapped + readProbe.position;
             }
+        }
+
+        void updatePosesCreation(const glm::vec3 playerPos) noexcept{
+            computeProbePositions(playerPos);
             probesBuffer->recordData(translateToSpan(generalProbes));
         }
 
         // general idea of this , is to make all offsets of probes , rather than allocating everytime new memory
         // since the amount of probes are not fixed between cascades , so we cant make 
-        std::vector<RC::ProbeInfo> generalProbesOffsets;
 
         std::vector<RC::ProbeInfo> generalProbes;
         
-        void createProbes(const glm::u16vec2 screenResolution , const uint32_t cascade , RC::CascadeInfo& cascadeInfo) noexcept {
-            // so we will be making here all probes position per cascade
-            // since we know our resolution of screen 
-            // cascade is the ID , bigger cascade , lower the resolution and lower the count
-            cascadeInfo.PROBES_PER_CASCADE = 0;
+        // the size of the cell of every cascade ( the index is the cascade )
+        std::vector<float> cellSizes;
+
+        // the probes of a cascade : a 3D grid of GRID_SIZE ^ 3 nodes around the player . the offset of a node from the centre of the grid is stored ( the centre is the player
+        // rounded down to the cell , see computeProbePositions ) . every cascade has the same number of probes , but its cell is twice bigger than the one before , so the grid
+        // covers twice more space and sees farther ( with the rays that start where the rays of the cascade before end )
+        void createProbes(const uint32_t cascade , const bool lastCascade , RC::CascadeInfo& cascadeInfo) noexcept {
+            const uint32_t n = GRID_SIZE;
+            const float cell = BASE_CELL_SIZE * static_cast<float>(1u << cascade);
+            if(cellSizes.size() <= cascade) cellSizes.resize(cascade + 1u , 0.0f);
+            cellSizes[cascade] = cell;
+
+            const uint32_t total = n * n * n;
             cascadeInfo.PROBE_OFFSET = static_cast<uint32_t>(generalProbesOffsets.size());
-            // the probes of a cascade lie on a SPHERE around the player : position is an OFFSET from the player ( updatePoses adds playerPos )
-            static const float generalOffsetPerCascade = 10.0f; // the radius of the sphere of the cascade 0 , every next cascade is this much farther
-            const float radius = generalOffsetPerCascade * static_cast<float>(cascade + 1u);
+            cascadeInfo.PROBES_PER_CASCADE = total;
+            cascadeInfo.GRID_SIZE = n;
+            cascadeInfo.CELL_SIZE = cell;
 
-            // required radius , is radius for this cascade to be chosen
-            cascadeInfo.requiredRadius2 = radius * radius;
+            // the rays : one for every texel of the block of a probe ( the ray x is the texel x , its direction is octahedralDecode of the texel ) . the bigger the cascade ,
+            // the more directions : the farther the interval , the finer the angle has to be
+            cascadeInfo.BLOCK_SIZE = 4u + 2u * cascade;
+            cascadeInfo.PROBE_RAY_COUNT = cascadeInfo.BLOCK_SIZE * cascadeInfo.BLOCK_SIZE;
 
-            static const uint32_t generalHeadResolution = 64;
-            // the bigger the cascade , the bigger the tile and the FEWER the probes
-            const uint32_t probeResolution = generalHeadResolution * (cascade + 1u);
-            // at least one probe per axis : a big cascade on a small screen must not be empty
-            const uint32_t totalProbes_x = std::max(1u , (static_cast<uint32_t>(screenResolution.x) - 1u) / probeResolution);
-            const uint32_t totalProbes_y = std::max(1u , (static_cast<uint32_t>(screenResolution.y) - 1u) / probeResolution);
+            // the interval of the rays : 4 cells of the cascade . the end of a cascade is the start of the next one , the last cascade goes on to infinity ( the sky )
+            cascadeInfo.INTERVAL_START = (cascade == 0u) ? 0.0f : 4.0f * BASE_CELL_SIZE * static_cast<float>(1u << (cascade - 1u));
+            cascadeInfo.INTERVAL_END = lastCascade ? 1000.0f : 4.0f * cell;
 
-            cascadeInfo.PROBE_RESOLUTION = probeResolution;
-            cascadeInfo.PROBE_RAY_COUNT = 4u * (cascade + 1ul);
+            // the image of the cascade : the blocks of the probes in rows ( the block of the probe p is at ( p % row , p / row ) * BLOCK_SIZE )
+            const uint32_t row = static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<float>(total))));
+            const uint32_t rows = (total + row - 1u) / row;
+            cascadeInfo.CASCADE_X = row * cascadeInfo.BLOCK_SIZE;
+            cascadeInfo.CASCADE_Y = rows * cascadeInfo.BLOCK_SIZE;
 
-            cascadeInfo.CASCADE_X = totalProbes_x * probeResolution;
-            cascadeInfo.CASCADE_Y = totalProbes_y * probeResolution;
+            generalProbesOffsets.reserve(generalProbesOffsets.size() + total);
 
-            // the same seed for a cascade every launch : the offsets are made once , the picture must not change from run to run
-            std::mt19937 engine(0x5EEDu + cascade);
-            // the jitter moves a probe along the radius , by a share of it ( it was a fixed +-5 / ( cascade + 1 ) that got smaller with the cascade , while the sphere grows )
-            const float jitter = 0.1f * radius;
-            std::uniform_real_distribution<float> randomOffset(-jitter , jitter);
-
-            generalProbesOffsets.reserve(generalProbesOffsets.size() + static_cast<size_t>(totalProbes_x) * totalProbes_y);
-
-            for(uint32_t y = 0 ; y < totalProbes_y ; y++)
-            for(uint32_t x = 0 ; x < totalProbes_x ; x++){
-                // azimuth 0 .. 2pi around the up axis , the polar angle is taken through its COSINE ( from 1 at the top to -1 at the bottom , in equal steps ) :
-                // the rings have the same area then , and the probes do not crowd at the poles like they do with equal steps of the angle
-                const float azimuth = 2.0f * glm::pi<float>() * ((float)x + 0.5f) / (float)totalProbes_x;
-                const float cosPolar = 1.0f - 2.0f * ((float)y + 0.5f) / (float)totalProbes_y;
-                const float sinPolar = glm::sqrt(glm::max(0.0f , 1.0f - cosPolar * cosPolar));
-
-                const glm::vec3 direction(sinPolar * glm::cos(azimuth) , cosPolar , sinPolar * glm::sin(azimuth));
- 
+            const float half = static_cast<float>(n / 2u);
+            for(uint32_t z = 0 ; z < n ; z++)
+            for(uint32_t y = 0 ; y < n ; y++)
+            for(uint32_t x = 0 ; x < n ; x++){
                 RC::ProbeInfo probe{};
                 probe.validProbe = true;
                 probe.cascadeID = cascade;
-                probe.position = direction * (radius + randomOffset(engine));
+                probe.position = glm::vec3(static_cast<float>(x) - half , static_cast<float>(y) - half , static_cast<float>(z) - half) * cell;
                 generalProbesOffsets.push_back(probe);
             }
-
-            cascadeInfo.PROBES_PER_CASCADE = totalProbes_x * totalProbes_y;
         }
 
         [[nodiscard]] ErrorDataOutput<void> createBuffersAndImages(const glm::u16vec2 screenResolution, const glm::vec3 playerPos) noexcept{
@@ -168,7 +173,7 @@ namespace mox{
 
                 for(uint32_t i = 0 ; i < cascadeCount ; i++){
                     RC::CascadeInfo cascade{};
-                    createProbes(screenResolution , i , cascade);
+                    createProbes(i , i + 1u == cascadeCount , cascade);
                     cascadesInfos.push_back(cascade);
                     // now we need to create image for that cascade
                     {
@@ -197,23 +202,23 @@ namespace mox{
                     data.TOTAL_PROBES = generalProbesOffsets.size();
                     data.TOTAL_CASCADE_COUNT = cascadeCount;
                     
-                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    GeneralBuffer2<BufferType::Device , true>::CreateInfo info{};
                     info.context = context;
                     info.size = sizeof(RC::GeneralProbeInfo);
                     info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 
-                    generalProbeBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , &data);
+                    generalProbeBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info , &data);
                 }
 
                 {
                     // cascades
                     
-                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    GeneralBuffer2<BufferType::Device , true>::CreateInfo info{};
                     info.context = context;
                     info.size = sizeof(RC::CascadeInfo) * cascadesInfos.size();
                     info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 
-                    cascadeBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , translateToSpan(cascadesInfos));
+                    cascadeBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info , translateToSpan(cascadesInfos));
                 }
 
                 {
@@ -229,15 +234,11 @@ namespace mox{
                 updatePosesCreation(playerPos);
 
                 {
-                    std::vector<DescriptorLayoutData> data(3);
+                    std::vector<DescriptorLayoutData> data(4);
                     data[0] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
-                    for(auto& cascade : cascades){
-                        const uint32_t binding = data.size();
-                        DescriptorLayoutData input = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
-                        data.push_back(input);
-                    }
+                    data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , cascadeCount};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -257,10 +258,10 @@ namespace mox{
                     data[1] = DescriptorData2::createData(cascadeBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0);
                     data[2] = DescriptorData2::createData(generalProbeBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
 
-                    for(auto& cascade : cascades){
-                        const uint32_t binding = data.size();
-                        DescriptorData2 input = DescriptorData2::createData(cascade.get(), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , binding , 0);
-                        data.push_back(input);
+                    // ONE binding ( 3 ) for all the cascades , as in the layout above ( count = cascadeCount ) and as in the shaders ( RCImages[] ) :
+                    // the cascade is the index in the array of the binding , not a binding of its own ( the bindings 3 , 4 , 5 ... do not exist in the layout )
+                    for(uint32_t i = 0 ; i < cascades.size() ; i++){
+                        data.push_back(DescriptorData2::createData(cascades[i].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , i));
                     }
 
                     DescriptorBuffer2::CreateInfo info{};
