@@ -741,6 +741,99 @@ namespace RC{
     };
 }
 
+
+/*
+#ifdef __cplusplus
+
+#else
+
+#endif
+*/
+
+// new world light grid
+//  INFO : basically i dont want to make forward plus , but instead i want to make a BHV system for world space 
+namespace lg{
+
+    // basically 32.0f is enough for our grid , since we dont want to render smth out 
+    #ifdef __cplusplus
+        // grid size is how far in each direction we can see the light , X Y Z 
+        inline static constexpr float GRID_SIZE = 32.0f;
+        // each grid is a position , and that position has its own size , for example we will be using 8.0f
+        // more than enough i think , but if its needed , i will do more
+        inline static constexpr float GRID_CELL_SIZE = 4.0f;
+        inline static constexpr float GRID_CELL_OFFSET = 18.0f;
+        inline static constexpr uint32_t MAX_LIGHT_PER_CELL = 64ul;
+    #else
+        static const float GRID_SIZE = 32.0f;
+        static const float GRID_CELL_SIZE = 4.0f;
+        static const uint MAX_LIGHT_PER_CELL = 64ul;
+        static const float GRID_CELL_OFFSET = 18.0f;
+
+    #endif
+
+    #ifdef __cplusplus
+        inline static constexpr uint32_t MAX_LIGHT_SOURCES = 4096ul;
+    #else
+        static const uint MAX_LIGHT_SOURCES = 4096ul;
+    #endif
+
+
+    struct LightSource{
+    #ifdef __cplusplus
+
+        alignas(16) glm::vec3 diffuse;
+        alignas(16) glm::vec3 position;
+    #else
+        float3 diffuse;
+        float3 position;
+    #endif
+        float Linear;
+        float Quadratic;
+        float radius;
+
+        float sourceRadius;
+    };
+
+    // idea is like this , there is a new Buffer , LightBufferIndices
+    // main goal is to minimaze the loop for finding the suitable light , instead we will be using BVH algorithm
+    #ifdef __cplusplus
+        using LightSourceIndex = int32_t;
+    #else
+        typedef int LightSourceIndex;
+    #endif
+
+    struct LightCell{
+    #ifdef __cplusplus
+
+        alignas(16) glm::vec3 position;
+        uint32_t totalLightCount;
+        int32_t lightIndices[MAX_LIGHT_PER_CELL];
+        
+    #else
+
+        float3 position;
+        uint totalLightCount;
+        uint lightIndices[MAX_LIGHT_PER_CELL];
+
+    #endif
+
+        float padding0;
+        float padding1;
+    };
+
+    struct GridCascadeInfo{
+    #ifdef __cplusplus
+        uint32_t totalLightCells;
+        int32_t totalLightCount;
+    #else
+        uint totalLightCells;
+        uint totalLightCount;
+    #endif
+        float padding0;
+        float padding1;        
+    };
+}
+
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;
 #endif

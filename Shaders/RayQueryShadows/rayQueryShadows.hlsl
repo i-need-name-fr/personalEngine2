@@ -5,7 +5,7 @@
 [[vk::binding(2 , 0)]] ConstantBuffer<SunSource> sunBuffer;
 
 [[vk::binding(3 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
-[[vk::binding(4 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
+[[vk::binding(4 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 [[vk::binding(5 , 0)]] RaytracingAccelerationStructure TLAS;
 
@@ -95,7 +95,7 @@ float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed){
 
 // a random point on the sphere of the lamp ( light.sourceRadius ) , on the half that looks at the shaded point : the shadow ray goes there , so the penumbra
 // comes from the size of the lamp ( the same function as in generalHit.hlsl ) . L goes FROM the point TO the lamp
-float3 randomInLightRadius(inout uint seed , LightSource light , const float3 L){
+float3 randomInLightRadius(inout uint seed , lg::LightSource light , const float3 L){
     const float u = rand(seed) , v = rand(seed);
     const float z = 1.0f - 2.0f * u;
     const float phi = 2.0f * PI * v;
@@ -106,9 +106,9 @@ float3 randomInLightRadius(inout uint seed , LightSource light , const float3 L)
     return light.position + offset;
 }
 
-float lightAttenuation(LightSource light , float lightDistance){
-    const float falloff = 1.0f / (1.0f + light.lightLinear * lightDistance + light.lightQuadratic * lightDistance * lightDistance);
-    const float ratio = saturate(lightDistance / max(light.lightRadius , 1e-4f));
+float lightAttenuation(lg::LightSource light , float lightDistance){
+    const float falloff = 1.0f / (1.0f + light.Linear * lightDistance + light.Quadratic * lightDistance * lightDistance);
+    const float ratio = saturate(lightDistance / max(light.radius , 1e-4f));
     float window = saturate(1.0f - ratio * ratio * ratio * ratio);
     window *= window;
     return falloff * window;
@@ -172,7 +172,7 @@ void main(uint3 id : SV_DispatchThreadID){
 
         [loop]
         for(uint l = 0 ; l < lightCount ; l++){
-            const LightSource light = lightBuffer[tileLightIndices[lightOffset + l]];
+            const lg::LightSource light = lightBuffer[tileLightIndices[lightOffset + l]];
 
             float3 L = light.position - pos;
             const float dist = length(L);
@@ -180,8 +180,8 @@ void main(uint3 id : SV_DispatchThreadID){
 
             // the shadow of a lamp fades out beyond its radius ( lightShadowReach : 1 inside of the radius , 0 at lightRadius * ( 1 + lightShadowFade ) ) instead
             // of ending with a jump . the weight has no window of the radius any more : the window is in the reach
-            const float reach = lightShadowReach(dist , light.lightRadius , features.lightShadowFade);
-            const float falloff = 1.0f / (1.0f + light.lightLinear * dist + light.lightQuadratic * dist * dist);
+            const float reach = lightShadowReach(dist , light.radius , features.lightShadowFade);
+            const float falloff = 1.0f / (1.0f + light.Linear * dist + light.Quadratic * dist * dist);
             // the weight fades with the reach too : a lamp that ends its fade leaves the mean without a jump
             const float weight = luminance(light.diffuse) * falloff * saturate(dot(N , L)) * reach;
             if(reach <= 0.0f || weight <= 0.0f) continue;

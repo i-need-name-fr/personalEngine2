@@ -9,7 +9,7 @@
 
 [[vk::binding(6 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 [[vk::binding(7 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
+[[vk::binding(8 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 [[vk::binding(9 , 0)]] RWStructuredBuffer<Vertex> vertices;
 [[vk::binding(10 , 0)]] RWStructuredBuffer<uint> indices;
@@ -110,9 +110,9 @@ void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightC
 // the attenuation of a point light : the physical falloff times a window that reaches exactly 0 at lightRadius .
 // without the window a light shone on EVERY pixel of the tiles it was listed in , far beyond its radius : the lit and the dark parts met
 // on the edges of the Forward+ tiles ( hard vertical and horizontal borders ) and on the sphere of the radius
-float lightAttenuation(LightSource light , float lightDistance){
-    const float falloff = 1.0f / (1.0f + light.lightLinear * lightDistance + light.lightQuadratic * lightDistance * lightDistance);
-    const float ratio = saturate(lightDistance / max(light.lightRadius , 1e-4f));
+float lightAttenuation(lg::LightSource light , float lightDistance){
+    const float falloff = 1.0f / (1.0f + light.Linear * lightDistance + light.Quadratic * lightDistance * lightDistance);
+    const float ratio = saturate(lightDistance / max(light.radius , 1e-4f));
     float window = saturate(1.0f - ratio * ratio * ratio * ratio);
     window *= window;
     return falloff * window;
@@ -208,7 +208,7 @@ float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed){
     return localDir.x * tangent + localDir.y * bitangent + localDir.z * axis;
 }
 
-float3 randomInLightRadius(inout uint seed  , LightSource light , const float3 L){
+float3 randomInLightRadius(inout uint seed  , lg::LightSource light , const float3 L){
     const float u = rand(seed) , v = rand(seed);
     const float z = 1.0f - 2 * u;
     const float phi = 2.0f * PI * v;
@@ -236,7 +236,7 @@ float3 randomInSunRadius(inout uint seed  , SunSource light , const float3 L){
     return normalize(normalize(L) + offset);
 }
 
-float calculateShadowInSphere(inout uint seed , LightSource light , const float3 P , const float3 N){
+float calculateShadowInSphere(inout uint seed , lg::LightSource light , const float3 P , const float3 N){
     float3 L = light.position - P;
     const float d = length(L);
     L = normalize(L);
@@ -402,7 +402,7 @@ void processPixel(inout RayPayLoad load , in float2 barycentrics){
         if(lightCount > 0){
 
             const uint id = (uint)(rand(load.seed) * lightCount) + lightOffset;
-            LightSource light = lightBuffer[tileLightIndices[id]];
+            lg::LightSource light = lightBuffer[tileLightIndices[id]];
             float3 diffuse = 0.0, specular = 0.0f;
             float3 toLight = normalize(light.position - info.P);
             const float3 lightPos = randomInLightRadius(load.seed , light , toLight);

@@ -43,7 +43,7 @@
 
 // Forward+ : the lamps of the tile of the pixel ( the lists are made by forward.hlsl )
 [[vk::binding(16 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
-[[vk::binding(17 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
+[[vk::binding(17 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 [[vk::binding(18 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
 [[vk::binding(19 , 0)]] ConstantBuffer<ForwardPlusInfo> forwardInfo;
 
@@ -343,13 +343,13 @@ float3 computeSSGI(uint2 currentPixel , out float visibility){
 
                 const uint lightID = (uint)(rand(seed) * lightCount) + lightOffset;
                 if(lightID != 9999){
-                    LightSource light = lightBuffer[tileLightIndices[lightID]];
+                    lg::LightSource light = lightBuffer[tileLightIndices[lightID]];
                     
                     float3 L = light.position - samplePos;
                     const float d = length(L);
                     L = normalize(L);
 
-                    const float att = 1.0f / ( 1.0f + light.lightLinear * d + d * d * light.lightQuadratic);
+                    const float att = 1.0f / ( 1.0f + light.Linear * d + d * d * light.Quadratic);
                     float3 diffuse , specular;
                     computeLight(info , L , diffuse , specular);
                     diffuse /= max(info.albedo , 1e-20f);

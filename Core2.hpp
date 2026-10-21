@@ -634,7 +634,7 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createLights() noexcept{
             // 3 lights
             {
-                std::vector<LightSource> lights(4);
+                std::vector<lg::LightSource> lights(4);
 
                 std::mt19937 rng{std::random_device{}()};
                 const auto rnd = [&rng](const float low , const float high){
@@ -646,9 +646,9 @@ namespace mox{
                 for(uint32_t i = 0 ; i < 4 ; i++){
                     const float intensity = rnd(4.0f , 10.0f);
                     lights[i].diffuse = glm::vec3(rnd(0.2f , 0.5f) , rnd(0.0f , 1.0f) , rnd(0.2f , 1.0f)) * intensity;
-                    lights[i].lightRadius = rnd(15.0f , 30.0f);
-                    lights[i].lightLinear = rnd(0.05f , 0.012f);
-                    lights[i].lightQuadratic = rnd(0.02f , 0.004f);
+                    lights[i].radius = rnd(15.0f , 30.0f);
+                    lights[i].Linear = rnd(0.05f , 0.012f);
+                    lights[i].Quadratic = rnd(0.02f , 0.004f);
                     // the size of the lamp itself ( meters ) : the penumbra of its shadow
                     lights[i].sourceRadius = rnd(1.0f , 2.0f);
                 }
@@ -1213,7 +1213,7 @@ namespace mox{
         static constexpr float FLOOR_Y = -2.0f; 
         float dt = 0.0f;
         uint32_t requiredMode = RasterizationRequired;
-        std::vector<LightSource> allLights;
+        std::vector<lg::LightSource> allLights;
 
         static constexpr uint32_t lightCount = 4;
 

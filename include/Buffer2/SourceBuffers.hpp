@@ -90,7 +90,7 @@ namespace mox{
                 sunBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
 
                 // light buffer
-                info.size = sizeof(LightSource) * MAX_LIGHT_SOURCE;
+                info.size = sizeof(lg::LightSource) * MAX_LIGHT_SOURCE;
                 lightBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
                 
                 // luminance history

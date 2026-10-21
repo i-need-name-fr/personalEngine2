@@ -54,7 +54,7 @@
 [[vk::binding(19 , 0)]] ConstantBuffer<ForwardPlusInfo> forwardInfo;
 [[vk::binding(20 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 [[vk::binding(21 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(22 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
+[[vk::binding(22 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 // the sun disc in the sky
 [[vk::binding(23 , 0)]] ConstantBuffer<SunSource> sunBuffer;
@@ -125,9 +125,9 @@ void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightC
 // the attenuation of a point light : the physical falloff times a window that reaches exactly 0 at lightRadius .
 // without the window a light shone on EVERY pixel of the tiles it was listed in , far beyond its radius : the lit and the dark parts met
 // on the edges of the Forward+ tiles ( hard vertical and horizontal borders ) and on the sphere of the radius
-float lightAttenuation(LightSource light , float lightDistance){
-    const float falloff = 1.0f / (1.0f + light.lightLinear * lightDistance + light.lightQuadratic * lightDistance * lightDistance);
-    const float ratio = saturate(lightDistance / max(light.lightRadius , 1e-4f));
+float lightAttenuation(lg::LightSource light , float lightDistance){
+    const float falloff = 1.0f / (1.0f + light.Linear * lightDistance + light.Quadratic * lightDistance * lightDistance);
+    const float ratio = saturate(lightDistance / max(light.radius , 1e-4f));
     float window = saturate(1.0f - ratio * ratio * ratio * ratio);
     window *= window;
     return falloff * window;
@@ -169,7 +169,7 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
 // ReSTIR DI is switched by features.ReSTIR ( ImGui ) : there is nothing to recompile
 
 float targetPdf_DI(uint lightIndex , GeneralObjectInfo info){
-    const LightSource candidate = lightBuffer[lightIndex];
+    const lg::LightSource candidate = lightBuffer[lightIndex];
     float3 L = candidate.position - info.P;
     const float d = length(L);
     L /= max(d , 1e-4f);
@@ -205,7 +205,7 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
     float bestPdf = 0.0f;
     for(uint i = 0 ; i < lightIndicesCount ; i++){
         const uint lightIndex = tileLightIndices[lightOffset + i];
-        const LightSource light = lightBuffer[lightIndex];
+        const lg::LightSource light = lightBuffer[lightIndex];
 
         float3 toLight = light.position - info.P;
         const float lightDistance = length(toLight);
@@ -423,7 +423,7 @@ void main(uint3 id : SV_DispatchThreadID){
 
             for(uint s = 0u ; s < lightCount ; s++){
                 const uint lightIndex = tileLightIndices[lightOffset + s];
-                const LightSource light = lightBuffer[lightIndex];
+                const lg::LightSource light = lightBuffer[lightIndex];
 
                 const float3 toLight = light.position - P;
                 const float lightDistance = length(toLight);

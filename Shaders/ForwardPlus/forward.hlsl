@@ -2,7 +2,7 @@
 
 [[vk::binding(0 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
 [[vk::binding( 1 , 0 )]] ConstantBuffer<ForwardPlusInfo> forwardInfo;
-[[vk::binding(2 , 0)]] RWStructuredBuffer<LightSource> allLights;
+[[vk::binding(2 , 0)]] RWStructuredBuffer<lg::LightSource> allLights;
 // all lights indices
 [[vk::binding(3 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 [[vk::binding(4, 0)]] RWStructuredBuffer<uint> lightCountPerTile;
@@ -107,10 +107,10 @@ void main(uint3 groupId : SV_GroupID , uint localIndex : SV_GroupIndex){
 
     for(uint lightIndex = localIndex ; lightIndex < forwardInfo.totalLights ; lightIndex += 256){
 
-        const LightSource light = allLights[lightIndex];
+        const lg::LightSource light = allLights[lightIndex];
         const float3 lightPosViewSpace = mul(generalBuffer.viewOnly , float4(light.position , 1.0f)).xyz;
         // the radius of the test is the radius of the light plus the fade of its shadow ( lightShadowReach ) : the shadow still counts there
-        if(!SphereIntersectsTileFrustum(lightPosViewSpace , light.lightRadius * (1.0f + max(forwardInfo.lightShadowFade , 0.0f)) , frustum)) continue;
+        if(!SphereIntersectsTileFrustum(lightPosViewSpace , light.radius * (1.0f + max(forwardInfo.lightShadowFade , 0.0f)) , frustum)) continue;
 
         uint writeIndex;
         InterlockedAdd(lightCountPerTile[tileIndex] , 1 , writeIndex);

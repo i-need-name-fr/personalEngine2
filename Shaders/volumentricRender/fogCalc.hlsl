@@ -7,7 +7,7 @@
 [[vk::binding(3 , 0)]] ConstantBuffer<ForwardPlusInfo> forwardBuffer;
 [[vk::binding(4 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 [[vk::binding(5 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(6 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
+[[vk::binding(6 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 
 [[vk::image_format("rgba16f")]]
@@ -75,13 +75,13 @@ void main(uint3 id : SV_DispatchThreadID){
     float3 Lin = sunBuffer.diffuse  * phaseHG(dot(L_sun , V) , g);
     for(uint i = 0 ; i < lightCount ; i++){
         const uint lightIndex = tileLightIndices[lightOffset + i];
-        LightSource light = lightBuffer[lightIndex];
+        lg::LightSource light = lightBuffer[lightIndex];
         float3 L = light.position - pos;
         float r2 = dot(L , L);
         float r = sqrt(r2);
         L  = L / r;
         float att = 1.0f / max(r2 , 0.0001f);
-        float window = saturate(1.0f - pow(r / light.lightRadius , 4.0f ));
+        float window = saturate(1.0f - pow(r / light.radius , 4.0f ));
         window *= window;
         Lin += light.diffuse * window * att * phaseHG(dot(L , V) , g);
     }

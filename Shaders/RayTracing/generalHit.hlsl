@@ -9,7 +9,7 @@
 
 [[vk::binding(6 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 [[vk::binding(7 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
+[[vk::binding(8 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 [[vk::binding(9 , 0)]] RWStructuredBuffer<Vertex> vertices;
 [[vk::binding(10 , 0)]] RWStructuredBuffer<uint> indices;
@@ -180,9 +180,9 @@ void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightC
 // the attenuation of a point light : the physical falloff times a window that reaches exactly 0 at lightRadius .
 // without the window a light shone on EVERY pixel of the tiles it was listed in , far beyond its radius : the lit and the dark parts met
 // on the edges of the Forward+ tiles ( hard vertical and horizontal borders ) and on the sphere of the radius
-float lightAttenuation(LightSource light , float lightDistance){
-    const float falloff = 1.0f / (1.0f + light.lightLinear * lightDistance + light.lightQuadratic * lightDistance * lightDistance);
-    const float ratio = saturate(lightDistance / max(light.lightRadius , 1e-4f));
+float lightAttenuation(lg::LightSource light , float lightDistance){
+    const float falloff = 1.0f / (1.0f + light.Linear * lightDistance + light.Quadratic * lightDistance * lightDistance);
+    const float ratio = saturate(lightDistance / max(light.radius , 1e-4f));
     float window = saturate(1.0f - ratio * ratio * ratio * ratio);
     window *= window;
     return falloff * window;
@@ -224,7 +224,7 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
 // ReSTIR DI is switched by features.ReSTIR ( ImGui ) : there is nothing to recompile
 
 float targetPdf_DI(uint lightIndex , GeneralObjectInfo info){
-    const LightSource candidate = lightBuffer[lightIndex];
+    const lg::LightSource candidate = lightBuffer[lightIndex];
     float3 L = candidate.position - info.P;
     const float d = length(L);
     L /= max(d , 1e-4f);
@@ -315,7 +315,7 @@ float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed){
     return localDir.x * tangent + localDir.y * bitangent + localDir.z * axis;
 }
 
-float3 randomInLightRadius(inout uint seed  , LightSource light , const float3 L){
+float3 randomInLightRadius(inout uint seed  , lg::LightSource light , const float3 L){
     const float u = rand(seed) , v = rand(seed);
     const float z = 1.0f - 2 * u;
     const float phi = 2.0f * PI * v;
@@ -349,7 +349,7 @@ float3 randomInSunRadius(inout uint seed  , SunSource light , const float3 L){
     return normalize(normalize(L) + offset);
 }
 
-float calculateShadowInSphere(inout uint seed , LightSource light , const float3 P , const float3 N){
+float calculateShadowInSphere(inout uint seed , lg::LightSource light , const float3 P , const float3 N){
     float3 L = light.position - P;
     const float d = length(L);
     L = normalize(L);
@@ -534,10 +534,9 @@ namespace ReSTIRGI{
         data.P = info.worldPos;
 
         float3 result = 0.0f ;
-
         if(lightCount){
             const uint id = (uint)(rand(seed) * lightCount) + lightOffset;
-            LightSource light = lightBuffer[tileLightIndices[id]];
+            lg::LightSource light = lightBuffer[tileLightIndices[id]];
             float3 diffuse, specular;
 
             const float3 V = normalize(x1Pos - info.worldPos);
@@ -566,9 +565,6 @@ namespace ReSTIRGI{
             result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
         }
 
-        // the sky light of the point x2 itself : a point in the shadow of the sun is not black , the sky lights it ( without it every ray of GI that hit
-        // something in the shade brought 0 : the black spots of the indirect light that moved with the azimuth of the sun ) . the same form as the sky
-        // ambient of the pixel : the average of the sky over the hemisphere of x2 * kD * the albedo of x2 ( the direction of the view is x1 )
         {
             const float3 V2 = normalize(x1Pos - info.worldPos);
             const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
@@ -821,7 +817,7 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
     float bestPdf = 0.0f;
     for(uint i = 0 ; i < lightIndicesCount ; i++){
         const uint lightIndex = tileLightIndices[lightOffset + i];
-        const LightSource light = lightBuffer[lightIndex];
+        const lg::LightSource light = lightBuffer[lightIndex];
 
         float3 toLight = light.position - info.P;
         const float lightDistance = length(toLight);
@@ -1082,7 +1078,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             for(uint i = 0 ; i < lightCount ;i++){
                 const uint tileLightIndex = lightOffset + i;
                 const uint lightID = tileLightIndices[tileLightIndex];
-                LightSource light = lightBuffer[lightID];
+                lg::LightSource light = lightBuffer[lightID];
                 float3 L = light.position - info.P;
                 L = normalize(L);
                 const float3 lightPos = randomInLightRadius(load.seed , light , L);
@@ -1090,12 +1086,12 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 const float d = length(dir);
                 dir = normalize(dir);
                 float shadow = 0.0f;
-                const float reach = lightShadowReach(d , light.lightRadius , features.lightShadowFade);
-                const float falloff = 1.0f / (1.0f + light.lightLinear * d + light.lightQuadratic * d * d);
+                const float reach = lightShadowReach(d , light.radius , features.lightShadowFade);
+                const float falloff = 1.0f / (1.0f + light.Linear * d + light.Quadratic * d * d);
                 // the weight fades with the reach too : a lamp that ends its fade leaves the mean without a jump
                 const float weight = luminance(light.diffuse) * falloff * saturate(dot(info.N , dir)) * reach;
                 if(reach <= 0.0f || weight <= 0.0f) continue;
-                const float sinAlpha = min(light.lightRadius / max(d , light.lightRadius) , MAX_LIGHT_CONE_SIN);
+                const float sinAlpha = min(light.radius / max(d , light.radius) , MAX_LIGHT_CONE_SIN);
                 const float cosAlpha = sqrt(1.0f - sinAlpha * sinAlpha);
                 const float att = lightAttenuation(light , d);
                 const float currentLightLum = luminance(light.diffuse * att * reach) * saturate(dot(info.N , L));

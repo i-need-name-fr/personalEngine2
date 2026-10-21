@@ -9,7 +9,7 @@
 
 [[vk::binding(6 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 [[vk::binding(7 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
+[[vk::binding(8 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 [[vk::binding(9 , 0)]] RWStructuredBuffer<Vertex> vertices;
 [[vk::binding(10 , 0)]] RWStructuredBuffer<uint> indices;

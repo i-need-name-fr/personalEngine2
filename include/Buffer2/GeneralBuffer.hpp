@@ -433,6 +433,7 @@ namespace mox{
         return std::span<T>(data , data + count);
     }
 
+
     using DeviceReadableBuffer = GeneralBuffer2<BufferType::Device , true>;
     using HostReadableBuffer = GeneralBuffer2<BufferType::Host , true>;
     using DeviceStaticBuffer = GeneralBuffer2<BufferType::Device , false>;
