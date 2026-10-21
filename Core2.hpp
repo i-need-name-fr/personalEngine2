@@ -985,7 +985,7 @@ namespace mox{
             gui::Text("Sun color : the color of the sun");
             changed |= gui::ColorEdit3("Sun color" , color);
             gui::Separator();
-
+            diffuse = {color[0] , color[1] , color[2]};
             // the size of the sun for the shadow : the half angle of the cone , radians ( the real sun is 0.00465 ) . the bigger , the softer the penumbra
             gui::SliderFloat("Sun source radius" , &sun.sourceRadius , 0.0f , 0.1f , "%.4f");
 

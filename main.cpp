@@ -16,7 +16,6 @@
 #include "include/Object2/cube.hpp"
 
 #include "include/Image2/MultiViewImage2.hpp"
-#include "tempCore.hpp"
 #include "Core2.hpp"
 
 using namespace mox;

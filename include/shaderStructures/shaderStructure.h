@@ -618,6 +618,117 @@ struct SkyViewData{
     float sunSinAzimuth;
 };
 
+// new Probes
+namespace DDGI{
+
+    struct ProbeInfo{
+#ifdef __cplusplus
+
+        alignas(16) glm::vec3 position;
+
+#else
+
+        float3 position;
+
+#endif
+    };
+
+    struct ProbeTileInfo{
+#ifdef __cplusplus
+        alignas(16) glm::vec3 position;
+
+        uint32_t totalProbes;
+        uint32_t firstProbe;
+        
+#else
+
+        float3 position;
+        uint totalProbes;
+        uint firstProbe
+
+#endif
+        float padding0;
+        float padding1;
+    };
+
+    struct GeneralProbeInfo{
+#ifdef __cplusplus
+        uint32_t TOTAL_PROBE_TILES_COUNT;
+        uint32_t TOTAL_PROBES_COUNT;
+        uint32_t PROBE_RESOLUTION;
+        uint32_t PROBES_PER_X;
+
+        uint32_t PROBE_TILE_SIZE;
+        uint32_t ATLAS_X;
+        uint32_t ATLAS_Y;
+#else
+        uint TOTAL_PROBE_TILES_COUNT;
+        uint TOTAL_PROBES_COUNT;
+        uint PROBE_RESOLUTION;
+        uint PROBES_PER_X;
+
+        uint PROBE_TILE_SIZE;
+        uint ATLAS_X;
+        uint ATLAS_Y;
+#endif
+        float padding0;
+    };
+}
+
+namespace RC{
+
+    // valid probe tells us , if we can even reach it , if no , it means that it might be in object , and we dont want to trace rays for it 
+    struct ProbeInfo{
+#ifdef __cplusplus
+
+        alignas(16) glm::vec3 position;
+        uint32_t cascadeID;
+        uint32_t validProbe;
+#else
+
+        float3 position;
+        uint cascadeID;
+        uint validProbe;
+
+#endif
+        float padding0;
+    };
+
+    struct CascadeInfo{
+#ifdef __cplusplus
+        uint32_t PROBES_PER_CASCADE;
+        uint32_t PROBE_RESOLUTION;
+        uint32_t PROBE_RAY_COUNT;
+        uint32_t CASCADE_X;
+
+        uint32_t CASCADE_Y;   
+        uint32_t PROBE_OFFSET;
+
+#else
+        uint PROBES_PER_CASCADE;
+        uint PROBE_RESOLUTION;
+        uint PROBE_RAY_COUNT;
+        uint CASCADE_X;
+        
+        uint CASCADE_Y;   
+        uint PROBE_OFFSET;
+#endif  
+        float requiredRadius2;
+        float padding1;
+    };
+
+    struct GeneralProbeInfo{
+#ifdef __cplusplus
+        uint32_t TOTAL_CASCADE_COUNT;
+        uint32_t TOTAL_PROBES;
+#else
+        uint TOTAL_CASCADE_COUNT;
+        uint TOTAL_PROBES;
+#endif
+        float padding0;
+        float padding1;
+    };
+}
 
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;
@@ -653,6 +764,8 @@ static const float FOG_NEAR = 0.01f;
 static const float FOG_FAR  = 200.0f;
 
 static const uint SKY_VIEW_STEPS = 32;
+
+static const float OFFSET_PER_CASCADE = 10.0f;
 
 struct GeneralObjectInfo{
     
