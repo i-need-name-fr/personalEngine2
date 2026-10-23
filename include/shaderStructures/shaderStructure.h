@@ -888,7 +888,7 @@ static const uint MAX_SHADOW_FRAME = 4u;
 
 // a history that is far from this frame ( the camera has jerked , the shadow behind the pixel is another one ) must not stay : the difference up to this value is the noise of
 // the rays and does not matter , above it the number of the frames is cut down , and at the difference 1 the history is thrown away completely ( the new frame has the weight 1 )
-static const float SHADOW_HISTORY_TOLERANCE = 0.35f;
+static const float SHADOW_HISTORY_TOLERANCE = 0.50f;
 
 struct GeneralObjectInfo{
     

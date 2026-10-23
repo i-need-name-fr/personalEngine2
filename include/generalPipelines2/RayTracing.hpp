@@ -159,7 +159,8 @@ namespace mox{
             buffer("ReSTIRDIBuffer_1");
             buffer("ReSTIRGIBuffer_0");
             buffer("ReSTIRGIBuffer_1");
-
+            buffer("tileLightIndices");
+            buffer("lightCountPerTile");
             return reqs;
         }
 
@@ -231,7 +232,8 @@ namespace mox{
                 GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo} , GraphSlot<BufferBase2>{"skyBuffer" , &skyBuffer} ,
                 GraphSlot<BufferBase2>{"sunBuffer" , &sunBuffer} ,
                 GraphSlot<BufferBase2>{"ReSTIRDIBuffer_0" , &ReSTIRDIBuffer[0]} , GraphSlot<BufferBase2>{"ReSTIRDIBuffer_1" , &ReSTIRDIBuffer[1]} ,
-                GraphSlot<BufferBase2>{"ReSTIRGIBuffer_0" , &ReSTIRGIBuffer[0]} , GraphSlot<BufferBase2>{"ReSTIRGIBuffer_1" , &ReSTIRGIBuffer[1]});
+                GraphSlot<BufferBase2>{"ReSTIRGIBuffer_0" , &ReSTIRGIBuffer[0]} , GraphSlot<BufferBase2>{"ReSTIRGIBuffer_1" , &ReSTIRGIBuffer[1]},
+            GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices}, GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile});
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -273,7 +275,7 @@ namespace mox{
             // the cascade 0 of Radiance Cascade : the pass before this one has merged all the cascades into it
             imageBar[14] = inputData.probes->cascades[0]->translateImage(read , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 19> bufBar;
+            std::array<VkBufferMemoryBarrier2 , 21> bufBar;
 
             bufBar[0] = generalBuffer->translateBuffer(uniformRead , stage);
             bufBar[1] = features->translateBuffer(uniformRead , stage);
@@ -302,8 +304,11 @@ namespace mox{
             bufBar[16] = inputData.probes->probesBuffer->translateBuffer(read , stage);
             bufBar[17] = inputData.probes->cascadeBuffer->translateBuffer(read , stage);
             bufBar[18] = inputData.probes->generalProbeBuffer->translateBuffer(uniformRead , stage);
+            bufBar[19] = tileLightIndices->translateBuffer(read , stage);
+            bufBar[20] = lightCountPerTile->translateBuffer(read , stage);
 
-            auto dep = TypicalDependency<19 , 15>(imageBar.data() , bufBar.data());
+
+            auto dep = TypicalDependency<21 , 15>(imageBar.data() , bufBar.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -344,6 +349,8 @@ namespace mox{
         BufferBase2* sunBuffer{nullptr};
         BufferBase2* ReSTIRDIBuffer[2]{nullptr , nullptr};
         BufferBase2* ReSTIRGIBuffer[2]{nullptr , nullptr};
+        BufferBase2* tileLightIndices;
+        BufferBase2* lightCountPerTile;
 
         // the macro of the move operators already checks this == &input , the check here keeps the function safe on its own
         void processCopy(RayTracing&& input) noexcept{
@@ -384,7 +391,7 @@ namespace mox{
             forwardInfo = std::exchange(input.forwardInfo , nullptr);
             skyBuffer = std::exchange(input.skyBuffer , nullptr);
             sunBuffer = std::exchange(input.sunBuffer , nullptr);
-
+            
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
             input.inputData = {};
@@ -424,7 +431,8 @@ namespace mox{
             forwardInfo = nullptr;
             skyBuffer = nullptr;
             sunBuffer = nullptr;
-
+            tileLightIndices = nullptr;
+            lightCountPerTile = nullptr;
             inputData = {};
             completedInit = false;
         }
@@ -447,7 +455,7 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(34);
+                    std::vector<DescriptorLayoutData> data(36);
 
                     data[0] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR , 1};
 
@@ -461,6 +469,10 @@ namespace mox{
                     data[19] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
 
                     for(uint32_t i = 20 ; i <= 33 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+
+                    data[34] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[35] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -484,7 +496,7 @@ namespace mox{
 
                 // ------------------------------------------------------------ set 0 : the descriptor buffers , one per parity of the frame
                 for(const auto id : {0 , 1}){
-                    std::vector<DescriptorData2> data(34);
+                    std::vector<DescriptorData2> data(36);
 
                     data[0] = DescriptorData2::createData(inputData.as , 0 , 0);
 
@@ -526,6 +538,8 @@ namespace mox{
                     data[31] = DescriptorData2::createData(viewImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 31 , 0);
                     data[32] = DescriptorData2::createData(motionVector , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 32 , 0);
                     data[33] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 33 , 0);
+                    data[34] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 34 , 0);
+                    data[35] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 35 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

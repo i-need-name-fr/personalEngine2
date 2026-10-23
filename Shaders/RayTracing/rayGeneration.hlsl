@@ -66,6 +66,8 @@
 
 [[vk::image_format("r32f")]]
 [[vk::binding(33 , 0)]] RWTexture2D<float> pixelCheck;
+[[vk::binding(34 ,0)]] RWStructuredBuffer<uint> lightCountPerTile;
+[[vk::binding(35 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 
 struct LightData{
     float3 diffuse;

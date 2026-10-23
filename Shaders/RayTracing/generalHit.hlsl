@@ -66,6 +66,9 @@
 [[vk::image_format("r32f")]]
 [[vk::binding(33 , 0)]] RWTexture2D<float> pixelCheck;
 
+[[vk::binding(34 ,0)]] RWStructuredBuffer<uint> lightCountPerTile;
+[[vk::binding(35 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
+
 [[vk::binding(0 , 2)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 [[vk::binding(1 , 2)]] RWStructuredBuffer<lg::LightCell> lightCells;
 [[vk::binding(2 , 2)]] ConstantBuffer<lg::GridCascadeInfo> gridInfo;
@@ -145,6 +148,18 @@ float calcMultiScatterFactor(float3 F0 , float roughness){
     const float F0_avr = (F0.x + F0.y + F0.z) / 3.0f;
     const float Ess = multiScatter.SampleLevel(samp , roughness, 0).x;
     return 1.0f + F0_avr * (1.0f / max(Ess , 0.001f) - 1.0f);
+}
+
+void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightCount){
+    firstLight = 0;
+    lightCount = 0;
+
+    uint2 tileCoord = currentPixel / forwardInfo.TILE_SIZE;
+    uint tileIndex = tileCoord.x + tileCoord.y * forwardInfo.TILE_PER_ROW;
+
+    // forward.hlsl's InterlockedAdd keeps counting past MAX_LIGHTS (it only stops WRITING there)
+    lightCount = min(lightCountPerTile[tileIndex] , (uint)MAX_LIGHTS);
+    firstLight = tileIndex * MAX_LIGHTS;
 }
 
 void computeLight(GeneralObjectInfo info , float3 L , out float3 diffuse , out float3 specular){
@@ -1269,14 +1284,17 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     }
 
     float lightLuminance = 0.0f;
+    // light here should be chosen by the forward + , not world grid light poses
+    uint tileLightCount , tileLightOffset;
+    findLightIndices(pixel , tileLightOffset , tileLightCount);
     {
         // lights
-        if(features.RayQueryLightSampleCount > 0 && lightCount > 0){
+        if(features.RayQueryLightSampleCount > 0 && tileLightCount > 0){
             float weightSum = 0.0f;
             float visibleSum = 0.0f;
             [loop]
-            for(uint i = 0 ; i < lightCount ;i++){
-                const uint lightID = lightIndices[i];
+            for(uint i = 0 ; i < tileLightCount ;i++){
+                const uint lightID = tileLightIndices[i + tileLightOffset];
                 lg::LightSource light = lightBuffer[lightID];
                 float3 L = light.position - info.P;
                 L = normalize(L);
@@ -1287,7 +1305,6 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 float shadow = 0.0f;
                 const float reach = lightShadowReach(d , light.radius , features.lightShadowFade);
                 const float falloff = 1.0f / (1.0f + light.Linear * d + light.Quadratic * d * d);
-                // the weight fades with the reach too : a lamp that ends its fade leaves the mean without a jump
                 const float weight = luminance(light.diffuse) * falloff * saturate(dot(info.N , dir)) * reach;
                 if(reach <= 0.0f || weight <= 0.0f) continue;
                 const float sinAlpha = min(light.radius / max(d , light.radius) , MAX_LIGHT_CONE_SIN);
@@ -1326,12 +1343,11 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         const float prevShadow = prevShadowData.x;
 
         // if the area is not affected by shadow , we dont want to lerp it with shadow, since its not in shadow now
+        // fix shadows 
         if(prevShadow != 1.0f && totalShadow != 1.0f)
         {
             // if its not 1.0f
             // means that in prev frame there was a shadow in this place
-            const float difference = abs(prevShadow - totalShadow);
-            if(difference <= SHADOW_HISTORY_TOLERANCE)
             {
                 shadowFrames = min(count + 1u , MAX_SHADOW_FRAME);
                 const float alpha = 1.0f / float(shadowFrames);
