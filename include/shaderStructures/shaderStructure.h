@@ -696,29 +696,39 @@ namespace RC{
 
 #endif
         float padding0;
+
+        // appended at the END ( the probe is placed on a surface of the screen , RCplacement.hlsl ) : the normal of the surface and the distance from the camera , they are
+        // for the weights of the merge ( a probe on another surface / far in depth must not give its light )
+#ifdef __cplusplus
+        alignas(16) glm::vec3 normal;
+#else
+        float3 normal;
+#endif
+        float cameraDistance;
     };
 
     struct CascadeInfo{
 #ifdef __cplusplus
         uint32_t PROBES_PER_CASCADE;
         // the probes of the cascade are a 3D grid of GRID_SIZE ^ 3 nodes ( the index of a node is x + GRID_SIZE * ( y + GRID_SIZE * z ) )
-        uint32_t GRID_SIZE;
+        uint32_t BUILD_SIZE;
         uint32_t PROBE_RAY_COUNT;
         uint32_t CASCADE_X;
 
         uint32_t CASCADE_Y;   
         uint32_t PROBE_OFFSET;
         uint32_t BLOCK_SIZE;
-
+        uint32_t PROBE_PER_ROW;
 #else
         uint PROBES_PER_CASCADE;
-        uint GRID_SIZE;
+        uint BUILD_SIZE;
         uint PROBE_RAY_COUNT;
         uint CASCADE_X;
         
         uint CASCADE_Y;   
         uint PROBE_OFFSET;
         uint BLOCK_SIZE;
+        uint PROBE_PER_ROW;
 
 #endif  
         // the distance between two nodes of the grid ( meters ) . the grid is snapped to it : the nodes stay at the same places of the world while the player moves
@@ -726,6 +736,7 @@ namespace RC{
         // the interval of the rays of the cascade along the ray from its probe : [ INTERVAL_START , INTERVAL_END ] ( meters ) . the end of a cascade is the start of the next one
         float INTERVAL_START;
         float INTERVAL_END;
+        float PROBE_RESOLUTION;
     };
 
     struct GeneralProbeInfo{
@@ -870,6 +881,14 @@ static const float FOG_FAR  = 200.0f;
 static const uint SKY_VIEW_STEPS = 32;
 
 static const float OFFSET_PER_CASCADE = 10.0f;
+
+// the temporal accumulation of the shadow is NOT endless : the second channel of the shadow image is the number of the frames that the pixel has gathered ( 1 .. MAX_SHADOW_FRAME ) ,
+// the weight of the new frame is 1 / ( the number + 1 ) , so after MAX_SHADOW_FRAME frames the old ones fade out
+static const uint MAX_SHADOW_FRAME = 4u;
+
+// a history that is far from this frame ( the camera has jerked , the shadow behind the pixel is another one ) must not stay : the difference up to this value is the noise of
+// the rays and does not matter , above it the number of the frames is cut down , and at the difference 1 the history is thrown away completely ( the new frame has the weight 1 )
+static const float SHADOW_HISTORY_TOLERANCE = 0.35f;
 
 struct GeneralObjectInfo{
     
@@ -1178,6 +1197,28 @@ float3 octahedralDecode(float2 uv){
     n.x += (n.x >= 0.0f) ? -t : t;
     n.y += (n.y >= 0.0f) ? -t : t;
     return normalize(n);
+}
+
+// the alpha of the images of Radiance Cascade ( RCImages , rgba16f ) holds TWO things in the 16 bits of the half float :
+//   the SIGN BIT  : the ray ended in a hit ( 1 ) or not ( 0 ) , the sky and the ray that left its interval are not a hit
+//   the other 15 bits : the distance to the hit , meters ( the half float of the absolute value , it is exact enough up to MAX_HIT_DISTANCE )
+// the cleared image ( 0 ) is " no hit , distance 0 " . the packed value is NOT a number to average : unpack the samples first , then mix the colours , the hit flags
+// ( the coverage ) and the distances separately
+namespace RC{
+
+    // the half float ends at 65504
+    static const float MAX_HIT_DISTANCE = 60000.0f;
+
+    float packHit(const bool hit , const float distance){
+        const float d = clamp(distance , 0.0f , MAX_HIT_DISTANCE);
+        // the sign is set by the bits : it works for the distance 0 too ( -0.0 )
+        return asfloat(asuint(d) | (hit ? 0x80000000u : 0u));
+    }
+
+    void unpackHit(const float packed , out bool hit , out float distance){
+        hit = (asuint(packed) & 0x80000000u) != 0u;
+        distance = abs(packed);
+    }
 }
 
 float3 sphericalFibonacci(uint i , uint numSamples){

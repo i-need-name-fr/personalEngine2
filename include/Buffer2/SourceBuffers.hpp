@@ -25,7 +25,6 @@ namespace mox{
         pDeviceReadableBuffer generalBuffer{nullptr};
         pDeviceReadableBuffer features{nullptr};
         pDeviceReadableBuffer sunBuffer{nullptr};
-        pDeviceReadableBuffer lightBuffer{nullptr};
         pDeviceReadableBuffer luminanceHistory{nullptr};
         // FogVolume : read by fogCalc / PostProcess , edited by the ImGuiPipe ( the CPU reads it )
         pDeviceReadableBuffer fogData{nullptr};
@@ -51,7 +50,6 @@ namespace mox{
             generalBuffer = nullptr;
             features = nullptr;
             sunBuffer = nullptr;
-            lightBuffer = nullptr;
             luminanceHistory = nullptr;
             fogData = nullptr;
             skyBuffer = nullptr;
@@ -89,10 +87,6 @@ namespace mox{
                 info.size = sizeof(SunSource);
                 sunBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
 
-                // light buffer
-                info.size = sizeof(lg::LightSource) * MAX_LIGHT_SOURCE;
-                lightBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
-                
                 // luminance history
                 info.size = sizeof(uint32_t) * 257;
                 luminanceHistory = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);

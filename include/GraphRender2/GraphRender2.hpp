@@ -5,6 +5,7 @@
 #include "../Image2/ViewPerLayer.hpp"
 #include "../Image2/ViewPerMip.hpp"
 #include "../Buffer2/SourceBuffers.hpp"
+#include "../LightManager/LightManager.hpp"
 
 namespace mox{
     // =================================== INFO ===================================
@@ -49,6 +50,12 @@ namespace mox{
             return processExecution(cmd , name);
         }
 
+        // the lamps ( the buffer of the LightManager ) : the passes ask for them as "lightBuffer" , like they did when the buffer was in the SourceBuffers
+        [[nodiscard]] ErrorDataOutput<void> processInputParameter(LightManager* data) noexcept{
+            if(!data) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("couldnt add the light manager as an input parameter , since its nullptr")});
+            return processInputParameter(data->lightBuffer.get() , "lightBuffer");
+        }
+
         [[nodiscard]] ErrorDataOutput<void> processInputParameter(SourceBuffers* data) noexcept{
 
             if(!data) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , std::format("couldnt add the source buffers as an input parameter , since its nullptr")});
@@ -67,12 +74,6 @@ namespace mox{
             // sun
             {
                 const auto result = processInputParameter(data->sunBuffer.get() , "sunBuffer");
-                if(!result.has_value()) return result;
-            }
-
-            // lights
-            {
-                const auto result = processInputParameter(data->lightBuffer.get() , "lightBuffer");
                 if(!result.has_value()) return result;
             }
 

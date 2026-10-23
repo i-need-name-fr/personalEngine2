@@ -140,6 +140,12 @@ namespace mox{
             nameToPhysical.erase(lightName);
         }
 
+        void changeLight(const std::string _lightName , const lg::LightSource _newLight) noexcept{
+            if(!nameToPhysical.contains(_lightName)) return;
+            const int32_t id = nameToPhysical[_lightName];
+            __implChangeLightSource(_newLight , id);
+        }
+
     private:
 
         void processCopy(LightManager&& input) noexcept

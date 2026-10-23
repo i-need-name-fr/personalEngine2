@@ -9,11 +9,11 @@
 
 [[vk::binding(5 , 0)]] RaytracingAccelerationStructure TLAS;
 
-[[vk::image_format("r32f")]]
-[[vk::binding(6 , 0)]] RWTexture2D<float> shadowImage;
+[[vk::image_format("rg32f")]]
+[[vk::binding(6 , 0)]] RWTexture2D<float2> shadowImage;
 
-[[vk::image_format("r32f")]]
-[[vk::binding(7 , 0)]] RWTexture2D<float> prevShadowImage;
+[[vk::image_format("rg32f")]]
+[[vk::binding(7 , 0)]] RWTexture2D<float2> prevShadowImage;
 
 [[vk::image_format("r32f")]]
 [[vk::binding(8 , 0)]] RWTexture2D<float> pixelCheck;
@@ -131,12 +131,12 @@ void main(uint3 id : SV_DispatchThreadID){
     uint2 screenSize = uint2(width , height);  
     if(any(id.xy >= screenSize)) return;
     if(pixelCheck[id.xy] == SKYBOX_PIXEL || pixelCheck[id.xy] == UNDEFINED_PIXEL){
-        shadowImage[id.xy] = 1.0f;
+        shadowImage[id.xy] = float2(1.0f , 0.0f);
         return;
     }
 
     if(features.PT || !features.RayQuery || features.VSM){
-        shadowImage[id.xy] = 1.0f;
+        shadowImage[id.xy] = float2(1.0f , 0.0f);
         return;
     }   
 
@@ -263,15 +263,28 @@ void main(uint3 id : SV_DispatchThreadID){
     const float sunShadowLifted = lerp(features.shadowMinimum , 1.0f , sunShadow);
     const float totalWeight = sunLuminance + lightLuminance;
     const float totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
-    float rawShadow = totalShadow;
-    float finalShadow;
-
+    float finalShadow = totalShadow;
+    uint shadowFrames = 1u;
     if(validUV){
-        const float prevShadow = prevShadowImage[prevPixel].x;
-        finalShadow = lerp(rawShadow , prevShadow , features.temporalShadowK);
-    }else{
-        finalShadow = rawShadow;
+        const float2 prevShadowData = prevShadowImage[prevPixel];
+        const uint count = uint(prevShadowData.y);
+        const float prevShadow = prevShadowData.x;
+
+        // if the area is not affected by shadow , we dont want to lerp it with shadow, since its not in shadow now
+        if(prevShadow != 1.0f && totalShadow != 1.0f)
+        {
+            // if its not 1.0f
+            // means that in prev frame there was a shadow in this place
+            const float difference = abs(prevShadow - totalShadow);
+            if(difference <= SHADOW_HISTORY_TOLERANCE)
+            {
+                shadowFrames = min(count + 1u , MAX_SHADOW_FRAME);
+                const float alpha = 1.0f / float(shadowFrames);
+                finalShadow = lerp(prevShadow , totalShadow , alpha);
+            }
+        }
+        // if the shadow of the previous frame is 1.0f ( or this frame has none ) there is no history to keep : shadowFrames is 1 and the shadow stays as it is
     }
 
-    shadowImage[id.xy]= finalShadow;
+    shadowImage[id.xy] = float2(finalShadow , float(shadowFrames));
 }

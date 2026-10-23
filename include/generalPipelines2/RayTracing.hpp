@@ -9,6 +9,8 @@
 #include "../ShaderPipe2/ShaderPipeSelect.hpp"
 #include "../Sampler/Sampler.hpp"
 #include "../Image2/TextureManager2.hpp"
+#include "../LightManager/LightManager.hpp"
+#include "../RCProbeManager/RCProbeManager.hpp"
 
 namespace mox{
 
@@ -17,9 +19,12 @@ namespace mox{
     // ( the ray generation shader reads the G buffer , makes a GeneralObjectInfo and calls generateReservoirGI )
     //
     // the pipeline is a REAL ray tracing pipeline ( vkCreateRayTracingPipelinesKHR ) , its descriptors are descriptor buffers :
-    //   set 0 : 37 bindings , the same list as in every shader of Shaders/RayTracing ( see the listing in the shaders ) , two descriptor buffers , the
+    //   set 0 : 34 bindings , the same list as in every shader of Shaders/RayTracing ( see the listing in the shaders ) , two descriptor buffers , the
     //           one with the index frameIndex % 2 is bound ( the ping pong images and the reservoirs are swapped inside )
     //   set 1 : the textures of the TextureManager2 ( the same set as the Deferred render )
+    //   set 2 : the world grid of the lamps of the LightManager : the lamps , the cells , the info ( its layout and its descriptor buffer )
+    //   set 3 : the probes of Radiance Cascade ( RCProbeManager ) : the probes , the cascades , the info , RCImages[] ( the pass RadianceCascade has written them ) ,
+    //           the shaders read the cascade 0 ( RC::processRC in generalHit.hlsl )
     //
     // the order of the groups = the numbers in shaderStructure.h ( RT_MISS_* and RT_HITGROUP_* ) :
     //   miss : 0 general , 1 hit info ( GI ) , 2 shadow
@@ -40,6 +45,10 @@ namespace mox{
             VulkanContext* context{};
             AccelerationStructure* as{};
             TextureManager2* manager{};
+            // the layout and the descriptor buffer of the set 2 ( the world grid of the lamps ) : the manager has to live longer than the pass
+            LightManager* lights{};
+            // the layout and the descriptor buffer of the set 3 ( Radiance Cascade ) : the manager has to live longer than the pass
+            RCProbeManager* probes{};
 
             std::string rayGenerationPath;
 
@@ -69,6 +78,16 @@ namespace mox{
 
             if(!info.manager){
                 engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create RayTracing , since the texture manager is nullptr"});
+                THROW_MESSAGE;
+            }
+
+            if(!info.lights){
+                engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create RayTracing , since the light manager is nullptr"});
+                THROW_MESSAGE;
+            }
+
+            if(!info.probes){
+                engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create RayTracing , since the probe manager is nullptr"});
                 THROW_MESSAGE;
             }
 
@@ -136,9 +155,6 @@ namespace mox{
             buffer("forwardInfo");
             buffer("skyBuffer");
             buffer("sunBuffer");
-            buffer("tileLightIndices");
-            buffer("lightCountPerTile");
-            buffer("lightBuffer");
             buffer("ReSTIRDIBuffer_0");
             buffer("ReSTIRDIBuffer_1");
             buffer("ReSTIRGIBuffer_0");
@@ -154,9 +170,9 @@ namespace mox{
 
             vkCmdBindPipeline(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->pipeline);
 
-            // set 0 : the descriptor buffer of this pass , set 1 : the textures
+            // set 0 : the descriptor buffer of this pass , set 1 : the textures , set 2 : the world grid of the lamps , set 3 : the probes of Radiance Cascade
             {
-                std::array<VkDescriptorBufferBindingInfoEXT , 2> info{};
+                std::array<VkDescriptorBufferBindingInfoEXT , 4> info{};
 
                 info[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
                 info[0].address = pipe->buffers[currentImage]->pBuffer;
@@ -168,11 +184,21 @@ namespace mox{
                 info[1].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
                 info[1].pNext = nullptr;
 
-                cmdBindDescriptorBuffersEXT(cmd , 2 , info.data());
+                info[2].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info[2].address = inputData.lights->dbuffer->pBuffer;
+                info[2].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                info[2].pNext = nullptr;
 
-                const uint32_t sets[2] = {0 , 1};
-                const VkDeviceSize offsets[2] = {0 , 0};
-                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->layout->layout , 0 , 2 , sets , offsets);
+                info[3].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info[3].address = inputData.probes->buffer->pBuffer;
+                info[3].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                info[3].pNext = nullptr;
+
+                cmdBindDescriptorBuffersEXT(cmd , 4 , info.data());
+
+                const uint32_t sets[4] = {0 , 1 , 2 , 3};
+                const VkDeviceSize offsets[4] = {0 , 0 , 0 , 0};
+                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->layout->layout , 0 , 4 , sets , offsets);
             }
 
             // vkCmdTraceRaysKHR takes the GRID of the rays , not the number of the workgroups : there is nothing to divide by 8
@@ -204,8 +230,6 @@ namespace mox{
                 GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"generalFeatures" , &features} ,
                 GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo} , GraphSlot<BufferBase2>{"skyBuffer" , &skyBuffer} ,
                 GraphSlot<BufferBase2>{"sunBuffer" , &sunBuffer} ,
-                GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices} , GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile} ,
-                GraphSlot<BufferBase2>{"lightBuffer" , &lightBuffer} ,
                 GraphSlot<BufferBase2>{"ReSTIRDIBuffer_0" , &ReSTIRDIBuffer[0]} , GraphSlot<BufferBase2>{"ReSTIRDIBuffer_1" , &ReSTIRDIBuffer[1]} ,
                 GraphSlot<BufferBase2>{"ReSTIRGIBuffer_0" , &ReSTIRGIBuffer[0]} , GraphSlot<BufferBase2>{"ReSTIRGIBuffer_1" , &ReSTIRGIBuffer[1]});
             if(!bound.has_value()) return bound;
@@ -226,7 +250,7 @@ namespace mox{
 
             // the G buffer of this frame and the sky : only read . the images of the light : the shaders add to them , so read and write
             // ( the images that the shaders only bind , like the shadows and the view image , are not touched by this pass )
-            std::array<VkImageMemoryBarrier2 , 14> imageBar;
+            std::array<VkImageMemoryBarrier2 , 15> imageBar;
 
             imageBar[0] = positionImage[id]->translateImage(read , stage);
             imageBar[1] = normalImage[id]->translateImage(read , stage);
@@ -246,7 +270,10 @@ namespace mox{
             imageBar[12] = specularImage[id]->translateImage(read | write , stage);
             imageBar[13] = indirectImage[id]->translateImage(read | write , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 16> bufBar;
+            // the cascade 0 of Radiance Cascade : the pass before this one has merged all the cascades into it
+            imageBar[14] = inputData.probes->cascades[0]->translateImage(read , stage);
+
+            std::array<VkBufferMemoryBarrier2 , 19> bufBar;
 
             bufBar[0] = generalBuffer->translateBuffer(uniformRead , stage);
             bufBar[1] = features->translateBuffer(uniformRead , stage);
@@ -254,10 +281,10 @@ namespace mox{
             bufBar[3] = skyBuffer->translateBuffer(uniformRead , stage);
             bufBar[4] = sunBuffer->translateBuffer(uniformRead , stage);
 
-            // the lamps of the tiles : written by the ForwardPlus
-            bufBar[5] = tileLightIndices->translateBuffer(read , stage);
-            bufBar[6] = lightCountPerTile->translateBuffer(read , stage);
-            bufBar[7] = lightBuffer->translateBuffer(read , stage);
+            // the world grid of the lamps : written by LightManager::updateGrid ( the compute shader ) , the buffers belong to the manager
+            bufBar[5] = inputData.lights->lightBuffer->translateBuffer(read , stage);
+            bufBar[6] = inputData.lights->lightCellBuffer->translateBuffer(read , stage);
+            bufBar[7] = inputData.lights->lightCascadeBuffer->translateBuffer(uniformRead , stage);
 
             // the geometry and the materials : the closest hit reads them
             bufBar[8] = Mesh2::vertexBuffer->translateBuffer(read , stage);
@@ -271,7 +298,12 @@ namespace mox{
             bufBar[14] = ReSTIRGIBuffer[id]->translateBuffer(read | write , stage);
             bufBar[15] = ReSTIRGIBuffer[prev]->translateBuffer(read , stage);
 
-            auto dep = TypicalDependency<16 , 14>(imageBar.data() , bufBar.data());
+            // the probes of Radiance Cascade : the placement wrote them , the shaders read the info of the cascades and the probes
+            bufBar[16] = inputData.probes->probesBuffer->translateBuffer(read , stage);
+            bufBar[17] = inputData.probes->cascadeBuffer->translateBuffer(read , stage);
+            bufBar[18] = inputData.probes->generalProbeBuffer->translateBuffer(uniformRead , stage);
+
+            auto dep = TypicalDependency<19 , 15>(imageBar.data() , bufBar.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -310,9 +342,6 @@ namespace mox{
         BufferBase2* forwardInfo{nullptr};
         BufferBase2* skyBuffer{nullptr};
         BufferBase2* sunBuffer{nullptr};
-        BufferBase2* tileLightIndices{nullptr};
-        BufferBase2* lightCountPerTile{nullptr};
-        BufferBase2* lightBuffer{nullptr};
         BufferBase2* ReSTIRDIBuffer[2]{nullptr , nullptr};
         BufferBase2* ReSTIRGIBuffer[2]{nullptr , nullptr};
 
@@ -355,9 +384,6 @@ namespace mox{
             forwardInfo = std::exchange(input.forwardInfo , nullptr);
             skyBuffer = std::exchange(input.skyBuffer , nullptr);
             sunBuffer = std::exchange(input.sunBuffer , nullptr);
-            tileLightIndices = std::exchange(input.tileLightIndices , nullptr);
-            lightCountPerTile = std::exchange(input.lightCountPerTile , nullptr);
-            lightBuffer = std::exchange(input.lightBuffer , nullptr);
 
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
@@ -398,9 +424,6 @@ namespace mox{
             forwardInfo = nullptr;
             skyBuffer = nullptr;
             sunBuffer = nullptr;
-            tileLightIndices = nullptr;
-            lightCountPerTile = nullptr;
-            lightBuffer = nullptr;
 
             inputData = {};
             completedInit = false;
@@ -424,20 +447,20 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(37);
+                    std::vector<DescriptorLayoutData> data(34);
 
                     data[0] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR , 1};
 
                     for(uint32_t i = 1 ; i <= 5 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
-                    for(uint32_t i = 6 ; i <= 18 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    for(uint32_t i = 6 ; i <= 15 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
 
+                    data[16] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
+                    data[17] = {VK_DESCRIPTOR_TYPE_SAMPLER , 1};
+                    data[18] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
                     data[19] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
-                    data[20] = {VK_DESCRIPTOR_TYPE_SAMPLER , 1};
-                    data[21] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
-                    data[22] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
 
-                    for(uint32_t i = 23 ; i <= 36 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+                    for(uint32_t i = 20 ; i <= 33 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -449,11 +472,11 @@ namespace mox{
                     pipe->addDescriptorLayout(info);
                 }
 
-                // ------------------------------------------------------------ the pipeline layout : set 0 and the textures
+                // ------------------------------------------------------------ the pipeline layout : set 0 , the textures , the world grid of the lamps and the probes
                 {
                     PipelineLayout::CreateInfo info{};
                     info.context = context;
-                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.manager->layout.get()};
+                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.manager->layout.get() , inputData.lights->layout.get() , inputData.probes->layout.get()};
                     info.ranges = {};
 
                     pipe->layout = std::make_shared<PipelineLayout>(info);
@@ -461,7 +484,7 @@ namespace mox{
 
                 // ------------------------------------------------------------ set 0 : the descriptor buffers , one per parity of the frame
                 for(const auto id : {0 , 1}){
-                    std::vector<DescriptorData2> data(37);
+                    std::vector<DescriptorData2> data(34);
 
                     data[0] = DescriptorData2::createData(inputData.as , 0 , 0);
 
@@ -471,42 +494,38 @@ namespace mox{
                     data[4] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 4 , 0);
                     data[5] = DescriptorData2::createData(sunBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
 
-                    data[6] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 6 , 0);
-                    data[7] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 7 , 0);
-                    data[8] = DescriptorData2::createData(lightBuffer , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 8 , 0);
-
-                    data[9] = DescriptorData2::createData(Mesh2::vertexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 9 , 0);
-                    data[10] = DescriptorData2::createData(Mesh2::indicesBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 10 , 0);
-                    data[11] = DescriptorData2::createData(Mesh2::instanceLayoutBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 11 , 0);
-                    data[12] = DescriptorData2::createData(Mesh2::instanceBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 12 , 0);
-                    data[13] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
-                    data[14] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 14 , 0);
+                    data[6] = DescriptorData2::createData(Mesh2::vertexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 6 , 0);
+                    data[7] = DescriptorData2::createData(Mesh2::indicesBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 7 , 0);
+                    data[8] = DescriptorData2::createData(Mesh2::instanceLayoutBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 8 , 0);
+                    data[9] = DescriptorData2::createData(Mesh2::instanceBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 9 , 0);
+                    data[10] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 10 , 0);
+                    data[11] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 11 , 0);
 
                     // the reservoirs : this frame writes the one with its own parity and reads the other
-                    data[15] = DescriptorData2::createData(ReSTIRDIBuffer[id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 15 , 0);
-                    data[16] = DescriptorData2::createData(ReSTIRDIBuffer[!id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 16 , 0);
-                    data[17] = DescriptorData2::createData(ReSTIRGIBuffer[id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 17 , 0);
-                    data[18] = DescriptorData2::createData(ReSTIRGIBuffer[!id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 18 , 0);
+                    data[12] = DescriptorData2::createData(ReSTIRDIBuffer[id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 12 , 0);
+                    data[13] = DescriptorData2::createData(ReSTIRDIBuffer[!id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
+                    data[14] = DescriptorData2::createData(ReSTIRGIBuffer[id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 14 , 0);
+                    data[15] = DescriptorData2::createData(ReSTIRGIBuffer[!id] , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 15 , 0);
 
-                    data[19] = DescriptorData2::createData(skybox , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 19 , 0);
-                    data[20] = DescriptorData2::createData(sampler.get() , 20 , 0);
-                    data[21] = DescriptorData2::createData(transmissionLUT , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 21 , 0);
-                    data[22] = DescriptorData2::createData(multiScatter , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 22 , 0);
+                    data[16] = DescriptorData2::createData(skybox , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 16 , 0);
+                    data[17] = DescriptorData2::createData(sampler.get() , 17 , 0);
+                    data[18] = DescriptorData2::createData(transmissionLUT , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 18 , 0);
+                    data[19] = DescriptorData2::createData(multiScatter , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 19 , 0);
 
-                    data[23] = DescriptorData2::createData(diffuseImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 23 , 0);
-                    data[24] = DescriptorData2::createData(specularImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 24 , 0);
-                    data[25] = DescriptorData2::createData(albedoImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 25 , 0);
-                    data[26] = DescriptorData2::createData(indirectImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 26 , 0);
-                    data[27] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 27 , 0);
-                    data[28] = DescriptorData2::createData(positionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 28 , 0);
-                    data[29] = DescriptorData2::createData(roughnessImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 29 , 0);
-                    data[30] = DescriptorData2::createData(metallicImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 30 , 0);
-                    data[31] = DescriptorData2::createData(depthImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 31 , 0);
-                    data[32] = DescriptorData2::createData(shadowImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 32 , 0);
-                    data[33] = DescriptorData2::createData(shadowImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 33 , 0);
-                    data[34] = DescriptorData2::createData(viewImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 34 , 0);
-                    data[35] = DescriptorData2::createData(motionVector , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 35 , 0);
-                    data[36] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 36 , 0);
+                    data[20] = DescriptorData2::createData(diffuseImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 20 , 0);
+                    data[21] = DescriptorData2::createData(specularImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 21 , 0);
+                    data[22] = DescriptorData2::createData(albedoImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 22 , 0);
+                    data[23] = DescriptorData2::createData(indirectImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 23 , 0);
+                    data[24] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 24 , 0);
+                    data[25] = DescriptorData2::createData(positionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 25 , 0);
+                    data[26] = DescriptorData2::createData(roughnessImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 26 , 0);
+                    data[27] = DescriptorData2::createData(metallicImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 27 , 0);
+                    data[28] = DescriptorData2::createData(depthImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 28 , 0);
+                    data[29] = DescriptorData2::createData(shadowImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 29 , 0);
+                    data[30] = DescriptorData2::createData(shadowImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 30 , 0);
+                    data[31] = DescriptorData2::createData(viewImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 31 , 0);
+                    data[32] = DescriptorData2::createData(motionVector , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 32 , 0);
+                    data[33] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 33 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

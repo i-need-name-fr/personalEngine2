@@ -7,68 +7,65 @@
 [[vk::binding(4 , 0)]] ConstantBuffer<GeneralFeatures> features;
 [[vk::binding(5 , 0)]] ConstantBuffer<SunSource> sunBuffer;
 
-[[vk::binding(6 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
-[[vk::binding(7 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
-[[vk::binding(9 , 0)]] RWStructuredBuffer<Vertex> vertices;
-[[vk::binding(10 , 0)]] RWStructuredBuffer<uint> indices;
-[[vk::binding(11 , 0)]] RWStructuredBuffer<InstanceData> instanceLayout;
-[[vk::binding(12 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
-[[vk::binding(13, 0)]] RWStructuredBuffer<MeshData> meshBuffer;
-[[vk::binding(14 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
+[[vk::binding(6 , 0)]] RWStructuredBuffer<Vertex> vertices;
+[[vk::binding(7 , 0)]] RWStructuredBuffer<uint> indices;
+[[vk::binding(8 , 0)]] RWStructuredBuffer<InstanceData> instanceLayout;
+[[vk::binding(9 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
+[[vk::binding(10 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
+[[vk::binding(11 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
 
-[[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
-[[vk::binding(16 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDIBuffer;
-[[vk::binding(17 , 0)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;
-[[vk::binding(18, 0)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
+[[vk::binding(12 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
+[[vk::binding(13 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDIBuffer;
+[[vk::binding(14 , 0)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;
+[[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
 
-[[vk::binding(19, 0)]] TextureCube skybox;
-[[vk::binding(20, 0)]] SamplerState samp;
-[[vk::binding(21 , 0)]] Texture2D transmissionLUT;
-[[vk::binding(22, 0)]] Texture1D multiScatter;
+[[vk::binding(16 , 0)]] TextureCube skybox;
+[[vk::binding(17 , 0)]] SamplerState samp;
+[[vk::binding(18 , 0)]] Texture2D transmissionLUT;
+[[vk::binding(19 , 0)]] Texture1D multiScatter;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(23, 0)]] RWTexture2D<float4> diffuseImage;
+[[vk::binding(20 , 0)]] RWTexture2D<float4> diffuseImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(24, 0)]] RWTexture2D<float4> specularImage;
+[[vk::binding(21 , 0)]] RWTexture2D<float4> specularImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(25, 0)]] RWTexture2D<float4> albedoImage;
+[[vk::binding(22 , 0)]] RWTexture2D<float4> albedoImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(26, 0)]] RWTexture2D<float4> indirectImage;
+[[vk::binding(23 , 0)]] RWTexture2D<float4> indirectImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(27, 0)]] RWTexture2D<float4> normalImage;
+[[vk::binding(24 , 0)]] RWTexture2D<float4> normalImage;
 
 [[vk::image_format("rgba32f")]]
-[[vk::binding(28, 0)]] RWTexture2D<float4> positionImage;
+[[vk::binding(25 , 0)]] RWTexture2D<float4> positionImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(29, 0)]] RWTexture2D<float> roughnessImage;
+[[vk::binding(26 , 0)]] RWTexture2D<float> roughnessImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(30, 0)]] RWTexture2D<float> metallicImage;
+[[vk::binding(27 , 0)]] RWTexture2D<float> metallicImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(31, 0)]] RWTexture2D<float> depthImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(32, 0)]] RWTexture2D<float> shadowImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(33, 0)]] RWTexture2D<float> prevShadowImage;
-
-[[vk::image_format("rgba32f")]]
-[[vk::binding(34, 0)]] RWTexture2D<float4> viewImage;
+[[vk::binding(28 , 0)]] RWTexture2D<float> depthImage;
 
 [[vk::image_format("rg32f")]]
-[[vk::binding(35, 0)]] RWTexture2D<float2> motionVector;
+[[vk::binding(29 , 0)]] RWTexture2D<float2> shadowImage;
+
+[[vk::image_format("rg32f")]]
+[[vk::binding(30 , 0)]] RWTexture2D<float2> prevShadowImage;
+
+[[vk::image_format("rgba32f")]]
+[[vk::binding(31 , 0)]] RWTexture2D<float4> viewImage;
+
+[[vk::image_format("rg32f")]]
+[[vk::binding(32 , 0)]] RWTexture2D<float2> motionVector;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(36, 0)]] RWTexture2D<float> pixelCheck;
+[[vk::binding(33 , 0)]] RWTexture2D<float> pixelCheck;
 
 struct LightData{
     float3 diffuse;
@@ -78,6 +75,8 @@ struct LightData{
     // the REAL distances ( not weights ) : the denoisers take the radius of the filter from them . diffuse and indirect share the first one
     float diffuseHitDistance;
     float specularHitDistance;
+    // the number of the frames that the shadow of the pixel has gathered ( the second channel of the shadow image , 1 .. MAX_SHADOW_FRAME )
+    float shadowFrames;
 };
 
 struct PixelData{
@@ -132,7 +131,7 @@ void main(){
     specularImage[currentPixel.xy] = float4(load.lightInfo.specular , load.lightInfo.specularHitDistance);
     indirectImage[currentPixel.xy] = float4(load.lightInfo.indirect , load.lightInfo.diffuseHitDistance);
 
-    shadowImage[currentPixel.xy] = load.lightInfo.shadow;
+    shadowImage[currentPixel.xy] = float2(load.lightInfo.shadow , load.lightInfo.shadowFrames);
 
     viewImage[currentPixel.xy] = float4(load.pixelInfo.viewDir , 1.0f);
 

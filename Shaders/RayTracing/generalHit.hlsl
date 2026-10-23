@@ -7,70 +7,75 @@
 [[vk::binding(4 , 0)]] ConstantBuffer<GeneralFeatures> features;
 [[vk::binding(5 , 0)]] ConstantBuffer<SunSource> sunBuffer;
 
-[[vk::binding(6 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
-[[vk::binding(7 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
+[[vk::binding(6 , 0)]] RWStructuredBuffer<Vertex> vertices;
+[[vk::binding(7 , 0)]] RWStructuredBuffer<uint> indices;
+[[vk::binding(8 , 0)]] RWStructuredBuffer<InstanceData> instanceLayout;
+[[vk::binding(9 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
+[[vk::binding(10 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
+[[vk::binding(11 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
 
-[[vk::binding(9 , 0)]] RWStructuredBuffer<Vertex> vertices;
-[[vk::binding(10 , 0)]] RWStructuredBuffer<uint> indices;
-[[vk::binding(11 , 0)]] RWStructuredBuffer<InstanceData> instanceLayout;
-[[vk::binding(12 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
-[[vk::binding(13, 0)]] RWStructuredBuffer<MeshData> meshBuffer;
-[[vk::binding(14 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
+[[vk::binding(12 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
+[[vk::binding(13 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDIBuffer;
+[[vk::binding(14 , 0)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;
+[[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
 
-[[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
-[[vk::binding(16 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDIBuffer;
-[[vk::binding(17 , 0)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;
-[[vk::binding(18, 0)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
-
-[[vk::binding(19, 0)]] TextureCube skybox;
-[[vk::binding(20, 0)]] SamplerState samp;
-[[vk::binding(21 , 0)]] Texture2D transmissionLUT;
-[[vk::binding(22, 0)]] Texture1D multiScatter;
+[[vk::binding(16 , 0)]] TextureCube skybox;
+[[vk::binding(17 , 0)]] SamplerState samp;
+[[vk::binding(18 , 0)]] Texture2D transmissionLUT;
+[[vk::binding(19 , 0)]] Texture1D multiScatter;
 
 [[vk::image_format("rgba16f")]]
-[[vk::binding(23, 0)]] RWTexture2D<float4> diffuseImage;
+[[vk::binding(20 , 0)]] RWTexture2D<float4> diffuseImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(24, 0)]] RWTexture2D<float4> specularImage;
+[[vk::binding(21 , 0)]] RWTexture2D<float4> specularImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(25, 0)]] RWTexture2D<float4> albedoImage;
+[[vk::binding(22 , 0)]] RWTexture2D<float4> albedoImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(26, 0)]] RWTexture2D<float4> indirectImage;
+[[vk::binding(23 , 0)]] RWTexture2D<float4> indirectImage;
 
 [[vk::image_format("rgba16")]]
-[[vk::binding(27, 0)]] RWTexture2D<float4> normalImage;
+[[vk::binding(24 , 0)]] RWTexture2D<float4> normalImage;
 
 [[vk::image_format("rgba32f")]]
-[[vk::binding(28, 0)]] RWTexture2D<float4> positionImage;
+[[vk::binding(25 , 0)]] RWTexture2D<float4> positionImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(29, 0)]] RWTexture2D<float> roughnessImage;
+[[vk::binding(26 , 0)]] RWTexture2D<float> roughnessImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(30, 0)]] RWTexture2D<float> metallicImage;
+[[vk::binding(27 , 0)]] RWTexture2D<float> metallicImage;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(31, 0)]] RWTexture2D<float> depthImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(32, 0)]] RWTexture2D<float> shadowImage;
-
-[[vk::image_format("r32f")]]
-[[vk::binding(33, 0)]] RWTexture2D<float> prevShadowImage;
-
-[[vk::image_format("rgba32f")]]
-[[vk::binding(34, 0)]] RWTexture2D<float4> viewImage;
+[[vk::binding(28 , 0)]] RWTexture2D<float> depthImage;
 
 [[vk::image_format("rg32f")]]
-[[vk::binding(35, 0)]] RWTexture2D<float2> motionVector;
+[[vk::binding(29 , 0)]] RWTexture2D<float2> shadowImage;
+
+[[vk::image_format("rg32f")]]
+[[vk::binding(30 , 0)]] RWTexture2D<float2> prevShadowImage;
+
+[[vk::image_format("rgba32f")]]
+[[vk::binding(31 , 0)]] RWTexture2D<float4> viewImage;
+
+[[vk::image_format("rg32f")]]
+[[vk::binding(32 , 0)]] RWTexture2D<float2> motionVector;
 
 [[vk::image_format("r32f")]]
-[[vk::binding(36, 0)]] RWTexture2D<float> pixelCheck;
+[[vk::binding(33 , 0)]] RWTexture2D<float> pixelCheck;
+
+[[vk::binding(0 , 2)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
+[[vk::binding(1 , 2)]] RWStructuredBuffer<lg::LightCell> lightCells;
+[[vk::binding(2 , 2)]] ConstantBuffer<lg::GridCascadeInfo> gridInfo;
 
 
+[[vk::binding(0 , 3)]] RWStructuredBuffer<RC::ProbeInfo> RCProbeBuffer;
+[[vk::binding(1 , 3)]] RWStructuredBuffer<RC::CascadeInfo> RCCascadesBuffer;
+[[vk::binding(2 , 3)]] ConstantBuffer<RC::GeneralProbeInfo> RCProbeInfo;
+[[vk::image_format("rgba16f")]]
+[[vk::binding(3 , 3)]] RWTexture2D<float4> RCImages[];
 
 struct LightData{
     float3 diffuse;
@@ -80,6 +85,8 @@ struct LightData{
     // the REAL distances ( not weights ) : the denoisers take the radius of the filter from them . diffuse and indirect share the first one
     float diffuseHitDistance;
     float specularHitDistance;
+    // the number of the frames that the shadow of the pixel has gathered ( the second channel of the shadow image , 1 .. MAX_SHADOW_FRAME )
+    float shadowFrames;
 };
 
 struct PixelData{
@@ -165,16 +172,38 @@ void computeLight(GeneralObjectInfo info , float3 L , out float3 diffuse , out f
     diffuse = kD * albedo / PI;
 }
 
-void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightCount){
-    firstLight = 0;
+inline float3 getGridOrigin(const float3 playerPosition) {
+    const float3 snapped = floor(playerPosition / lg::GRID_CELL_SIZE) * lg::GRID_CELL_SIZE;
+    return snapped - float3(lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE, lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE,lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE);
+}
+
+inline float3 translateToGridPos(const float3 position , const float3 playerPosition) {
+    return position - getGridOrigin(playerPosition);
+}
+
+inline int32_t translatePosToCellIndex(const float3 gridPos) {
+    const float3 cell = floor(gridPos / lg::GRID_CELL_SIZE);
+    const float n = lg::GRID_SIZE;
+    if(cell.x < 0.0f || cell.y < 0.0f || cell.z < 0.0f || cell.x >= n || cell.y >= n || cell.z >= n) return NON_VALID_SLOT;
+
+    const int32_t count = int(lg::GRID_SIZE);
+    return int32_t(cell.x) + count * (int32_t(cell.y) + count * int32_t(cell.z));
+}
+
+int findGridSlot(const float3 P){
+    const float3 gridPos = translateToGridPos(P , generalBuffer.playerPosition);
+    return translatePosToCellIndex(gridPos);
+}
+
+void findLightIndices(const float3 P , out uint lightIndices[lg::MAX_LIGHT_PER_CELL] ,out uint lightCount){
     lightCount = 0;
+    const int gridID = findGridSlot(P);
+    if(gridID == NON_VALID_SLOT) return;
 
-    uint2 tileCoord = currentPixel / forwardInfo.TILE_SIZE;
-    uint tileIndex = tileCoord.x + tileCoord.y * forwardInfo.TILE_PER_ROW;
-
-    // forward.hlsl's InterlockedAdd keeps counting past MAX_LIGHTS (it only stops WRITING there)
-    lightCount = min(lightCountPerTile[tileIndex] , (uint)MAX_LIGHTS);
-    firstLight = tileIndex * MAX_LIGHTS;
+    const lg::LightCell cell = lightCells[gridID];
+    // the grid shader keeps counting past MAX_LIGHT_PER_CELL ( it only stops WRITING there )
+    lightCount = min(cell.totalLightCount , (uint)lg::MAX_LIGHT_PER_CELL);
+    lightIndices = cell.lightIndices;
 }
 
 // the attenuation of a point light : the physical falloff times a window that reaches exactly 0 at lightRadius .
@@ -513,30 +542,24 @@ namespace ReSTIRGI{
         if(!info.didHit){
             return 0.0f;
         }
-        const float4 clipPos = mul(generalBuffer.viewProj, float4(info.worldPos , 1.0f));
-        float2 prevUV = (clipPos.xy / max(clipPos.w , 1e-20)) * 0.5f + 0.5f;
-        prevUV.y = 1.0f - prevUV.y;
-        const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
-        uint lightCount , lightOffset;
+        uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
         uint2 pixel = DispatchRaysIndex().xy;
 
-        if(validUV){
-            const uint2 id = uint2(prevUV * float2(DispatchRaysDimensions().xy) - 0.5f);
-            findLightIndices(id , lightOffset , lightCount);
-        }else{
-            findLightIndices(pixel , lightOffset , lightCount);
-        }
+        findLightIndices(info.worldPos , lightIndices , lightCount);
+
         GeneralObjectInfo data = (GeneralObjectInfo)0;
         data.albedo = info.albedo;
         data.metallic = info.metallic;
         data.roughness = info.roughness;
         data.N = info.normal;
         data.P = info.worldPos;
+        
+        const float3 saveAlbedo = max(info.albedo , 1e-20);
 
         float3 result = 0.0f ;
         if(lightCount){
-            const uint id = (uint)(rand(seed) * lightCount) + lightOffset;
-            lg::LightSource light = lightBuffer[tileLightIndices[id]];
+            const uint id = (uint)(rand(seed) * lightCount);
+            lg::LightSource light = lightBuffer[lightIndices[id]];
             float3 diffuse, specular;
 
             const float3 V = normalize(x1Pos - info.worldPos);
@@ -553,15 +576,19 @@ namespace ReSTIRGI{
             const float NdotL = saturate(dot(data.N , realL));  
             float shadow = calculateShadowInSphere(seed , light , data.P , data.N);
             float window = lightAttenuation(light, dist);
+            diffuse /= saveAlbedo;
             result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
+        }else{
+            result =  0.01f;
         }
+
         if(sunBuffer.intensity > 0.0f){
             float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
             // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
             const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
             const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
             computeLight(data , L , sunDiffuse , sunSpecular);
-            //
+            sunDiffuse /= saveAlbedo;
             result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
         }
 
@@ -571,8 +598,11 @@ namespace ReSTIRGI{
             const float NdotV = max(dot(info.normal , V2) , 0.0001f);
             const float3 F = F_fresnel(F0 , NdotV);
             const float3 kD = (1.0f - F) * (1.0f - info.metallic);
-            result += sampleSkybox(info.normal) * kD * info.albedo;
+            result += sampleSkybox(info.normal) * kD;
         }
+
+        result *= saveAlbedo;
+
         return result;
     }
 
@@ -805,18 +835,18 @@ void finalizeReservoir_DI(inout ReservoirDI r , GeneralObjectInfo info){
     r.W = (p_hat > 1e-6f && r.M > 0u) ? r.weightSum / (float(r.M) * p_hat) : 0.0f;
 }
 
-void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjectInfo info, uint lightIndicesCount , uint lightOffset){
+void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjectInfo info, uint lightIndices[lg::MAX_LIGHT_PER_CELL] , uint lightCount){
     res.W = 0.0f;
     res.M = 0;
     res.weightSum = 0.0f;
     res.chosenIndex = 9999u;   // undefined : no light is chosen
     res.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
     res.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-    if(lightIndicesCount == 0u) return;
+    if(lightCount == 0u) return;
 
     float bestPdf = 0.0f;
-    for(uint i = 0 ; i < lightIndicesCount ; i++){
-        const uint lightIndex = tileLightIndices[lightOffset + i];
+    for(uint i = 0 ; i < lightCount ; i++){
+        const uint lightIndex = lightIndices[i];
         const lg::LightSource light = lightBuffer[lightIndex];
 
         float3 toLight = light.position - info.P;
@@ -932,7 +962,7 @@ void spatialReuse_DI(inout ReservoirDI r , inout uint seed , uint2 currentPixel,
     }
 }
 
-ReservoirDI ReSTIR_DI_generation(uint2 currentPixel , float2 prevUV , inout uint seed , GeneralObjectInfo info,  uint lightIndicesCount , uint lightOffset){
+ReservoirDI ReSTIR_DI_generation(uint2 currentPixel , float2 prevUV , inout uint seed , GeneralObjectInfo info,  uint lightIndices[lg::MAX_LIGHT_PER_CELL] , uint lightCount){
     const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
     const uint2 prevCoords = (uint2)clamp(prevUV * float2(generalBuffer.screenWidth , generalBuffer.screenHeight) ,
                                           float2(0.0f , 0.0f) ,
@@ -941,7 +971,7 @@ ReservoirDI ReSTIR_DI_generation(uint2 currentPixel , float2 prevUV , inout uint
     // every light is visited in generateReservoir_DI , so there is nothing to collect from the last frame or from the neighbours . ( the reuse picks between
     // the reservoirs by a random number : it would bring the flashes back )
     ReservoirDI r;
-    generateReservoir_DI(r , seed , info , lightIndicesCount , lightOffset);
+    generateReservoir_DI(r , seed , info , lightIndices , lightCount);
     const uint M_CAP = 500u;
     if(r.M > M_CAP){
         r.weightSum *= float(M_CAP) / float(r.M);
@@ -975,6 +1005,143 @@ float3 traceRayReflection(const float3 direction , const float3 position , out f
     return (directDiffuse + load.lightInfo.specular) * load.lightInfo.shadow + indirect* load.lightInfo.shadow;
 }
 
+// Cascade radiance
+namespace RC
+{
+    // the place of the world point P in the GRID OF THE PROBES of the cascade 0 , as a float : the probes are attached to the tiles of the SCREEN ( not to the world ) , so the
+    // point is projected to the screen first . the probe i stands in the middle of its tile , so its centre is at the integer i in these units :
+    //   floor( probePos )  - the probe on the left / top of the point , the next one is + 1 , and  probePos - floor( probePos )  is the weight of the next one ( the bilinear )
+    // returns false if there is no probe for the point : it is behind the camera , or outside of the screen ( the probes of the screen know nothing about it )
+    // it does not look at the depth : a point hidden behind something else gets the place of the pixel in front of it , the caller compares the depth / the normal if it matters
+    bool findProbePosition(const float3 P , out float2 probePos)
+    {
+        probePos = float2(0.0f , 0.0f);
+
+        const float4 clipPos = mul(generalBuffer.viewProj , float4(P , 1.0f));
+        if(clipPos.w <= 0.0f) return false;
+
+        float2 uv = (clipPos.xy / clipPos.w) * 0.5f + 0.5f;
+        // the same flip as everywhere : the pixel ( 0 , 0 ) is the top left corner , the NDC y points up
+        uv.y = 1.0f - uv.y;
+        if(any(uv < 0.0f) || any(uv >= 1.0f)) return false;
+
+        const RC::CascadeInfo cascade = RCCascadesBuffer[0];
+        const float2 pixel = uv * float2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+        probePos = pixel / cascade.PROBE_RESOLUTION - 0.5f;
+        return true;
+    }
+
+    // the probe of the cascade 0 that is the NEAREST to P : the coordinate ( the column and the row of the tile ) , not an index . int2( -1 , -1 ) if there is no probe
+    // the nearest one is the tile that the point falls into , which is the rounding of probePos
+    int2 findProbe(const float3 P)
+    {
+        float2 probePos;
+        if(!findProbePosition(P , probePos)) return int2(-1 , -1);
+
+        const RC::CascadeInfo cascade = RCCascadesBuffer[0];
+        // the last row / column of the tiles is cut by the edge of the screen , but a probe is there : the number of the probes is what the image holds
+        const int2 probeCount = int2(cascade.CASCADE_X , cascade.CASCADE_Y) / int(cascade.BUILD_SIZE);
+        return clamp(int2(floor(probePos + 0.5f)) , int2(0 , 0) , probeCount - 1);
+    }
+
+    // hitDistance : the distance of the hit that the probes see in the direction ( meters ) , for the radius of the filter of the denoiser : the mean of the distances of the
+    // hits ( the sky : 1000 ) with the same weights as the colour . it is 1000 when there is no probe
+    float3 processRC(const float3 dir , const float3 P , out float hitDistance)
+    {
+        hitDistance = 1000.0f;
+        float2 probePos;
+        if(!findProbePosition(P , probePos))
+        {
+            return sampleSkybox(dir);
+        }
+
+        const RC::CascadeInfo c = RCCascadesBuffer[0];
+        const int buildSize = int(c.BUILD_SIZE);
+        const int2 probeCount = int2(c.CASCADE_X , c.CASCADE_Y) / buildSize;
+
+        // the PROBE : the base is the probe on the left / top of the point , the fraction is how far the point is from it
+        const int2 probeBase = int2(floor(probePos));
+        const float2 probeFrac = probePos - float2(probeBase);
+
+        // the DIRECTION : the same for the block of every probe
+        const float2 texelPos = octahedralEncode(dir) * float(buildSize) - 0.5f;
+        const int2 texelBase = int2(floor(texelPos));
+        const float2 texelFrac = texelPos - float2(texelBase);
+
+        // N = 1 : the offsets 0 and 1 from the base ( the 2 x 2 of the bilinear ) , a bigger N gives a wider window with the weights of the far ones smaller
+        const int PROBE_SAMPLE_COUNT = 1;
+        const int BUILD_SAMPLE_COUNT = 1;
+
+        float weightSum = 0.0f;
+        float3 result = 0.0f;
+        // the alpha of the images is packed ( RC::packHit ) : the samples are unpacked first , the hits are counted by their weights
+        float hitWeight = 0.0f;
+        float hitDistanceSum = 0.0f;
+        float missDistanceSum = 0.0f;
+
+        [unroll]
+        for(int probeY = 1 - PROBE_SAMPLE_COUNT ; probeY <= PROBE_SAMPLE_COUNT ; probeY++)
+        {
+            [unroll]
+            for(int probeX = 1 - PROBE_SAMPLE_COUNT ; probeX <= PROBE_SAMPLE_COUNT ; probeX++)
+            {
+                const int2 currentProbe = probeBase + int2(probeX , probeY);
+                if(any(currentProbe < 0) || any(currentProbe >= probeCount)) continue;
+
+                const uint probeIndex = c.PROBE_OFFSET + uint(currentProbe.y) * c.PROBE_PER_ROW + uint(currentProbe.x);
+                if(RCProbeBuffer[probeIndex].validProbe == 0u) continue;
+
+                const float2 probeDistance = abs(float2(probeX , probeY) - probeFrac);
+                const float probeWeight = saturate(1.0f - probeDistance.x / float(PROBE_SAMPLE_COUNT)) * saturate(1.0f - probeDistance.y / float(PROBE_SAMPLE_COUNT));
+                if(probeWeight <= 0.0f) continue;
+
+                [unroll]
+                for(int buildY = 1 - BUILD_SAMPLE_COUNT ; buildY <= BUILD_SAMPLE_COUNT ; buildY++)
+                {
+                    [unroll]
+                    for(int buildX = 1 - BUILD_SAMPLE_COUNT ; buildX <= BUILD_SAMPLE_COUNT ; buildX++)
+                    {
+                        const int2 currentBuild = texelBase + int2(buildX , buildY);
+                        // since we dont want to touch other probes
+                        if(any(currentBuild < 0) || any(currentBuild >= buildSize)) continue;
+
+                        const float2 texelDistance = abs(float2(buildX , buildY) - texelFrac);
+                        const float texelWeight = saturate(1.0f - texelDistance.x / float(BUILD_SAMPLE_COUNT)) * saturate(1.0f - texelDistance.y / float(BUILD_SAMPLE_COUNT));
+                        if(texelWeight <= 0.0f) continue;
+
+                        // the corner of the block of the probe + the texel in it
+                        const int2 pixel = currentProbe * buildSize + currentBuild;
+
+                        const float weight = probeWeight * texelWeight;
+                        const float4 sampleData = RCImages[0][uint2(pixel)];
+                        bool sampleHit;
+                        float sampleDistance;
+                        RC::unpackHit(sampleData.a , sampleHit , sampleDistance);
+
+                        result += weight * sampleData.xyz;
+                        weightSum += weight;
+                        if(sampleHit)
+                        {
+                            hitWeight += weight;
+                            hitDistanceSum += weight * sampleDistance;
+                        }
+                        else
+                        {
+                            missDistanceSum += weight * sampleDistance;
+                        }
+                    }
+                }
+            }
+        }
+
+        if(weightSum <= 0.0f) return sampleSkybox(dir);
+
+        // the distance of the hits if there are any , of the misses if there are not
+        hitDistance = (hitWeight > 0.0f) ? (hitDistanceSum / hitWeight) : (missDistanceSum / weightSum);
+        return result / weightSum;
+    }
+}
+
 void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const uint2 pixel){
     uint2 size = DispatchRaysDimensions().xy;
     float2 uv = (float2(pixel) + 0.5) / float2(size);
@@ -984,10 +1151,10 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     prevUV.y = 1.0f - prevUV.y;
     const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
     uint2 prevPixel = uint2(prevUV * float2(size) - 0.5f);
-    uint lightCount , lightOffset;
-    findLightIndices(pixel , lightOffset , lightCount);
+    uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
+    findLightIndices(info.P , lightIndices , lightCount);
 
-    ReservoirDI di = ReSTIR_DI_generation(pixel ,prevUV , load.seed , info , lightCount , lightOffset );
+    ReservoirDI di = ReSTIR_DI_generation(pixel ,prevUV , load.seed , info , lightIndices , lightCount );
 
     float3 totalDiffuse = 0.0f;
     float3 totalSpecular = 0.0f;   
@@ -1023,15 +1190,50 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     }
 
     ReservoirGI gi = (ReservoirGI)0;
-    if(load.fromReflection){
-        gi = ReSTIRGI::generateReservoirGI(info , pixel , load.seed);
-    }else{
-        gi = ReSTIRGI::ReSTIR_GI_generation(load.seed , info);
+    if(features.ReSTIRGI)
+    {
+        if(load.fromReflection){
+            gi = ReSTIRGI::generateReservoirGI(info , pixel , load.seed);
+        }else{
+            gi = ReSTIRGI::ReSTIR_GI_generation(load.seed , info);
+        }
+        if(gi.M > 0u){
+            const float3 L = normalize(gi.samplePos - info.P);
+            diffuseHitDistance = length(gi.samplePos - info.P);
+            totalIndirect = gi.radiance * ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic) * gi.W;
+        }
     }
-    if(gi.M > 0u){
-        const float3 L = normalize(gi.samplePos - info.P);
-        diffuseHitDistance = length(gi.samplePos - info.P);
-        totalIndirect += gi.radiance * ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic) * gi.W;
+    else if(features.RadianceCascade)
+    {
+        // the distance of the hit that the probes see : it is not used yet ( diffuseHitDistance is for the radius of the filter of the denoiser )
+        float rcHitDistance = 0.0f;
+        // we need halfVector
+        const bool reflective = ReSTIRGI::isSpecularMode(info.roughness ,info.metallic);
+        if(!reflective)
+        {
+            float pdf= 0.0f;
+            float3 L = 0.0f;
+            ReSTIRGI::sampleDiffuseDirection(float2(randNoise() , randNoise()) , info.N , L , pdf);
+            if(pdf > 0.0f)
+            {
+                const float3 brdf = ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic);
+                totalIndirect = brdf * RC::processRC(L , info.P , rcHitDistance) / pdf;
+                diffuseHitDistance = rcHitDistance;
+            }   
+
+        }
+        else
+        {
+            float pdf= 0.0f;
+            float3 L = 0.0f;
+            ReSTIRGI::sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
+            if(pdf > 0.0f)
+            {
+                const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
+                totalIndirect = fcos * RC::processRC(L , info.P , rcHitDistance) / pdf;
+                diffuseHitDistance = rcHitDistance;
+            }   
+        }
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour
     
@@ -1050,8 +1252,6 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
         if(features.RayQuerySunSampleCount > 0 && sunNdotL > 0.0f){
             sunShadow =0.0f;
-            // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra .
-            // the disc in the sky still has SUN_ANGULAR_RADIUS
             const float sunCosAlpha = cos(sunBuffer.sourceRadius);
             const float3 sunOrigin = pos + L * 0.01f;
             [loop]
@@ -1076,8 +1276,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             float visibleSum = 0.0f;
             [loop]
             for(uint i = 0 ; i < lightCount ;i++){
-                const uint tileLightIndex = lightOffset + i;
-                const uint lightID = tileLightIndices[tileLightIndex];
+                const uint lightID = lightIndices[i];
                 lg::LightSource light = lightBuffer[lightID];
                 float3 L = light.position - info.P;
                 L = normalize(L);
@@ -1120,9 +1319,30 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     const float sunShadowLifted = lerp(features.shadowMinimum , 1.0f , sunShadow);
     const float totalWeight = sunLuminance + lightLuminance;
     totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
+    uint shadowFrames = 1u;
     if(validUV){
-        const float prevShadow = prevShadowImage[prevPixel].x;
-        totalShadow = lerp(totalShadow , prevShadow , features.temporalShadowK);
+        const float2 prevShadowData = prevShadowImage[prevPixel];
+        const uint count = uint(prevShadowData.y);
+        const float prevShadow = prevShadowData.x;
+
+        // if the area is not affected by shadow , we dont want to lerp it with shadow, since its not in shadow now
+        if(prevShadow != 1.0f && totalShadow != 1.0f)
+        {
+            // if its not 1.0f
+            // means that in prev frame there was a shadow in this place
+            const float difference = abs(prevShadow - totalShadow);
+            if(difference <= SHADOW_HISTORY_TOLERANCE)
+            {
+                shadowFrames = min(count + 1u , MAX_SHADOW_FRAME);
+                const float alpha = 1.0f / float(shadowFrames);
+                totalShadow = lerp(prevShadow , totalShadow, alpha);
+            }
+
+        }
+            // if current prev shadow is 1.0f 
+            // it means that there wasnt any shadow at all
+            // so the shadowFrames is 1
+            // total shadow stays the same without temporal occlusion
     }
 
     const float3 albedoSafe = max(info.albedo , 0.02f);
@@ -1133,6 +1353,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     if(!load.fromReflection) load.lightInfo.specularHitDistance = min(specularHitDistance , 10000.0f);
     load.pixelInfo.viewDir = info.P + nextDir * specularHitDistance;
     load.lightInfo.shadow = totalShadow;
+    load.lightInfo.shadowFrames = float(shadowFrames);
     load.lightInfo.diffuse = diffuseOut;
     load.lightInfo.indirect = totalIndirect / albedoSafe;
     load.lightInfo.specular = totalSpecular;

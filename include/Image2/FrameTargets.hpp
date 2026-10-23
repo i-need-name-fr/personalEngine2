@@ -215,9 +215,13 @@ namespace mox{
                 metallicImage=  std::make_shared<RenderImage2>(info);
                 pixelCheck=  std::make_shared<RenderImage2>(info);
 
+                // the shadow : two channels ( R32G32 ) , the clear value is 1 in the first one ( no shadow ) and 0 in the second one
                 info.clear.float32[0] = 1.0f;
+                info.imageFormat = VK_FORMAT_R32G32_SFLOAT;
                 shadowImage[0] =  std::make_shared<RenderImage2>(info);
                 shadowImage[1] =  std::make_shared<RenderImage2>(info);
+                // the images after it ( the occlusion ) are still one channel
+                info.imageFormat = VK_FORMAT_R32_SFLOAT;
 
                 ambientOcclusionImage[0] =  std::make_shared<RenderImage2>(info);
                 ambientOcclusionImage[1] =  std::make_shared<RenderImage2>(info);

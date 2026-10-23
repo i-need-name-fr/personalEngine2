@@ -9,7 +9,6 @@
 
 [[vk::binding(6 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 [[vk::binding(7 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 [[vk::binding(9 , 0)]] RWStructuredBuffer<Vertex> vertices;
 [[vk::binding(10 , 0)]] RWStructuredBuffer<uint> indices;
@@ -33,6 +32,10 @@
 [[vk::image_format("rgba16f")]]
 [[vk::binding(3 , 2)]] RWTexture2D<float4> RCImages[];
 
+[[vk::binding(0 , 3)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
+[[vk::binding(1 , 3)]] RWStructuredBuffer<lg::LightCell> lightCells;
+[[vk::binding(2 , 3)]] ConstantBuffer<lg::GridCascadeInfo> gridInfo;
+
 struct [raypayload] ShadowRayPayLoad{
     bool inShadow : read(closesthit , miss, caller) : write(closesthit , miss , caller);
     float depth : read(closesthit , miss, caller) : write(closesthit , miss , caller);
@@ -43,6 +46,7 @@ struct [raypayload] RayPayLoad{
     uint seed : read(closesthit , miss, caller) : write(closesthit , miss , caller);
     uint cascadeID : read(closesthit , miss, caller) : write(closesthit , miss , caller);
     float alpha : read(closesthit , miss, caller) : write(closesthit , miss , caller);
+    float hitDistance : read(closesthit , miss, caller) : write(closesthit , miss , caller);
     uint mode : read(closesthit , miss, caller) : write(closesthit , miss , caller);
 };
 
@@ -95,16 +99,38 @@ void computeLight(GeneralObjectInfo info , float3 L , out float3 diffuse , out f
     diffuse = kD * albedo / PI;
 }
 
-void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightCount){
-    firstLight = 0;
+inline float3 getGridOrigin(const float3 playerPosition) {
+    const float3 snapped = floor(playerPosition / lg::GRID_CELL_SIZE) * lg::GRID_CELL_SIZE;
+    return snapped - float3(lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE, lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE,lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE);
+}
+
+inline float3 translateToGridPos(const float3 position , const float3 playerPosition) {
+    return position - getGridOrigin(playerPosition);
+}
+
+inline int32_t translatePosToCellIndex(const float3 gridPos) {
+    const float3 cell = floor(gridPos / lg::GRID_CELL_SIZE);
+    const float n = lg::GRID_SIZE;
+    if(cell.x < 0.0f || cell.y < 0.0f || cell.z < 0.0f || cell.x >= n || cell.y >= n || cell.z >= n) return NON_VALID_SLOT;
+
+    const int32_t count = int(lg::GRID_SIZE);
+    return int32_t(cell.x) + count * (int32_t(cell.y) + count * int32_t(cell.z));
+}
+
+int findGridSlot(const float3 P){
+    const float3 gridPos = translateToGridPos(P , generalBuffer.playerPosition);
+    return translatePosToCellIndex(gridPos);
+}
+
+void findLightIndices(const float3 P , out uint lightIndices[lg::MAX_LIGHT_PER_CELL] ,out uint lightCount){
     lightCount = 0;
+    const int gridID = findGridSlot(P);
+    if(gridID == NON_VALID_SLOT) return;
 
-    uint2 tileCoord = currentPixel / forwardInfo.TILE_SIZE;
-    uint tileIndex = tileCoord.x + tileCoord.y * forwardInfo.TILE_PER_ROW;
-
-    // forward.hlsl's InterlockedAdd keeps counting past MAX_LIGHTS (it only stops WRITING there)
-    lightCount = min(lightCountPerTile[tileIndex] , (uint)MAX_LIGHTS);
-    firstLight = tileIndex * MAX_LIGHTS;
+    const lg::LightCell cell = lightCells[gridID];
+    // the grid shader keeps counting past MAX_LIGHT_PER_CELL ( it only stops WRITING there )
+    lightCount = min(cell.totalLightCount , (uint)lg::MAX_LIGHT_PER_CELL);
+    lightIndices = cell.lightIndices;
 }
 
 // the attenuation of a point light : the physical falloff times a window that reaches exactly 0 at lightRadius .
@@ -354,6 +380,78 @@ GeneralObjectInfo readData(const float2 barycentrics){
     return info;
 }
 
+float3 sampleSkybox(const float3 N){
+    float3 result = 0.0f;
+    // 0 samples : no sky light ( and no division by 0 below )
+    if(features.skyboxSampleCount == 0u) return result;
+    [loop]
+    for(uint i = 0 ; i  < features.skyboxSampleCount ; i++){
+        const float3 direction = randomInHemisphere(N);
+        result += skybox.SampleLevel(samp , direction , 0).xyz;
+    }
+    result /= float(features.skyboxSampleCount);
+    return result;
+}
+
+float3 computeLightAt(GeneralObjectInfo data, inout uint seed , const float3 V){
+    // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear * 
+    uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
+    uint2 pixel = DispatchRaysIndex().xy;
+
+    findLightIndices(data.P , lightIndices , lightCount);
+
+    
+    const float3 saveAlbedo = max(data.albedo , 1e-20);
+
+    float3 result = 0.0f ;
+    if(lightCount){
+        const uint id = (uint)(rand(seed) * lightCount);
+        lg::LightSource light = lightBuffer[lightIndices[id]];
+        float3 diffuse, specular;
+
+        float3 L = light.position - data.P;
+        L = normalize(L);
+        float3 lightPos = randomInLightRadius(seed , light , L);
+        float3 realL = lightPos - data.P;
+        const float dist = length(realL);
+        realL = normalize(realL);
+        
+        computeLight(data ,realL , diffuse , specular );
+
+        const float NdotL = saturate(dot(data.N , realL));  
+        float shadow = calculateShadowInSphere(seed , light , data.P , data.N);
+        float window = lightAttenuation(light, dist);
+        diffuse /= saveAlbedo;
+        result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
+    }else{
+        result =  0.01f;
+    }
+
+    if(sunBuffer.intensity > 0.0f)
+    {
+        float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
+        // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
+        const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
+        const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+        computeLight(data , L , sunDiffuse , sunSpecular);
+        sunDiffuse /= saveAlbedo;
+        result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+    }
+
+    {
+        const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
+        const float NdotV = max(dot(data.N , V) , 0.0001f);
+        const float3 F = F_fresnel(F0 , NdotV);
+        const float3 kD = (1.0f - F) * (1.0f - data.metallic);
+        result += sampleSkybox(data.N) * kD;
+    }
+
+    result *= saveAlbedo;
+
+    return result;
+}
+
+
 // the pixel of the screen where a point of the world is ( -999 behind the camera ) : the lamps of the Forward+ tile of that pixel light the point
 int2 convertToScreenPixel(const float3 position){
     const float4 clipPos =mul(generalBuffer.viewProj , float4(position , 1.0f));
@@ -368,65 +466,14 @@ int2 convertToScreenPixel(const float3 position){
 void processPixel(inout RayPayLoad load , in float2 barycentrics){
     GeneralObjectInfo info = readData(barycentrics);
 
-    // the tile of the HIT point ( not of the probe : the probes are all around the player , most of them are off the screen )
-    const int2 pixel = convertToScreenPixel(info.P);
-    const int2 screenSize = int2(generalBuffer.screenWidth , generalBuffer.screenHeight);
-    const bool validPixel = all(pixel >= int2(0 , 0)) && all(pixel < screenSize);
-    float3 totalDiffuse = 0.0f;
-    float3 totalSpecular = 0.0f;
-
-    // lets start with sun
-    const float3 saveAlbedo = max(info.albedo  , 1e-20);
-    float sunLuminance = 0.0f;
-
-    {
-        if(sunBuffer.intensity > 0.0f){
-            float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
-            // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
-            const float3 L = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
-            const float sunShadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , 1000.0f);
-            computeLight(info , L , sunDiffuse , sunSpecular);
-            sunDiffuse /= saveAlbedo;
-            totalDiffuse += (sunDiffuse) *  clamp(dot(info.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
-            totalSpecular = sunSpecular * sunShadow  *  clamp(dot(info.N , L),  0.0f , 1.0f) * sunBuffer.diffuse;
-        }else{
-            totalDiffuse +=  0.01f;
-        }
-    }
-    float lightLuminance = 0.0f;
-    
-    // now for lights
-    if(validPixel){
-        uint lightCount , lightOffset;
-        findLightIndices(pixel , lightOffset , lightCount);
-        if(lightCount > 0){
-
-            const uint id = (uint)(rand(load.seed) * lightCount) + lightOffset;
-            lg::LightSource light = lightBuffer[tileLightIndices[id]];
-            float3 diffuse = 0.0, specular = 0.0f;
-            float3 toLight = normalize(light.position - info.P);
-            const float3 lightPos = randomInLightRadius(load.seed , light , toLight);
-            float3 L = lightPos - info.P;
-            const float d = length(L);
-            L = normalize(L);
-            if(calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , d) == 1.0f){
-                computeLight(info , L , diffuse , specular);
-                diffuse /= saveAlbedo;
-                const float NdotL = saturate(dot(info.N , L));  
-                float shadow = calculateShadowInSphere(load.seed , light , info.P , info.N);
-                float window = lightAttenuation(light, d);
-                totalDiffuse += NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
-                totalSpecular += NdotL * light.diffuse * (specular) * shadow  * window * lightCount;
-            }else{
-                totalDiffuse +=  0.01f;
-            }
-
-        }
-    }
-
-    load.finalColor = totalDiffuse * info.albedo + totalSpecular;
+    // the light of the hit point : the same as the light of a hit of ReSTIR GI ( computeLightAt ) - the sun , one lamp of the world grid ( it does not need the screen : the hit
+    // can be anywhere ) and the AMBIENT of the sky ( kD ) , which fills the shadows . without the ambient the shadows of the probes were black , and the light that the
+    // probes gave to the pixels in the shadow was zero
+    load.finalColor = computeLightAt(info , load.seed , info.V);
     // the ray hit something inside of its interval : what is behind the surface does not count
     load.alpha = 1.0f;
+    // the distance to the hit : the denoiser takes the radius of its filter from it
+    load.hitDistance = RayTCurrent();
 }
 
 [shader("closesthit")]
@@ -440,7 +487,13 @@ void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr)
         }
         load.finalColor = 0.0f;
         load.alpha = 1.0f;
+        load.hitDistance = RayTCurrent();
         return;
     }
-    processPixel(load , attr.barycentrics);
+
+    const float3 V = WorldRayDirection();
+    GeneralObjectInfo info = readData(attr.barycentrics);
+    load.finalColor = computeLightAt(info , load.seed , V);
+    load.hitDistance = RayTCurrent();
+    load.alpha = 1.0f;
 }

@@ -32,6 +32,8 @@
 #include "include/GraphRender2/GraphRender2.hpp"
 #include "include/generalPipelines2/RayTracing.hpp"
 #include "include/RTCompileObjects/RTCompileObjects.hpp"
+#include "include/LightManager/LightManager.hpp"
+#include "include/generalPipelines2/RadianceCascade.hpp"
 
 namespace gui = ImGui;
 
@@ -128,6 +130,9 @@ namespace mox{
             models.clear();
             buffers = nullptr;
             renderImages = nullptr;
+            rc = nullptr;
+            RCManager = nullptr;
+            light_m = nullptr;
             tlas = nullptr;
             Mesh2::performDelete();
             manager = nullptr;
@@ -182,6 +187,11 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createAllPasses() noexcept{
             try{
                 graph = std::make_shared<GraphRender2>();
+
+                {
+                    const auto result = graph->processInputParameter(light_m->lightBuffer.get() , "lightBuffer");
+                    if(!result.has_value()) return result;
+                }
 
                 {
                     const auto result = graph->processInputParameter(renderImages.get());
@@ -317,6 +327,25 @@ namespace mox{
                 }
 
                 {
+                    RadianceCascade::CreateInfo info{};
+                    info.context = context.get();
+                    info.as = tlas.get();
+                    info.manager = manager.get();
+                    info.probes = RCManager.get();
+                    info.lights = light_m.get();
+                    info.placementPath = getShaderPath("../Shaders/RadianceCascade/RCplacement");
+                    info.rayGenerationPath = getShaderPath("../Shaders/RadianceCascade/RCgeneration");
+                    info.missPath = getShaderPath("../Shaders/RadianceCascade/RCmiss");
+                    info.shadowMissPath = getShaderPath("../Shaders/RadianceCascade/RCshadowMiss");
+                    info.hitPath = getShaderPath("../Shaders/RadianceCascade/RChit");
+                    info.shadowAnyHitPath = getShaderPath("../Shaders/RadianceCascade/RCshadowAnyHit");
+                    info.shadowHitPath = getShaderPath("../Shaders/RadianceCascade/RCshadowHit");
+                    info.combinePath = getShaderPath("../Shaders/RadianceCascade/CombineCascades");
+
+                    rc = std::make_shared<RadianceCascade>(info);
+                }
+
+                {
                     RayTracing::CreateInfo info{};
                     info.as = tlas.get();
                     info.context = context.get();
@@ -329,6 +358,8 @@ namespace mox{
                     info.giHitPath = getShaderPath("../Shaders/RayTracing/GI_hit");
                     info.giMissPath = getShaderPath("../Shaders/RayTracing/GI_miss");
                     info.manager = manager.get();
+                    info.lights = light_m.get();
+                    info.probes = RCManager.get();
 
                     rt = std::make_shared<RayTracing>(info);
                 }
@@ -359,6 +390,7 @@ namespace mox{
                     atmosphere.get() ,   // the sky : the sky view LUT and the cube
                     render.get() ,       // the g buffer
                     forward.get() ,      // the lamps of every tile
+                    rc.get() ,           // Radiance Cascade : the probes on the surfaces , their rays , the merge of the cascades
                     rt.get(),
                     ao.get() ,           // the occlusion
                     bilateral.get() ,    // the filter of the shadows and of the occlusion
@@ -483,6 +515,22 @@ namespace mox{
                     manager = std::make_shared<TextureManager2>(info);
                 }
 
+                {
+                    LightManager::CreateInfo info{};
+                    info.context = context.get();
+                    info.shaderPath = getShaderPath("../Shaders/LightGridUpdate/LightGridUpdate");
+                    info.user = context->user.get();
+
+                    light_m = std::make_shared<LightManager>(info);
+                }
+
+                {
+                    RCProbeManager::CreateInfo info{};
+                    info.context = context.get();
+
+                    RCManager = std::make_shared<RCProbeManager>(info);
+                }
+
                 // multiscatter
                 MultiScatter::CreateInfo mlInfo{};
                 mlInfo.context = context.get();
@@ -581,19 +629,6 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<void> createModels() noexcept{
             try{
-                // // stone 1
-                // {
-                //     Model2::CreateInfo info{};
-                //     info.color = glm::vec3(0.0f);
-                //     info.isALightObject = false;
-                //     info.path = "../models/stone_01/stone_01.obj";
-
-                //     models.push_back(std::make_shared<Model2>(info));
-                //     glm::mat4 model(1.0f);
-                //     model = glm::translate(model , glm::vec3(-2.0f));
-                //     model = glm::scale(model , glm::vec3(50.0f));
-                //     models[0]->setMatrix(model , 0);
-                // }
 
                 // stone 1
                 {
@@ -610,18 +645,6 @@ namespace mox{
                     models[0]->setMatrix(model , 0);
                 }
 
-                // {
-                //     Model2::CreateInfo info{};
-                //     info.color = glm::vec3(0.0f);
-                //     info.isALightObject = false;
-                //     info.path = "../models/rock_09/rock_09.obj";
-
-                //     models.push_back(std::make_shared<Model2>(info));
-                //     glm::mat4 model(1.0f);
-                //     model = glm::translate(model , glm::vec3(-20.0f ,20.0f, 0.0f));
-                //     model = glm::scale(model , glm::vec3(30.0f));
-                //     models[2]->setMatrix(model , 0);
-                // }
 
 
             }
@@ -659,34 +682,13 @@ namespace mox{
                 lights[1].position = glm::vec3(2.2f , 3.7f , 27.0f);
                 lights[2].position = glm::vec3(-19.0f , 3.5 , 19);
                 lights[3].position = glm::vec3(-5.7f , 9.5f, -16.0f);
-                allLights = std::move(lights);
-
-                buffers->lightBuffer->recordData(translateToSpan(allLights));
+                // the names : the lamps are found by them , not by the index in a vector . the grid and the buffers are written by light_m->updateGrid every frame
+                for(uint32_t i = 0 ; i < lights.size() ; i++){
+                    light_m->addLight(lights[i] , std::format("light_{}" , i));
+                }
             }
             return {};
         }
-
-        void updateMeshesPos() noexcept {
-            const float time = glfwGetTime();
-            // glm::mat4 model = glm::mat4(1.0f);
-            // model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 20.0f)) , 0.0f ));
-            // model = glm::rotate(model  ,glm::radians(time * 20.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
-            // model = glm::translate(model , glm::vec3(7.0f , 5.0f , 0.0f));
-            // model = glm::scale(model , glm::vec3(0.3f));
-            // meshes[1]->updateMatrix(model ,2);
-        }
-
-        void updateLightPoses() noexcept{
-            const float time = glfwGetTime();
-            // glm::mat4 model = glm::mat4(1.0f);
-            // model = glm::translate(model , glm::vec3(-12.0f , 14.0f , 6.0f));
-            // model = glm::translate(model , glm::vec3(0.0f,glm::cos(glm::radians(time * 40.0f)) , 0.0f ));
-            // model = glm::rotate(model  ,glm::radians(time * 40.0f) , glm::vec3(0.0f , 1.0f , 0.0f));
-            // model = glm::translate(model , glm::vec3(20.0f , 0.0f , 0.0f));
-            // model = glm::scale(model , glm::vec3(0.3f));
-            // allLights[3].position = model[3];
-        }
-
 
         void recordCmd(VkCommandBuffer& cmd , const uint32_t index) noexcept{
             {
@@ -844,10 +846,7 @@ namespace mox{
             buffers->features->updateBufferCmd(cmd ,features , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
             buffers->forwardInfo->updateBufferCmd(cmd ,forwardData , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
 
-            updateLightPoses();
-            updateMeshesPos();
-
-            buffers->lightBuffer->updateBufferCmd(cmd , translateToSpan(allLights) , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+            light_m->updateGrid(cmd);
 
             Mesh2::updateMeshData(cmd);
             tlas->updateTLAS(cmd);
@@ -1142,6 +1141,7 @@ namespace mox{
             {
                 if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
                     info.ReSTIRGI = !info.ReSTIRGI;
+                    info.RadianceCascade = false;
                 }
             }
             gui::EndDisabled();
@@ -1165,6 +1165,16 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
+            gui::BeginDisabled(info.PT || !info.RT);
+            {
+                if(gui::Button(info.RadianceCascade ? "Radiance Cascade: ON" : "Radiance Cascade: OFF")){
+                    info.RadianceCascade = !info.RadianceCascade;
+                    info.ReSTIRGI = false;
+                }
+            }
+            gui::EndDisabled();
+            gui::Separator();
+
 
             // fog render
             gui::BeginDisabled(info.PT);
@@ -1182,6 +1192,8 @@ namespace mox{
         pSourceBuffers buffers; // done
         pTLAS2 tlas{}; // created
         pTextureManager2 manager; // created
+        pLightManager light_m;
+        pRCProbeManager RCManager;
 
         pAtmosphereScattering atmosphere{};
         pDeferredRender render{};
@@ -1202,6 +1214,7 @@ namespace mox{
         // here will be imgui
         pImgui2 imgui{};
         pRayTracing rt{};
+        pRadianceCascade rc{};
 
         std::vector<pMesh2> meshes{};
         std::vector<pModel2> models{};
@@ -1213,7 +1226,6 @@ namespace mox{
         static constexpr float FLOOR_Y = -2.0f; 
         float dt = 0.0f;
         uint32_t requiredMode = RasterizationRequired;
-        std::vector<lg::LightSource> allLights;
 
         static constexpr uint32_t lightCount = 4;
 
