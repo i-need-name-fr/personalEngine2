@@ -6,6 +6,7 @@
 #include "include/Image2/ViewPerMip.hpp"
 #include "include/Image2/FrameTargets.hpp"
 #include "include/Object2/Model2.hpp"
+#include "include/Object2/Model3.hpp"
 #include "include/AS2/TLAS2.hpp"
 #include "include/Object2/cube.hpp"
 #include "include/Image2/MultiViewImage2.hpp"
@@ -632,13 +633,13 @@ namespace mox{
 
                 // stone 1
                 {
-                    Model2::CreateInfo info{};
+                    // the fort from glTF : the node transforms are baked into the vertices , the textures are found next to the .gltf
+                    Model3::CreateInfo info{};
                     info.color = glm::vec3(0.0f);
-                    info.isALightObject = false;
-                    info.path = "../models/modular_fort_01/modular_fort_01.obj";
+                    info.path = "../models/modular_fort_01/modular_fort_01.gltf";
                     info.metallic = 0.0f;
                     info.roughness = 1.0f;
-                    models.push_back(std::make_shared<Model2>(info));
+                    models.push_back(std::make_shared<Model3>(info));
                     glm::mat4 model(1.0f);
                     model = glm::translate(model , glm::vec3(-40.0f ,-2.0f, 0.0f));
                     model = glm::scale(model , glm::vec3(1.0f));
@@ -1217,7 +1218,7 @@ namespace mox{
         pRadianceCascade rc{};
 
         std::vector<pMesh2> meshes{};
-        std::vector<pModel2> models{};
+        std::vector<pModel3> models{};
 
         glm::mat4 prevVP{1.0f};
         bool firstIteration{true};

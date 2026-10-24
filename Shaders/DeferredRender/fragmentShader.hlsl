@@ -82,17 +82,39 @@ PsOutput main(VsOutput input){
 
     if(lut.metallicTextureID != NON_VALID_SLOT){
         const uint id = virtualTextureIndex[lut.metallicTextureID];
-        output.metallic = allTextures[id].Sample(samp , uv).x;
+        // RGBA8 map : a grey picture has the value in every channel , an ARM map has the metallic in B
+        output.metallic = allTextures[id].Sample(samp , uv).z;
     }else{
         output.metallic = lut.metallic;
     }
 
     if(lut.roughnessTextureID != NON_VALID_SLOT){
         const uint id = virtualTextureIndex[lut.roughnessTextureID];
-        output.roughness = allTextures[id].Sample(samp , uv).x;
+        // RGBA8 map : a grey picture has the value in every channel , an ARM map has the roughness in G
+        output.roughness = allTextures[id].Sample(samp , uv).y;
     }else{
         output.roughness = lut.roughness;
     }
+
+    if(lut.armTextureID != NON_VALID_SLOT)
+    {
+        const uint id = virtualTextureIndex[lut.armTextureID];
+        const float3 arm = allTextures[id].Sample(samp, uv).xyz;
+        // will add occlusion later
+        output.roughness = arm.y;
+        output.metallic = arm.z;
+    }
+
+
+    // the ambient occlusion of the material goes into the ALPHA of the albedo image ( rgba16f , nobody reads its alpha : every shader takes .xyz ) . 1 : there is no occlusion
+    // ( the material has no map ) . the value is the red channel of the map ( a one channel map is loaded as it is , see aoPath in Mesh2 ) . it is not used by the lighting yet
+    float ambientOcclusion = 1.0f;
+    if(lut.aoTextureID != NON_VALID_SLOT)
+    {
+        const uint id = virtualTextureIndex[lut.aoTextureID];
+        ambientOcclusion = allTextures[id].Sample(samp , uv).x;
+    }
+    output.albedo.a = ambientOcclusion;
 
     output.pixelCheck = COLOR_PIXEL;
     return output;

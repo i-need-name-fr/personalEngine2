@@ -361,13 +361,28 @@ GeneralObjectInfo readData(const float2 barycentrics){
     float metallic = lut.metallic;
     if(lut.metallicTextureID != NON_VALID_SLOT){
         const uint id = virtualTextureIndex[lut.metallicTextureID];
-        metallic = allTextures[id].SampleLevel(textureSampler , uv , 0).x;
+        // RGBA8 map : a grey picture has the value in every channel , an ARM map has the metallic in B
+        metallic = allTextures[id].SampleLevel(textureSampler , uv , 0).z;
     }
 
     float roughness = lut.roughness;
     if(lut.roughnessTextureID != NON_VALID_SLOT){
         const uint id = virtualTextureIndex[lut.roughnessTextureID];
-        roughness = allTextures[id].SampleLevel(textureSampler , uv , 0).x;
+        // RGBA8 map : a grey picture has the value in every channel , an ARM map has the roughness in G
+        roughness = allTextures[id].SampleLevel(textureSampler , uv , 0).y;
+    }
+
+    // the packed PBR map ( R occlusion , G roughness , B metallic ) : the same as the deferred render reads it , the occlusion is not used yet
+    if(lut.armTextureID != NON_VALID_SLOT){
+        const uint id = virtualTextureIndex[lut.armTextureID];
+        const float3 arm = allTextures[id].SampleLevel(textureSampler , uv , 0).xyz;
+        roughness = arm.y;
+        metallic = arm.z;
+    }
+
+
+    // the map of the ambient occlusion : not used yet
+    if(lut.aoTextureID != NON_VALID_SLOT){
     }
 
     GeneralObjectInfo info = (GeneralObjectInfo)0;

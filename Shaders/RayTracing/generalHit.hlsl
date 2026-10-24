@@ -69,6 +69,16 @@
 [[vk::binding(34 ,0)]] RWStructuredBuffer<uint> lightCountPerTile;
 [[vk::binding(35 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 
+// the G buffer of the LAST frame ( the images of the other parity ) : the same formats as the images of this frame
+[[vk::image_format("rgba32f")]]
+[[vk::binding(36 , 0)]] RWTexture2D<float4> prevPositionImage;
+
+[[vk::image_format("rgba16")]]
+[[vk::binding(37 , 0)]] RWTexture2D<float4> prevNormalImage;
+
+[[vk::image_format("r32f")]]
+[[vk::binding(38 , 0)]] RWTexture2D<float> prevDepthImage;
+
 [[vk::binding(0 , 2)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 [[vk::binding(1 , 2)]] RWStructuredBuffer<lg::LightCell> lightCells;
 [[vk::binding(2 , 2)]] ConstantBuffer<lg::GridCascadeInfo> gridInfo;
@@ -1061,7 +1071,7 @@ namespace RC
 
     // hitDistance : the distance of the hit that the probes see in the direction ( meters ) , for the radius of the filter of the denoiser : the mean of the distances of the
     // hits ( the sky : 1000 ) with the same weights as the colour . it is 1000 when there is no probe
-    float3 processRC(const float3 dir , const float3 P , out float hitDistance)
+    float3 processRC(const float3 dir , const float3 P , out float hitDistance , const bool currentImage)
     {
         hitDistance = 1000.0f;
         float2 probePos;
@@ -1128,7 +1138,7 @@ namespace RC
                         const int2 pixel = currentProbe * buildSize + currentBuild;
 
                         const float weight = probeWeight * texelWeight;
-                        const float4 sampleData = RCImages[0][uint2(pixel)];
+                        const float4 sampleData = (currentImage ? RCImages[RC::imageIndex(0u , generalBuffer.frameIndex)][uint2(pixel)] : RCImages[RC::prevImageIndex(generalBuffer.frameIndex)][uint2(pixel)]);
                         bool sampleHit;
                         float sampleDistance;
                         RC::unpackHit(sampleData.a , sampleHit , sampleDistance);
@@ -1155,6 +1165,42 @@ namespace RC
         hitDistance = (hitWeight > 0.0f) ? (hitDistanceSum / hitWeight) : (missDistanceSum / weightSum);
         return result / weightSum;
     }
+
+
+
+bool checkDisocclusion(uint2 pixel , uint2 prevPixel){
+
+    const float3 centerPosition = positionImage[pixel].xyz;
+    const float3 centerNormal = normalImage[pixel].xyz;
+
+    const float4 prevPositionSample = prevPositionImage[prevPixel];
+    const float3 nNormal = prevNormalImage[prevPixel].xyz;   
+
+    // w == 0 marks a sky texel written by the miss shader
+    if(prevPositionSample.w == 0.0f) return false;
+
+    const float positionDiff = length(centerPosition - prevPositionSample.xyz);
+    if(positionDiff > 0.05f) return false;
+
+    const float normalDot = dot(centerNormal , nNormal);
+    if(normalDot < 0.9f) return false;
+    
+    return true;
+}
+
+    float3 temporalReuse(const uint2 pixel , const bool validUV , const uint2 prevPixel , GeneralObjectInfo info , const float3 L)
+    {
+        if(validUV)
+        if(checkDisocclusion(pixel , prevPixel))
+        {
+            float rcHitDistance;
+            const float3 prevP = prevPositionImage[prevPixel].xyz;
+            const float3 prevColor = RC::processRC(L , prevP , rcHitDistance, false);
+            return prevColor;
+        }
+
+        return 0.0f;
+    }
 }
 
 void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const uint2 pixel){
@@ -1165,7 +1211,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     float2 prevUV = pos.xy * 0.5f + 0.5f;
     prevUV.y = 1.0f - prevUV.y;
     const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
-    uint2 prevPixel = uint2(prevUV * float2(size) - 0.5f);
+    // the pixel of the last frame that the point falls into . it used to be uint2( prevUV * size - 0.5 ) : it cuts to the pixel on the left / top of the nearest ones , so the
+    // history was read from a place that is up to a pixel off in ONE direction every frame , and the accumulated shadow drifted that way ( it floated )
+    uint2 prevPixel = min(uint2(max(prevUV * float2(size) , 0.0f)) , size - 1u);
     uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
     findLightIndices(info.P , lightIndices , lightCount);
 
@@ -1229,30 +1277,63 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             float pdf= 0.0f;
             float3 L = 0.0f;
             ReSTIRGI::sampleDiffuseDirection(float2(randNoise() , randNoise()) , info.N , L , pdf);
+            float3 rcResult = 0.0f;
             if(pdf > 0.0f)
             {
                 const float3 brdf = ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic);
-                totalIndirect = brdf * RC::processRC(L , info.P , rcHitDistance) / pdf;
+                rcResult  = brdf * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
                 diffuseHitDistance = rcHitDistance;
             }   
 
+            if(validUV)
+            {
+                const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
+                const float currentLum = luminance(rcResult);
+                const float prevLum = luminance(prevRC);
+                // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
+                const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
+                const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
+                const float alpha = lerp(0.7f , 1.0f , k);
+                rcResult = lerp(prevRC , rcResult , alpha);
+            }
+
+            totalIndirect = rcResult;
         }
         else
         {
             float pdf= 0.0f;
             float3 L = 0.0f;
+            float3 rcResult = 0.0f;
+
             ReSTIRGI::sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
             if(pdf > 0.0f)
             {
                 const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
-                totalIndirect = fcos * RC::processRC(L , info.P , rcHitDistance) / pdf;
+                rcResult = fcos * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
                 diffuseHitDistance = rcHitDistance;
             }   
+    
+            if(validUV)
+            {
+                const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
+                const float currentLum = luminance(rcResult);
+                const float prevLum = luminance(prevRC);
+                // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
+                const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
+                const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
+                const float alpha = lerp(0.7f , 1.0f , k);
+                rcResult = lerp(prevRC , rcResult , alpha);
+            }
+
+            totalIndirect = rcResult;
         }
+
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour
     
-    const float indirectLum = luminance(totalIndirect / max(info.albedo, 0.002f));
+    // the luminance of the indirect light is NOT used in the shadow : the formulas of the sun and of the lamps get 0 ( the real value is the blocky indirect light of the
+    // probes , it put the squares of the tiles into the shadow , and its history did not clear )
+    const float indirectLum = 0.0f;
 
     if(sunBuffer.intensity > 0.0f){
         // sun
@@ -1337,28 +1418,21 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     const float totalWeight = sunLuminance + lightLuminance;
     totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
     uint shadowFrames = 1u;
-    if(validUV){
-        const float2 prevShadowData = prevShadowImage[prevPixel];
-        const uint count = uint(prevShadowData.y);
+    // the history counts only if it is the same surface : the position and the normal of the last frame ( checkDisocclusion ) , not only the value of the shadow
+    if(validUV && RC::checkDisocclusion(pixel , prevPixel)){
+        const float2 prevShadowData = prevShadowImage[prevPixel].xy;
+        uint count = uint(prevShadowData.y);
         const float prevShadow = prevShadowData.x;
-
-        // if the area is not affected by shadow , we dont want to lerp it with shadow, since its not in shadow now
-        // fix shadows 
-        if(prevShadow != 1.0f && totalShadow != 1.0f)
+        const float diff = abs(prevShadow - totalShadow);
+        const float k = smoothstep(0.0f , SHADOW_HISTORY_TOLERANCE , diff);
+        count = min(count + 1u , MAX_SHADOW_FRAME);
+        const float baseAlpha = 1.0f / float(count);
+        const float alpha = lerp(baseAlpha , 1.0f , k);
+        totalShadow = lerp(prevShadow , totalShadow , alpha);
+        if(alpha < 0.8f)
         {
-            // if its not 1.0f
-            // means that in prev frame there was a shadow in this place
-            {
-                shadowFrames = min(count + 1u , MAX_SHADOW_FRAME);
-                const float alpha = 1.0f / float(shadowFrames);
-                totalShadow = lerp(prevShadow , totalShadow, alpha);
-            }
-
+            shadowFrames = count;
         }
-            // if current prev shadow is 1.0f 
-            // it means that there wasnt any shadow at all
-            // so the shadowFrames is 1
-            // total shadow stays the same without temporal occlusion
     }
 
     const float3 albedoSafe = max(info.albedo , 0.02f);

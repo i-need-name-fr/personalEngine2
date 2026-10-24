@@ -202,8 +202,10 @@ namespace mox{
 
         [[nodiscard]] ErrorDataOutput<int32_t> addTexture(Texture2::CreateInfo info) noexcept{
 
-            // the same file can be several textures : a channel of a packed map ( ARM ) is a texture of its own , so the key has the channel in it
-            const std::string key = (info.channel >= 0) ? info.path + "#" + std::to_string(info.channel) : info.path;
+            // the same file can be several textures only when a CHANNEL of it is a texture of its own ( R32_SFLOAT with a channel ) : then the key has the channel in it .
+            // the RGBA8 maps keep all the channels , the same file is one texture whatever the channel in the info is ( the roughness and the metallic of an ARM map )
+            const bool channelIsUsed = (info.format == VK_FORMAT_R32_SFLOAT && info.channel >= 0);
+            const std::string key = channelIsUsed ? info.path + "#" + std::to_string(info.channel) : info.path;
 
             auto it = pathToVirtual.find(key);
             if(it != pathToVirtual.end()){

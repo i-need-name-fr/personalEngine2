@@ -69,6 +69,16 @@
 [[vk::binding(34 ,0)]] RWStructuredBuffer<uint> lightCountPerTile;
 [[vk::binding(35 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
 
+// the G buffer of the LAST frame ( the images of the other parity ) : the same formats as the images of this frame
+[[vk::image_format("rgba32f")]]
+[[vk::binding(36 , 0)]] RWTexture2D<float4> prevPositionImage;
+
+[[vk::image_format("rgba16")]]
+[[vk::binding(37 , 0)]] RWTexture2D<float4> prevNormalImage;
+
+[[vk::image_format("r32f")]]
+[[vk::binding(38 , 0)]] RWTexture2D<float> prevDepthImage;
+
 struct LightData{
     float3 diffuse;
     float3 specular;

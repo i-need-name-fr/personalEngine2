@@ -8,8 +8,12 @@
 
 [[vk::push_constant]] struct 
 {
+    // the cascades ( the info : sizes , probes ) ...
     uint current;
     uint prev;
+    // ... and their images in RCImages[] : the cascade 0 is the image of the parity of the frame ( RC::imageIndex ) , the others have their own
+    uint currentImage;
+    uint prevImage;
 } push;
 
 
@@ -25,7 +29,7 @@ void main(uint3 id : SV_DispatchThreadID)
     // now we need to get data from the image
     // but now the idea is simple
     // to get buildTexel 
-    const float4 dataCombined_our = RCImages[push.current][id.xy];
+    const float4 dataCombined_our = RCImages[push.currentImage][id.xy];
     // the alpha is packed : the sign is " the ray hit something " , the rest is the distance of the hit ( RC::packHit )
     // if the ray hit something in its interval , we dont have to combine the data already , therefore goal is kinda simple
     bool hit_our;
@@ -98,7 +102,7 @@ void main(uint3 id : SV_DispatchThreadID)
                     const int2 pixel = currentProbeCoord * prevBuildSize + currentBuild;
 
                     const float weight = probeWeight * texelWeight;
-                    const float4 sampleData = RCImages[push.prev][uint2(pixel)];
+                    const float4 sampleData = RCImages[push.prevImage][uint2(pixel)];
                     bool sampleHit;
                     float sampleDistance;
                     RC::unpackHit(sampleData.a , sampleHit , sampleDistance);
@@ -129,5 +133,5 @@ void main(uint3 id : SV_DispatchThreadID)
     const float missWeight = max(weightSum - hitWeight , 1e-6f);
     const float behindDistance = behindHit ? (hitDistanceSum / max(hitWeight , 1e-6f)) : (missDistanceSum / missWeight);
 
-    RCImages[push.current][id.xy] = float4(behindColor / weightSum , RC::packHit(behindHit , behindDistance));
+    RCImages[push.currentImage][id.xy] = float4(behindColor / weightSum , RC::packHit(behindHit , behindDistance));
 }

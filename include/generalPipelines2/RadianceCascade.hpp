@@ -130,7 +130,8 @@ namespace mox{
         [[nodiscard]] [[gnu::hot]] ErrorDataOutput<void> executePass(VkCommandBuffer& cmd) noexcept override final{
             [[unlikely]] if(!completedInit) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to execute the pass ,since the pipeline wasnt created yet [RadianceCascade]"});
 
-            const uint8_t currentImage = inputData.context->sc->frameIndex % 2;
+            const uint32_t frameIndex = inputData.context->sc->frameIndex;
+            const uint8_t currentImage = frameIndex % 2;
             const uint32_t cascadeCount = static_cast<uint32_t>(cascadeInfos.size());
 
             // ------------------------------------------------------------ 1. the probes stand on the surfaces
@@ -206,6 +207,9 @@ namespace mox{
                     CombinePush push{};
                     push.current = current;
                     push.prev = current + 1;
+                    // the cascade 0 is the image with the parity of the frame , the others have their own ( RCProbeManager::imageIndex )
+                    push.currentImage = RCProbeManager::imageIndex(current , frameIndex);
+                    push.prevImage = RCProbeManager::imageIndex(current + 1 , frameIndex);
                     vkCmdPushConstants(cmd , combinePipe->layout->layout , VK_SHADER_STAGE_COMPUTE_BIT , 0 , sizeof(CombinePush) , &push);
 
                     const RC::CascadeInfo& cs = cascadeInfos[current];
@@ -328,10 +332,12 @@ namespace mox{
 
     private:
 
-        // the push constant of CombineCascades.hlsl
+        // the push constant of CombineCascades.hlsl : the cascades and their images ( the cascade 0 has two images , see RCProbeManager )
         struct CombinePush{
             uint32_t current;
             uint32_t prev;
+            uint32_t currentImage;
+            uint32_t prevImage;
         };
 
         pPipeline rtPipe{nullptr};

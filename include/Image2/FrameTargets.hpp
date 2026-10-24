@@ -215,7 +215,7 @@ namespace mox{
                 metallicImage=  std::make_shared<RenderImage2>(info);
                 pixelCheck=  std::make_shared<RenderImage2>(info);
 
-                // the shadow : two channels ( R32G32 ) , the clear value is 1 in the first one ( no shadow ) and 0 in the second one
+                // the shadow : two channels ( R32G32 ) : R is the shadow ( the clear value is 1 : no shadow ) , G is the number of the frames of the history
                 info.clear.float32[0] = 1.0f;
                 info.imageFormat = VK_FORMAT_R32G32_SFLOAT;
                 shadowImage[0] =  std::make_shared<RenderImage2>(info);

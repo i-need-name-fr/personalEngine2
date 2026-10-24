@@ -50,7 +50,8 @@ void recordData(const float2 buildUV , const float4 color , const uint2 probeInd
     // now we need to locate our probe in RCImage
     const uint probePerRow = cas_.PROBE_PER_ROW;
     const uint2 pixel = (probeIndex * cas_.BUILD_SIZE) + buildPixel;
-    RCImages[casID][pixel] = color;
+    // the cascade 0 is written to the image with the parity of the frame ( ping pong ) , the others to their own images ( RC::imageIndex )
+    RCImages[RC::imageIndex(casID , generalBuffer.frameIndex)][pixel] = color;
 }
 
 struct [raypayload] RayPayLoad{

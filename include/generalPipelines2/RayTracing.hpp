@@ -19,7 +19,7 @@ namespace mox{
     // ( the ray generation shader reads the G buffer , makes a GeneralObjectInfo and calls generateReservoirGI )
     //
     // the pipeline is a REAL ray tracing pipeline ( vkCreateRayTracingPipelinesKHR ) , its descriptors are descriptor buffers :
-    //   set 0 : 34 bindings , the same list as in every shader of Shaders/RayTracing ( see the listing in the shaders ) , two descriptor buffers , the
+    //   set 0 : 39 bindings , the same list as in every shader of Shaders/RayTracing ( see the listing in the shaders ) , two descriptor buffers , the
     //           one with the index frameIndex % 2 is bound ( the ping pong images and the reservoirs are swapped inside )
     //   set 1 : the textures of the TextureManager2 ( the same set as the Deferred render )
     //   set 2 : the world grid of the lamps of the LightManager : the lamps , the cells , the info ( its layout and its descriptor buffer )
@@ -252,7 +252,7 @@ namespace mox{
 
             // the G buffer of this frame and the sky : only read . the images of the light : the shaders add to them , so read and write
             // ( the images that the shaders only bind , like the shadows and the view image , are not touched by this pass )
-            std::array<VkImageMemoryBarrier2 , 15> imageBar;
+            std::array<VkImageMemoryBarrier2 , 19> imageBar;
 
             imageBar[0] = positionImage[id]->translateImage(read , stage);
             imageBar[1] = normalImage[id]->translateImage(read , stage);
@@ -272,8 +272,16 @@ namespace mox{
             imageBar[12] = specularImage[id]->translateImage(read | write , stage);
             imageBar[13] = indirectImage[id]->translateImage(read | write , stage);
 
-            // the cascade 0 of Radiance Cascade : the pass before this one has merged all the cascades into it
-            imageBar[14] = inputData.probes->cascades[0]->translateImage(read , stage);
+            // the cascade 0 of Radiance Cascade has TWO images ( ping pong , RCProbeManager ) : the image of THIS frame ( the pass before this one has merged all the cascades into
+            // it ) and the image of the LAST frame ( the history for the temporal part ) . both are read and written : the shaders of this pass may store into them
+            const uint32_t frameIndex = inputData.context->sc->frameIndex;
+            imageBar[14] = inputData.probes->cascades[RCProbeManager::imageIndex(0 , frameIndex)]->translateImage(read | write , stage);
+            imageBar[15] = inputData.probes->cascades[RCProbeManager::imageIndex(0 , frameIndex + 1u)]->translateImage(read | write , stage);
+
+            // the G buffer of the last frame : only read ( the deferred render of the next frame writes it , it is not touched in this pass )
+            imageBar[16] = positionImage[prev]->translateImage(read , stage);
+            imageBar[17] = normalImage[prev]->translateImage(read , stage);
+            imageBar[18] = depthImage[prev]->translateImage(read , stage);
 
             std::array<VkBufferMemoryBarrier2 , 21> bufBar;
 
@@ -308,7 +316,7 @@ namespace mox{
             bufBar[20] = lightCountPerTile->translateBuffer(read , stage);
 
 
-            auto dep = TypicalDependency<21 , 15>(imageBar.data() , bufBar.data());
+            auto dep = TypicalDependency<21 , 19>(imageBar.data() , bufBar.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -455,7 +463,7 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(36);
+                    std::vector<DescriptorLayoutData> data(39);
 
                     data[0] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR , 1};
 
@@ -472,6 +480,11 @@ namespace mox{
 
                     data[34] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[35] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+
+                    // the G buffer of the LAST frame ( position , normal , depth ) : the history of the temporal part checks with it that the surface is the same
+                    data[36] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+                    data[37] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+                    data[38] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
 
                     DescriptorLayout::CreateInfo info{};
@@ -496,7 +509,7 @@ namespace mox{
 
                 // ------------------------------------------------------------ set 0 : the descriptor buffers , one per parity of the frame
                 for(const auto id : {0 , 1}){
-                    std::vector<DescriptorData2> data(36);
+                    std::vector<DescriptorData2> data(39);
 
                     data[0] = DescriptorData2::createData(inputData.as , 0 , 0);
 
@@ -540,6 +553,11 @@ namespace mox{
                     data[33] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 33 , 0);
                     data[34] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 34 , 0);
                     data[35] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 35 , 0);
+
+                    // the images of the other parity ( !id ) : the G buffer of the last frame
+                    data[36] = DescriptorData2::createData(positionImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 36 , 0);
+                    data[37] = DescriptorData2::createData(normalImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 37 , 0);
+                    data[38] = DescriptorData2::createData(depthImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 38 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

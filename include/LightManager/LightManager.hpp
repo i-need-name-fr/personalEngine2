@@ -77,7 +77,7 @@ namespace mox{
             context = info.context;
             user = info.user;
             {
-                const auto result = __implInitBuffers(context);
+                const auto result = _implInitBuffers(context);
                 if(!result.has_value())
                 {
                     engineLogger(result);
@@ -87,7 +87,7 @@ namespace mox{
             }
 
             {
-                const auto result = __implCreatePipe(info.shaderPath);
+                const auto result = _implCreatePipe(info.shaderPath);
                 if(!result.has_value())
                 {
                     engineLogger(result);
@@ -109,19 +109,19 @@ namespace mox{
 
         [[gnu::hot]] void updateGrid(VkCommandBuffer& cmd) noexcept
         {
-            __implUpdateGrid(cmd , user->position);
+            _implUpdateGrid(cmd , user->position);
         }
 
         [[nodiscard]] ErrorDataOutput<void> updateGridAuto() noexcept
         {
-            return __implUpdateGridAuto(user->position);
+            return _implUpdateGridAuto(user->position);
         }
 
         void addLight(const lg::LightSource light , const std::string name) noexcept
         {
             if(nameToPhysical.contains(name)) return;
             
-            const int32_t slot = __implAddLight(light);
+            const int32_t slot = _implAddLight(light);
             [[unlikely]] if(slot == NON_VALID_SLOT)
             {
                 std::cerr << "all slots for light has been taken , please delete one\n";
@@ -136,14 +136,14 @@ namespace mox{
         {
             [[unlikely]] if(!nameToPhysical.contains(lightName)) return;
             const uint32_t lightIndex = nameToPhysical[lightName];
-            __implDeleteLightSource(lightIndex);
+            _implDeleteLightSource(lightIndex);
             nameToPhysical.erase(lightName);
         }
 
         void changeLight(const std::string _lightName , const lg::LightSource _newLight) noexcept{
             if(!nameToPhysical.contains(_lightName)) return;
             const int32_t id = nameToPhysical[_lightName];
-            __implChangeLightSource(_newLight , id);
+            _implChangeLightSource(_newLight , id);
         }
 
     private:
@@ -182,7 +182,7 @@ namespace mox{
             totalLightCount = 0;
         }
 
-        void __implUpdateGrid(VkCommandBuffer& cmd , const glm::vec3 playerPos) noexcept
+        void _implUpdateGrid(VkCommandBuffer& cmd , const glm::vec3 playerPos) noexcept
         {
             cascadeInfo.totalLightCount = totalLightCount;
             cascadeInfo.totalLightCells = TOTAL_CELLS;
@@ -249,13 +249,13 @@ namespace mox{
             cmdBindShadersEXT(cmd , 1 , stages , shaders);
         }
 
-        [[nodiscard]] ErrorDataOutput<void> __implUpdateGridAuto(const glm::vec3 playerPos) noexcept
+        [[nodiscard]] ErrorDataOutput<void> _implUpdateGridAuto(const glm::vec3 playerPos) noexcept
         {
 
             context->queueManager->Begin();
 
             cmdFunctionType function = [&](VkCommandBuffer& cmd) -> void{
-                __implUpdateGrid(cmd , user->position);
+                _implUpdateGrid(cmd , user->position);
             };
 
             context->queueManager->recordCmd(function  , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
@@ -268,7 +268,7 @@ namespace mox{
             return {};
         }
 
-        int32_t __implAddLight(const lg::LightSource light) noexcept
+        int32_t _implAddLight(const lg::LightSource light) noexcept
         {
 
             int32_t freePhysicalSlot = NON_VALID_SLOT;
@@ -288,7 +288,7 @@ namespace mox{
             return freePhysicalSlot;
         }
 
-        void __implDeleteLightSource(const uint32_t lightIndex) noexcept{
+        void _implDeleteLightSource(const uint32_t lightIndex) noexcept{
             if(totalLightCount == 0) return;
             if(lightIndex >= lg::MAX_LIGHT_SOURCES) return;
             const lg::LightSource light = allLights[lightIndex];
@@ -297,7 +297,7 @@ namespace mox{
             totalLightCount--;
         }
 
-        void __implChangeLightSource(const lg::LightSource changedLight , const uint32_t lightIndex) noexcept{
+        void _implChangeLightSource(const lg::LightSource changedLight , const uint32_t lightIndex) noexcept{
             if(lightIndex >= lg::MAX_LIGHT_SOURCES)
             {
                 static uint32_t totalMessageCount = 10;
@@ -312,7 +312,7 @@ namespace mox{
         }
 
         // the compute pipe of the grid : the set 0 is the layout and the descriptor buffer of the manager ( the lamps , the cells , the info ) , one push constant
-        [[nodiscard]] ErrorDataOutput<void> __implCreatePipe(const std::string shaderPath) noexcept{
+        [[nodiscard]] ErrorDataOutput<void> _implCreatePipe(const std::string shaderPath) noexcept{
             try{
                 pipe = std::make_shared<ShaderPipeType>(context);
 
@@ -348,7 +348,7 @@ namespace mox{
             return {};
         }
 
-        [[nodiscard]] ErrorDataOutput<void> __implInitBuffers(VulkanContext* context) noexcept{
+        [[nodiscard]] ErrorDataOutput<void> _implInitBuffers(VulkanContext* context) noexcept{
             try{
 
                 {

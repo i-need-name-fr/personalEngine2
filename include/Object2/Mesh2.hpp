@@ -283,8 +283,12 @@ namespace mox{
             std::string depthPath{NonTexturePath};
             std::string roughnessPath{NonTexturePath};
             std::string metallicPath{NonTexturePath};
-            // -1 : the map is a grey picture ( the value is read as it is ) , 0 .. 3 : the value is ONE channel of the picture ( R , G , B , A ) .
-            // a packed PBR map ( ARM : R occlusion , G roughness , B metallic ) is named in both paths with the channels 1 and 2 ( the occlusion is not read )
+            std::string armPath{NonTexturePath};
+            // the map of the ambient occlusion ( one channel : the red one ) . it is only loaded for now , the shaders do not use the value yet
+            std::string aoPath{NonTexturePath};
+
+            // the channels are used only by the maps that are loaded as R32_SFLOAT ( the ambient occlusion ) : the maps of the roughness and of the metallic are RGBA8 now ,
+            // the shaders read the roughness as .y and the metallic as .z , so a packed map ( ARM ) is named in both paths and the channels do nothing
             int32_t roughnessChannel{-1};
             int32_t metallicChannel{-1};
 
@@ -297,6 +301,7 @@ namespace mox{
             float metallic{0.0f};
 
             uint8_t needsCalcTBN{true};
+            uint8_t needsCalcNormal{false};
         };
 
         explicit Mesh2(CreateInfo &info){
@@ -467,6 +472,42 @@ namespace mox{
             baseMeshData.indexCount = input.inputIndices.size();
             baseMeshData.firstVertex = totalVertices.size();
 
+            // the SMOOTH normals : every vertex gets the sum of the normals of the triangles that use it , and the weight of a triangle is its area ( the cross product is not
+            // normalized while it is summed : a big triangle says more than a sliver ) . the sum is turned into a unit vector afterwards , once for every vertex .
+            // a shared vertex used to take what the LAST triangle said , the result depended on the order of the indices . it runs before the tangents : they need the normals
+            // - a vertex that is used by no triangle ( or only by triangles without an area ) has the sum 0 : it gets the up vector , not NaN
+            // - the vertices at a seam of the UVs are doubled in glTF : the two copies have the same position but are used by different triangles , so their normals can differ a little
+            if(input.needsCalcNormal)
+            {
+                for(Vertex& vertex : input.inputVertices){
+                    vertex.normal = glm::vec3(0.0f);
+                }
+
+                for(uint32_t i = 0 ; i + 2 < baseMeshData.indexCount ; i += 3)
+                {
+                    const uint32_t ia = input.inputIndices[i];
+                    const uint32_t ib = input.inputIndices[i + 1];
+                    const uint32_t ic = input.inputIndices[i + 2];
+                    if(ia >= input.inputVertices.size() || ib >= input.inputVertices.size() || ic >= input.inputVertices.size()) continue;
+
+                    const glm::vec3& a = input.inputVertices[ia].position;
+                    const glm::vec3& b = input.inputVertices[ib].position;
+                    const glm::vec3& c = input.inputVertices[ic].position;
+
+                    // counter clockwise ( glTF ) : the normal looks out of the surface . its length is twice the area of the triangle
+                    const glm::vec3 areaNormal = glm::cross(b - a , c - a);
+
+                    input.inputVertices[ia].normal += areaNormal;
+                    input.inputVertices[ib].normal += areaNormal;
+                    input.inputVertices[ic].normal += areaNormal;
+                }
+
+                for(Vertex& vertex : input.inputVertices){
+                    const float length = glm::length(vertex.normal);
+                    vertex.normal = (length > 1e-12f) ? (vertex.normal / length) : glm::vec3(0.0f , 1.0f , 0.0f);
+                }
+            }
+
             if(input.needsCalcTBN){
                 // the tangent and the direction of v are summed over every triangle that uses a vertex ( a shared vertex used to take
                 // what the last triangle said ) and turned into the final frame afterwards
@@ -479,9 +520,9 @@ namespace mox{
                     const uint32_t ic = input.inputIndices[i + 2];
                     if(ia >= input.inputVertices.size() || ib >= input.inputVertices.size() || ic >= input.inputVertices.size()) continue;
 
-                    const Vertex& a = input.inputVertices[ia];
-                    const Vertex& b = input.inputVertices[ib];
-                    const Vertex& c = input.inputVertices[ic];
+                    Vertex& a = input.inputVertices[ia];
+                    Vertex& b = input.inputVertices[ib];
+                    Vertex& c = input.inputVertices[ic];
 
                     const glm::vec3 edge1 = b.position - a.position;
                     const glm::vec3 edge2 = c.position - a.position;
@@ -559,14 +600,15 @@ namespace mox{
             lut.normalTextureID = NON_VALID_SLOT;
             lut.metallicTextureID = NON_VALID_SLOT;
             lut.roughnessTextureID = NON_VALID_SLOT;
-
+            lut.armTextureID = NON_VALID_SLOT;
+            lut.aoTextureID = NON_VALID_SLOT;
             if(input.diffusePath != NonTexturePath){
                 Texture2::CreateInfo info{};
                 info.path = input.diffusePath;
                 info.context = context;
                 // the picture is sRGB encoded : with the SRGB format the sampler returns linear values , the lighting works in linear
                 // ( it was UNORM : the albedo went through the gamma of HDR_final a second time and came out washed out )
-                info.format = VK_FORMAT_R8G8B8A8_SRGB;
+                info.format = MOX_TEXTURE_DIFFUSE_FORMAT;
 
                 const auto result = manager->addTexture(info);
                 if(result.has_value()){
@@ -580,7 +622,7 @@ namespace mox{
                 Texture2::CreateInfo info{};
                 info.path = input.normalPath;
                 info.context = context;
-                info.format = VK_FORMAT_R8G8_UNORM;
+                info.format = MOX_TEXTURE_NORMAL_FORMAT;
 
                 const auto result = manager->addTexture(info);
                 if(result.has_value()){
@@ -594,7 +636,7 @@ namespace mox{
                 Texture2::CreateInfo info{};
                 info.path = input.depthPath;
                 info.context = context;
-                info.format = VK_FORMAT_R32_SFLOAT;
+                info.format = MOX_TEXTURE_DEPTH_FORMAT;
 
                 const auto result = manager->addTexture(info);
                 if(result.has_value()){
@@ -608,7 +650,7 @@ namespace mox{
                 Texture2::CreateInfo info{};
                 info.path = input.roughnessPath;
                 info.context = context;
-                info.format = VK_FORMAT_R32_SFLOAT;
+                info.format = MOX_TEXTURE_ROUGHNESS_FORMAT;
                 info.channel = input.roughnessChannel;
 
                 const auto result = manager->addTexture(info);
@@ -623,7 +665,7 @@ namespace mox{
                 Texture2::CreateInfo info{};
                 info.path = input.metallicPath;
                 info.context = context;
-                info.format = VK_FORMAT_R32_SFLOAT;
+                info.format = MOX_TEXTURE_METALLIC_FORMAT;
                 info.channel = input.metallicChannel;
 
                 const auto result = manager->addTexture(info);
@@ -631,6 +673,38 @@ namespace mox{
                     lut.metallicTextureID = result.value();
                 }else{
                    std::cerr << std::format("couldnt find the metallic path -> {} , despite the miss, mesh will be created" , input.metallicPath) << '\n';
+                }
+            }
+
+            if(input.armPath != NonTexturePath)
+            {
+                Texture2::CreateInfo info{};
+                info.path = input.armPath;
+                info.context = context;
+                info.format = MOX_TEXTURE_ARM_FORMAT;
+
+                const auto result = manager->addTexture(info);
+                if(result.has_value()){
+                    lut.armTextureID = result.value();
+                }else{
+                   std::cerr << std::format("couldnt find the arm path -> {} , despite the miss, mesh will be created" , input.armPath) << '\n';
+                }
+            }
+
+            if(input.aoPath != NonTexturePath)
+            {
+                Texture2::CreateInfo info{};
+                info.path = input.aoPath;
+                info.context = context;
+                info.format = MOX_TEXTURE_AMBIENT_OCCLUSION_FORMAT;
+                // the red channel as it is written ( 0 .. 255 -> 0 .. 1 ) : the value of a data map must not get the gamma of stbi_loadf
+                info.channel = 0;
+
+                const auto result = manager->addTexture(info);
+                if(result.has_value()){
+                    lut.aoTextureID = result.value();
+                }else{
+                   std::cerr << std::format("couldnt find the ao path -> {} , despite the miss, mesh will be created" , input.aoPath) << '\n';
                 }
             }
 

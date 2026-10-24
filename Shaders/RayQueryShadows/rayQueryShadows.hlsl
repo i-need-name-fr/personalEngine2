@@ -266,7 +266,7 @@ void main(uint3 id : SV_DispatchThreadID){
     float finalShadow = totalShadow;
     uint shadowFrames = 1u;
     if(validUV){
-        const float2 prevShadowData = prevShadowImage[prevPixel];
+        const float2 prevShadowData = prevShadowImage[prevPixel].xy;
         const uint count = uint(prevShadowData.y);
         const float prevShadow = prevShadowData.x;
 

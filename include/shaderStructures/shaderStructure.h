@@ -164,6 +164,11 @@ struct LUT{
     int32_t metallicTextureID = 0;
     int32_t isLightSource = 0;
     
+    // the packed PBR map ( ARM ) : -1 ( NON_VALID_SLOT ) when there is none
+    int32_t armTextureID = -1;
+    // the map of the ambient occlusion
+    int32_t aoTextureID = -1;
+
 #else
 
     float3 color;
@@ -179,7 +184,13 @@ struct LUT{
     int metallicTextureID;
     int isLightSource;
 
+    int armTextureID;
+    int aoTextureID;
+
 #endif
+
+    float padding0;
+    float padding1;
 };
 
 // this is for TextureInfo , since there are times when textures are deleted
@@ -732,12 +743,14 @@ namespace RC{
 
 #endif  
         // the distance between two nodes of the grid ( meters ) . the grid is snapped to it : the nodes stay at the same places of the world while the player moves
-        float CELL_SIZE;
+        float HISTORY_COUNT;
         // the interval of the rays of the cascade along the ray from its probe : [ INTERVAL_START , INTERVAL_END ] ( meters ) . the end of a cascade is the start of the next one
         float INTERVAL_START;
         float INTERVAL_END;
         float PROBE_RESOLUTION;
     };
+
+    static const float MAX_RC_HISTORY = 16ul;
 
     struct GeneralProbeInfo{
 #ifdef __cplusplus
@@ -884,11 +897,11 @@ static const float OFFSET_PER_CASCADE = 10.0f;
 
 // the temporal accumulation of the shadow is NOT endless : the second channel of the shadow image is the number of the frames that the pixel has gathered ( 1 .. MAX_SHADOW_FRAME ) ,
 // the weight of the new frame is 1 / ( the number + 1 ) , so after MAX_SHADOW_FRAME frames the old ones fade out
-static const uint MAX_SHADOW_FRAME = 4u;
+static const uint MAX_SHADOW_FRAME = 12u;
 
 // a history that is far from this frame ( the camera has jerked , the shadow behind the pixel is another one ) must not stay : the difference up to this value is the noise of
 // the rays and does not matter , above it the number of the frames is cut down , and at the difference 1 the history is thrown away completely ( the new frame has the weight 1 )
-static const float SHADOW_HISTORY_TOLERANCE = 0.50f;
+static const float SHADOW_HISTORY_TOLERANCE = 0.35f;
 
 struct GeneralObjectInfo{
     
@@ -1208,6 +1221,7 @@ namespace RC{
 
     // the half float ends at 65504
     static const float MAX_HIT_DISTANCE = 60000.0f;
+    static const float MAX_RADIANCE_TOLERANCE = 0.35f;
 
     float packHit(const bool hit , const float distance){
         const float d = clamp(distance , 0.0f , MAX_HIT_DISTANCE);
@@ -1218,6 +1232,17 @@ namespace RC{
     void unpackHit(const float packed , out bool hit , out float distance){
         hit = (asuint(packed) & 0x80000000u) != 0u;
         distance = abs(packed);
+    }
+
+    // which image of RCImages[] belongs to a cascade : the cascade 0 has TWO images ( ping pong : the images 0 and 1 ) , the cascades 1 .. N - 1 have one image each ( the images
+    // 2 .. N ) . so the chain of a frame is  0 2 3 4 5  or  1 2 3 4 5 , it depends on the parity of the frame
+    // imageIndex : the image that the cascade is written to / read from in THIS frame , prevImageIndex : the image of the cascade 0 of the LAST frame
+    uint imageIndex(const uint cascadeID , const uint frameIndex){
+        return (cascadeID == 0u) ? (frameIndex & 1u) : (cascadeID + 1u);
+    }
+
+    uint prevImageIndex(const uint frameIndex){
+        return (frameIndex + 1u) & 1u;
     }
 }
 

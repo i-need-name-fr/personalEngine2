@@ -8,6 +8,19 @@ namespace mox{
     class Texture2;
     using pTexture2 = std::shared_ptr<Texture2>;
 
+    // the picture of the colour is sRGB encoded : with the SRGB format the sampler returns linear values , the lighting works in linear
+    // ( it was UNORM once : the albedo went through the gamma of the final image a second time and came out washed out ) . the packed maps ( ARM ) and the others are data , not colours : UNORM
+    inline static const VkFormat MOX_TEXTURE_DIFFUSE_FORMAT = VK_FORMAT_R8G8B8A8_SRGB;
+    inline static const VkFormat MOX_TEXTURE_ARM_FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
+    inline static const VkFormat MOX_TEXTURE_NORMAL_FORMAT = VK_FORMAT_R8G8_UNORM;
+    // the height ( parallax ) , the roughness and the metallic maps are RGBA8 : a grey picture gets the same value in R , G and B ( stb ) and a packed map ( ARM ) keeps its
+    // channels , so the shaders read the roughness as .y and the metallic as .z whatever the file is ( roughnessPath and metallicPath can name the same ARM file ) , and the height as .x
+    inline static const VkFormat MOX_TEXTURE_DEPTH_FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
+    inline static const VkFormat MOX_TEXTURE_ROUGHNESS_FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
+    inline static const VkFormat MOX_TEXTURE_METALLIC_FORMAT = VK_FORMAT_R8G8B8A8_UNORM;
+    inline static const VkFormat MOX_TEXTURE_AMBIENT_OCCLUSION_FORMAT = VK_FORMAT_R32_SFLOAT;
+
+
     // simple texture , using stb
     class Texture2 final : public ImageBase2{
     public:

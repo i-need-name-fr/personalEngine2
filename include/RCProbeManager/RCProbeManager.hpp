@@ -16,6 +16,8 @@ namespace mox{
     //   the tile of a probe  : BASE_PROBE_RESOLUTION * 2 ^ cascade pixels  ( the next cascade has 4 times less probes )
     //   the block of a probe : BUILD_SIZE x BUILD_SIZE texels ( one texel = one ray , the octahedral map of the directions ) , BASE_BUILD_SIZE + 2 * cascade
     //   the image of a cascade : ( probes on x * BUILD_SIZE ) x ( probes on y * BUILD_SIZE ) , the block of the probe ( x , y ) is at ( x , y ) * BUILD_SIZE
+    //   the images : the cascade 0 has TWO ( ping pong : the images 0 and 1 , the one with the parity of the frame is the image of this frame , the other one is the image of the
+    //   last frame ) , the cascades 1 .. CASCADE_COUNT - 1 have one each ( the images 2 .. CASCADE_COUNT ) : IMAGE_COUNT = CASCADE_COUNT + 1 images in ONE binding
     // the probes of all the cascades are in ONE buffer : the cascade starts at PROBE_OFFSET , the probe ( x , y ) is  PROBE_OFFSET + y * PROBE_PER_ROW + x
     // the positions are written every frame by the placement pass ( RCplacement.hlsl ) from the G buffer , so nothing is filled here
     //
@@ -31,6 +33,8 @@ namespace mox{
         SetTypicalTransferOperators(RCProbeManager)
 
         static constexpr uint32_t CASCADE_COUNT = 5;
+        // the cascade 0 has two images ( ping pong ) , the others one
+        static constexpr uint32_t IMAGE_COUNT = CASCADE_COUNT + 1;
         // the tile of a probe of the cascade 0 , in pixels
         static constexpr uint32_t BASE_PROBE_RESOLUTION = 16;
         // the block of a probe of the cascade 0 : BASE_BUILD_SIZE ^ 2 rays
@@ -53,6 +57,16 @@ namespace mox{
         std::array<RC::CascadeInfo , CASCADE_COUNT> cascadesData{};
         uint32_t totalProbes{0};
 
+        // the image of a cascade in this frame : the same as RC::imageIndex in the shaders ( the cascade 0 : the parity of the frame , the others : cascade + 1 )
+        static constexpr uint32_t imageIndex(const uint32_t cascadeID , const uint32_t frameIndex) noexcept{
+            return (cascadeID == 0u) ? (frameIndex & 1u) : (cascadeID + 1u);
+        }
+
+        // the cascade that the image with this index belongs to ( the images 0 and 1 are the cascade 0 )
+        static constexpr uint32_t cascadeOfImage(const uint32_t image) noexcept{
+            return (image < 2u) ? 0u : (image - 1u);
+        }
+
         struct CreateInfo{
             VulkanContext* context;
         };
@@ -68,7 +82,7 @@ namespace mox{
 
             this->context = info.context;
             {
-                const auto result = __implInit();
+                const auto result = _implInit();
                 if(!result.has_value()){
                     engineLogger(result);
                     processDelete();
@@ -109,7 +123,7 @@ namespace mox{
         }
 
         // the info of one cascade ( the offset of its probes is set by the caller , it depends on the cascades before )
-        void __implProcessCascade(const uint32_t id , RC::CascadeInfo &cs) noexcept
+        void _implProcessCascade(const uint32_t id , RC::CascadeInfo &cs) noexcept
         {
             const uint32_t screenWidth = context->sc->extent.width;
             const uint32_t screenHeight = context->sc->extent.height;
@@ -130,7 +144,6 @@ namespace mox{
             cs.PROBES_PER_CASCADE = probesX * probesY;
             cs.CASCADE_X = probesX * buildSize;
             cs.CASCADE_Y = probesY * buildSize;
-            cs.CELL_SIZE = 0.0f;
 
             // the interval of the rays : [ 0 , BASE ] , [ BASE , 2 BASE ] , [ 2 BASE , 4 BASE ] ... the last one goes on to the end
             const bool last = (id + 1u == CASCADE_COUNT);
@@ -138,20 +151,21 @@ namespace mox{
             cs.INTERVAL_END = last ? LAST_INTERVAL_END : BASE_INTERVAL * static_cast<float>(1u << id);
         }
 
-        [[nodiscard]] ErrorDataOutput<void> __implInit() noexcept
+        [[nodiscard]] ErrorDataOutput<void> _implInit() noexcept
         {
             try{
                 // the info of the cascades and the offsets of their probes in the ONE buffer of the probes
                 uint32_t offset = 0;
                 for(uint32_t i = 0 ; i < CASCADE_COUNT ; i++){
-                    __implProcessCascade(i , cascadesData[i]);
+                    _implProcessCascade(i , cascadesData[i]);
                     cascadesData[i].PROBE_OFFSET = offset;
                     offset += cascadesData[i].PROBES_PER_CASCADE;
                 }
                 totalProbes = offset;
 
-                // an image for every cascade
-                for(uint32_t i = 0 ; i < CASCADE_COUNT ; i++){
+                // the images : 0 and 1 are the cascade 0 ( ping pong ) , 2 .. CASCADE_COUNT are the cascades 1 .. CASCADE_COUNT - 1
+                for(uint32_t i = 0 ; i < IMAGE_COUNT ; i++){
+                    const RC::CascadeInfo& imageCascade = cascadesData[cascadeOfImage(i)];
                     RenderImage2::CreateInfo info{};
                     info.context = this->context;
                     info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -159,7 +173,7 @@ namespace mox{
                     info.imageType = VK_IMAGE_TYPE_2D;
                     info.viewType = VK_IMAGE_VIEW_TYPE_2D;
                     info.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-                    info.extent = {cascadesData[i].CASCADE_X , cascadesData[i].CASCADE_Y};
+                    info.extent = {imageCascade.CASCADE_X , imageCascade.CASCADE_Y};
                     info.mipMapCount = 1;
                     info.layerCount = 1;
                     info.clear.float32[0] = 0.0f;
@@ -208,7 +222,7 @@ namespace mox{
                     data[0] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
-                    data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , CASCADE_COUNT};
+                    data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , IMAGE_COUNT};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -226,8 +240,8 @@ namespace mox{
                     data.push_back(DescriptorData2::createData(cascadeBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0));
                     data.push_back(DescriptorData2::createData(generalProbeBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0));
 
-                    // ONE binding ( 3 ) for all the cascades , as in the layout above ( count = CASCADE_COUNT ) and as in the shaders ( RCImages[] ) :
-                    // the cascade is the index in the array of the binding , not a binding of its own
+                    // ONE binding ( 3 ) for all the images , as in the layout above ( count = IMAGE_COUNT ) and as in the shaders ( RCImages[] ) :
+                    // the image is the index in the array of the binding , not a binding of its own
                     for(uint32_t i = 0 ; i < cascades.size() ; i++){
                         data.push_back(DescriptorData2::createData(cascades[i].get() , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , i));
                     }
