@@ -132,7 +132,7 @@ namespace mox{
                 VkRenderingAttachmentInfo color{};
                 color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
                 color.pNext = nullptr;
-                color.imageView = finalImage->view;
+                color.imageView = image("finalImage")->view;
                 color.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
                 color.resolveMode = VK_RESOLVE_MODE_NONE;
                 // the UI goes over what is already in the image
@@ -144,7 +144,7 @@ namespace mox{
                 rendering.pNext = nullptr;
                 rendering.flags = 0;
                 rendering.renderArea.offset = {0 , 0};
-                rendering.renderArea.extent = finalImage->extent;
+                rendering.renderArea.extent = image("finalImage")->extent;
                 rendering.layerCount = 1;
                 rendering.viewMask = 0;
                 rendering.colorAttachmentCount = 1;
@@ -170,7 +170,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources , GraphSlot<RenderImage2>{"finalImage" , &finalImage});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             const auto created = createImGui();
@@ -184,7 +184,7 @@ namespace mox{
             [[unlikely]] if(!completedInit) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate the barriers , since ImGui wasnt created yet [ImGuiPipe]"});
 
             // the UI is drawn as the color attachment of the final image
-            auto barrier = finalImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            auto barrier = image("finalImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -209,8 +209,6 @@ namespace mox{
         inline static bool alive = false;
 
         CreateInfo inputData{};
-
-        RenderImage2* finalImage{nullptr};
 
         // the buffers of the shaders : the UI reads their CPU copy and writes the changes back
         DeviceReadableBuffer* generalBuffer{nullptr};
@@ -415,7 +413,7 @@ namespace mox{
             try{
                 VulkanContext* context = inputData.context;
                 device = context->logicalDevice->device;
-                colorFormat = finalImage->format;
+                colorFormat = image("finalImage")->format;
 
                 IMGUI_CHECKVERSION();
                 ImGui::CreateContext();
@@ -515,9 +513,9 @@ namespace mox{
         void processCopy(ImGuiPipe&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             inputData = input.inputData;
-            finalImage = std::exchange(input.finalImage , nullptr);
 
             generalBuffer = std::exchange(input.generalBuffer , nullptr);
             featuresBuffer = std::exchange(input.featuresBuffer , nullptr);
@@ -557,6 +555,7 @@ namespace mox{
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the backend frees buffers and textures that the GPU may still read
             if(device && vulkanBackend) vkDeviceWaitIdle(device);
 
@@ -568,7 +567,6 @@ namespace mox{
             }
 
             // the buffers and the image belong to the owners , they are only forgotten
-            finalImage = nullptr;
             generalBuffer = nullptr;
             featuresBuffer = nullptr;
             fogBuffer = nullptr;
@@ -922,9 +920,9 @@ namespace mox{
             ImGui::TextDisabled("best %.2f ms" , best < 1e8f ? best : 0.0f);
             ImGui::SameLine(0.0f , 16.0f);
             ImGui::TextDisabled("worst %.2f ms" , worst);
-            if(finalImage){
+            if(image("finalImage")){
                 ImGui::SameLine(0.0f , 16.0f);
-                ImGui::TextDisabled("%ux%u" , finalImage->extent.width , finalImage->extent.height);
+                ImGui::TextDisabled("%ux%u" , image("finalImage")->extent.width , image("finalImage")->extent.height);
             }
         }
 

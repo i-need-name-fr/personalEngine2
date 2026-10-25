@@ -17,7 +17,6 @@
 [[vk::binding(5 , 0)]] RWStructuredBuffer<uint> lightCountPerTile;
 [[vk::binding(6 , 0)]] RWStructuredBuffer<LightSource> lightBuffer;
 
-
 [[vk::image_format("rgba16f")]]
 [[vk::binding(7 , 0)]] RWTexture2DArray<float4> fogImage;
 [[vk::image_format("r32f")]]
@@ -110,8 +109,8 @@ namespace mox{
                 cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 1 , sets , offset);
             }
             // the groups are 4 x 4 , the froxel volume has 64 layers ( z )
-            const uint32_t x = (fogImage->extent.width + 3) / 4;
-            const uint32_t y = (fogImage->extent.height + 3) / 4;
+            const uint32_t x = (image("fogImage")->extent.width + 3) / 4;
+            const uint32_t y = (image("fogImage")->extent.height + 3) / 4;
 
             vkCmdDispatch(cmd , x , y, 64);
 
@@ -127,12 +126,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"fogData" , &fogData} ,
-                GraphSlot<BufferBase2>{"sunBuffer" , &sunBuffer} , GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo} ,
-                GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices} , GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile} ,
-                GraphSlot<BufferBase2>{"lightBuffer" , &lightBuffer} ,
-                GraphSlot<RenderImage2>{"fogImage" , &fogImage} , GraphSlot<RenderImage2>{"filteredShadowImage" , &filteredShadowImage});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -148,18 +142,18 @@ namespace mox{
             // everything is only read here : the uniform buffers and the lights that the ForwardPlus has just written ( the shader declares
             // the lists as RW , but it does not write them )
             std::array<VkBufferMemoryBarrier2 , 7> bufBar;
-            bufBar[0] = generalBuffer->translateBuffer(uniformRead , stage);
-            bufBar[1] = fogData->translateBuffer(uniformRead , stage);
-            bufBar[2] = sunBuffer->translateBuffer(uniformRead , stage);
-            bufBar[3] = forwardInfo->translateBuffer(uniformRead , stage);
-            bufBar[4] = tileLightIndices->translateBuffer(read , stage);
-            bufBar[5] = lightCountPerTile->translateBuffer(read , stage);
-            bufBar[6] = lightBuffer->translateBuffer(read , stage);
+            bufBar[0] = buffer("generalBuffer")->translateBuffer(uniformRead , stage);
+            bufBar[1] = buffer("fogData")->translateBuffer(uniformRead , stage);
+            bufBar[2] = buffer("sunBuffer")->translateBuffer(uniformRead , stage);
+            bufBar[3] = buffer("forwardInfo")->translateBuffer(uniformRead , stage);
+            bufBar[4] = buffer("tileLightIndices")->translateBuffer(read , stage);
+            bufBar[5] = buffer("lightCountPerTile")->translateBuffer(read , stage);
+            bufBar[6] = buffer("lightBuffer")->translateBuffer(read , stage);
 
             std::array<VkImageMemoryBarrier2 , 2> imageBar;
             // the froxel volume is written , the filtered shadow is read
-            imageBar[0] = fogImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , stage);
-            imageBar[1] = filteredShadowImage->translateImage(read , stage);
+            imageBar[0] = image("fogImage")->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , stage);
+            imageBar[1] = image("filteredShadowImage")->translateImage(read , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -177,27 +171,18 @@ namespace mox{
             return {};
         }
 
-
     private:
         
         // the macro of the move operators already checks this == &input , the check here keeps the function safe on its own
         void processCopy(VolumentricRender&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             pipe = std::move(input.pipe);
             inputData = input.inputData;
 
             // the buffers and the images of the graph
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
-            fogData = std::exchange(input.fogData , nullptr);
-            sunBuffer = std::exchange(input.sunBuffer , nullptr);
-            forwardInfo = std::exchange(input.forwardInfo , nullptr);
-            tileLightIndices = std::exchange(input.tileLightIndices , nullptr);
-            lightCountPerTile = std::exchange(input.lightCountPerTile , nullptr);
-            lightBuffer = std::exchange(input.lightBuffer , nullptr);
-            fogImage = std::exchange(input.fogImage , nullptr);
-            filteredShadowImage = std::exchange(input.filteredShadowImage , nullptr);
 
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
@@ -205,18 +190,9 @@ namespace mox{
         }
 
         void processDelete(void) noexcept{
+            clearAttributes();
             // the buffers and the images belong to the graph , they are only forgotten
             pipe = nullptr;
-
-            generalBuffer = nullptr;
-            fogData = nullptr;
-            sunBuffer = nullptr;
-            forwardInfo = nullptr;
-            tileLightIndices = nullptr;
-            lightCountPerTile = nullptr;
-            lightBuffer = nullptr;
-            fogImage = nullptr;
-            filteredShadowImage = nullptr;
 
             inputData = {};
             completedInit = false;
@@ -265,17 +241,17 @@ namespace mox{
 
                 {
                     std::vector<DescriptorData2> data(9);
-                    data[0] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
-                    data[1] = DescriptorData2::createData(fogData , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1, 0);
-                    data[2] = DescriptorData2::createData(sunBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
-                    data[3] = DescriptorData2::createData(forwardInfo , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 3 , 0);
+                    data[0] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
+                    data[1] = DescriptorData2::createData(buffer("fogData") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1, 0);
+                    data[2] = DescriptorData2::createData(buffer("sunBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
+                    data[3] = DescriptorData2::createData(buffer("forwardInfo") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 3 , 0);
 
-                    data[4] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
-                    data[5] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 5 , 0);
-                    data[6] = DescriptorData2::createData(lightBuffer , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 6 , 0);
+                    data[4] = DescriptorData2::createData(buffer("tileLightIndices") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
+                    data[5] = DescriptorData2::createData(buffer("lightCountPerTile") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 5 , 0);
+                    data[6] = DescriptorData2::createData(buffer("lightBuffer") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 6 , 0);
 
-                    data[7] = DescriptorData2::createData(fogImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 7 , 0);
-                    data[8] = DescriptorData2::createData(filteredShadowImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0);
+                    data[7] = DescriptorData2::createData(image("fogImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 7 , 0);
+                    data[8] = DescriptorData2::createData(image("filteredShadowImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
@@ -309,18 +285,7 @@ namespace mox{
 
         CreateInfo inputData{};
 
-        BufferBase2* generalBuffer{nullptr};
-        BufferBase2* fogData{nullptr};
-        BufferBase2* sunBuffer{nullptr};
-
-        BufferBase2* forwardInfo{nullptr};
-        BufferBase2* tileLightIndices{nullptr};
-        BufferBase2* lightCountPerTile{nullptr};
-        BufferBase2* lightBuffer{nullptr};
-
         // the froxel volume : 160 x 90 pixels , 64 layers ( a 2D array )
-        RenderImage2* fogImage{nullptr};
-        RenderImage2* filteredShadowImage{nullptr};
     };
 
     using pVolumentricRender = std::shared_ptr<VolumentricRender>;

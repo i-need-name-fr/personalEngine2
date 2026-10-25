@@ -91,7 +91,7 @@ namespace mox{
             VkRenderingAttachmentInfo color{};
             color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
             color.pNext = nullptr;
-            color.imageView = finalImage->view;
+            color.imageView = image("finalImage")->view;
             color.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
             color.resolveMode = VK_RESOLVE_MODE_NONE;
             // the UI goes over what is already in the image
@@ -103,7 +103,7 @@ namespace mox{
             rendering.pNext = nullptr;
             rendering.flags = 0;
             rendering.renderArea.offset = {0 , 0};
-            rendering.renderArea.extent = finalImage->extent;
+            rendering.renderArea.extent = image("finalImage")->extent;
             rendering.layerCount = 1;
             rendering.viewMask = 0;
             rendering.colorAttachmentCount = 1;
@@ -125,7 +125,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources , GraphSlot<RenderImage2>{"finalImage" , &finalImage});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             // the pipeline of the UI is made for the format of this image
@@ -140,7 +140,7 @@ namespace mox{
             [[unlikely]] if(!completedInit) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to translate the barriers , since the vulkan backend of ImGui wasnt created yet [Imgui2]"});
 
             // the UI is drawn as the color attachment of the final image
-            auto barrier = finalImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            auto barrier = image("finalImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -158,14 +158,12 @@ namespace mox{
             return {};
         }
 
-
     private:
 
         // only one ImGui context can live in a process
         inline static bool alive = false;
 
         VulkanContext* context{nullptr};
-        RenderImage2* finalImage{nullptr};
 
         VkDevice device{nullptr};
 
@@ -205,7 +203,7 @@ namespace mox{
         // the vulkan backend with the dynamic rendering : no render pass , the backend takes the format of the attachment
         [[nodiscard]] ErrorDataOutput<void> createVulkanBackend() noexcept{
             try{
-                colorFormat = finalImage->format;
+                colorFormat = image("finalImage")->format;
 
                 DetailsCreateInfo details{};
                 details.device = context->physicalDevice->device;
@@ -245,9 +243,9 @@ namespace mox{
         void processCopy(Imgui2&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             context = std::exchange(input.context , nullptr);
-            finalImage = std::exchange(input.finalImage , nullptr);
             device = std::exchange(input.device , nullptr);
             colorFormat = input.colorFormat;
 
@@ -259,6 +257,7 @@ namespace mox{
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the backend frees buffers and textures that the GPU may still read
             if(device && vulkanBackend) vkDeviceWaitIdle(device);
 
@@ -270,7 +269,6 @@ namespace mox{
             }
 
             // the image belongs to the graph , it is only forgotten
-            finalImage = nullptr;
             context = nullptr;
             device = nullptr;
             vulkanBackend = false;

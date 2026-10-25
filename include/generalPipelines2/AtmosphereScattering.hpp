@@ -5,7 +5,6 @@
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../Sampler/Sampler.hpp"
 
-
 namespace mox{
 
     class AtmosphereScattering : public GraphPass2{
@@ -86,11 +85,11 @@ namespace mox{
 
             // 1 : the sky view LUT
             cmdBindShadersEXT(cmd , 1 , stages , shaders);
-            vkCmdDispatch(cmd , (skyView->extent.width + 7) / 8 , (skyView->extent.height + 7) / 8 , 1);
+            vkCmdDispatch(cmd , (image("SkyView")->extent.width + 7) / 8 , (image("SkyView")->extent.height + 7) / 8 , 1);
 
             // the second shader reads what the first one has just written
             {
-                const auto barrier = skyView->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+                const auto barrier = image("SkyView")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
                 VkDependencyInfo dependency{};
                 dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -109,7 +108,7 @@ namespace mox{
             // 2 : the LUT into the 6 faces of the skybox
             shaders[0] = pipe->shaders[1]->shader;
             cmdBindShadersEXT(cmd , 1 , stages , shaders);
-            vkCmdDispatch(cmd , (skybox->extent.width + 7) / 8 , (skybox->extent.height + 7) / 8 , 6);
+            vkCmdDispatch(cmd , (skybox("skybox")->extent.width + 7) / 8 , (skybox("skybox")->extent.height + 7) / 8 , 6);
 
             shaders[0] = nullptr;
             cmdBindShadersEXT(cmd , 1 , stages , shaders);
@@ -124,10 +123,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<BufferBase2>{"skyBuffer" , &skyBuffer} , GraphSlot<BufferBase2>{"sunBuffer" , &sunBuffer} ,
-                GraphSlot<RenderImage2>{"transmissionLUT" , &transmissionLUT} , GraphSlot<RenderImage2>{"multiScatterLUT" , &multiScatterLUT} ,
-                GraphSlot<RenderImage2>{"SkyView" , &skyView} , GraphSlot<Skybox2>{"skybox" , &skybox});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -139,16 +135,16 @@ namespace mox{
             constexpr VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 
             std::array<VkBufferMemoryBarrier2 , 2> bufBar;
-            bufBar[0] = skyBuffer->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
-            bufBar[1] = sunBuffer->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
+            bufBar[0] = buffer("skyBuffer")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
+            bufBar[1] = buffer("sunBuffer")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
 
             // the LUTs of the transmission and of the multi scattering are only read ( they were computed once ) ,
             // the sky view LUT and the skybox are written in every frame
             std::array<VkImageMemoryBarrier2 , 4> imageBar;
-            imageBar[0] = transmissionLUT->translateImage(VK_ACCESS_2_SHADER_READ_BIT , stage);
-            imageBar[1] = multiScatterLUT->translateImage(VK_ACCESS_2_SHADER_READ_BIT , stage);
-            imageBar[2] = skyView->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , stage);
-            imageBar[3] = skybox->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , stage);
+            imageBar[0] = image("transmissionLUT")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , stage);
+            imageBar[1] = image("multiScatterLUT")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , stage);
+            imageBar[2] = image("SkyView")->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , stage);
+            imageBar[3] = skybox("skybox")->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -176,18 +172,11 @@ namespace mox{
         pSampler clampSampler{nullptr};
         pSampler wrapSampler{nullptr};
 
-        BufferBase2* skyBuffer{nullptr};
-        BufferBase2* sunBuffer{nullptr};
-
-        RenderImage2* transmissionLUT{nullptr};
-        RenderImage2* multiScatterLUT{nullptr};
-        RenderImage2* skyView{nullptr};
-        Skybox2* skybox{nullptr};
-
         // the macro of the move operators already checks this == &input , the check here keeps the function safe on its own
         void processCopy(AtmosphereScattering&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             pipe = std::move(input.pipe);
             inputData = input.inputData;
@@ -195,30 +184,17 @@ namespace mox{
             clampSampler = std::move(input.clampSampler);
             wrapSampler = std::move(input.wrapSampler);
 
-            skyBuffer = std::exchange(input.skyBuffer , nullptr);
-            sunBuffer = std::exchange(input.sunBuffer , nullptr);
-            transmissionLUT = std::exchange(input.transmissionLUT , nullptr);
-            multiScatterLUT = std::exchange(input.multiScatterLUT , nullptr);
-            skyView = std::exchange(input.skyView , nullptr);
-            skybox = std::exchange(input.skybox , nullptr);
-
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
             input.inputData = {};
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the buffers and the images belong to the graph , they are only forgotten
             pipe = nullptr;
             clampSampler = nullptr;
             wrapSampler = nullptr;
-
-            skyBuffer = nullptr;
-            sunBuffer = nullptr;
-            transmissionLUT = nullptr;
-            multiScatterLUT = nullptr;
-            skyView = nullptr;
-            skybox = nullptr;
 
             inputData = {};
             completedInit = false;
@@ -228,7 +204,7 @@ namespace mox{
             VulkanContext* context = inputData.context;
 
             // the compute shader writes the faces of the cube as the layers of a 2D array , it needs the storage view of the skybox
-            if(!skybox->storageView){
+            if(!skybox("skybox")->storageView){
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create AtmosphereScattering pipe , since the skybox has no storageView ( it needs VK_IMAGE_USAGE_STORAGE_BIT )"});
             }
 
@@ -282,16 +258,16 @@ namespace mox{
 
                 {
                     std::vector<DescriptorData2> data(9);
-                    data[0] = DescriptorData2::createData(skyBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
-                    data[1] = DescriptorData2::createData(sunBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
-                    data[2] = DescriptorData2::createData(transmissionLUT , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 2 , 0);
-                    data[3] = DescriptorData2::createData(multiScatterLUT , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 3 , 0);
+                    data[0] = DescriptorData2::createData(buffer("skyBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
+                    data[1] = DescriptorData2::createData(buffer("sunBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
+                    data[2] = DescriptorData2::createData(image("transmissionLUT") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 2 , 0);
+                    data[3] = DescriptorData2::createData(image("multiScatterLUT") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 3 , 0);
                     data[4] = DescriptorData2::createData(clampSampler.get() , 4 , 0);
                     // the same sky view LUT : written by the first shader ( 5 ) and read by the second one ( 6 )
-                    data[5] = DescriptorData2::createData(skyView , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 5 , 0);
-                    data[6] = DescriptorData2::createData(skyView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 6 , 0);
+                    data[5] = DescriptorData2::createData(image("SkyView") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 5 , 0);
+                    data[6] = DescriptorData2::createData(image("SkyView") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 6 , 0);
                     // the skybox : the 2D array view of its 6 faces
-                    data[7] = DescriptorData2::createData(skybox->storageView , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 7 , 0);
+                    data[7] = DescriptorData2::createData(skybox("skybox")->storageView , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 7 , 0);
                     data[8] = DescriptorData2::createData(wrapSampler.get() , 8 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};

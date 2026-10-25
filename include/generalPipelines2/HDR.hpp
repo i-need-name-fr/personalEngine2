@@ -130,17 +130,7 @@ namespace mox{
         [[nodiscard]]  const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"depthImage_0" , &depthImage[0]} , GraphSlot<RenderImage2>{"depthImage_1" , &depthImage[1]} ,
-                GraphSlot<RenderImage2>{"HDRImage_0" , &HDRImage[0]} , GraphSlot<RenderImage2>{"HDRImage_1" , &HDRImage[1]} ,
-                GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} , GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} ,
-                GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} , GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
-                GraphSlot<RenderImage2>{"finalImage" , &finalImage} ,
-                GraphSlot<RenderImage2>{"filteredAmbientOcclusion" , &filteredAmbientOcclusionImage} ,
-                GraphSlot<RenderImage2>{"filteredShadowImage" , &filteredShadowImage} ,
-                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"generalFeatures" , &generalFeatures} ,
-                GraphSlot<BufferBase2>{"luminanceHistory" , &luminanceHistory});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -153,20 +143,20 @@ namespace mox{
             std::array<VkBufferMemoryBarrier2 , 3> bufBar;
             std::array<VkImageMemoryBarrier2 , 10> imageBar;
 
-            bufBar[0] = luminanceHistory->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            bufBar[1] = generalBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            bufBar[2] = generalFeatures->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            bufBar[0] = buffer("luminanceHistory")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            bufBar[1] = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            bufBar[2] = buffer("generalFeatures")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-            imageBar[0] = albedoImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[1] = normalImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[2] = HDRImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[3] = pixelCheck->translateImage(VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[4] = depthImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[5] = roughnessImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[6] = metallicImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[7] = finalImage->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[8] = filteredAmbientOcclusionImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[9] = filteredShadowImage->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[0] = image("albedoImage")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[1] = image("normalImage" , currentImage)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[2] = image("HDRImage" , currentImage)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[3] = image("pixelCheck")->translateImage(VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[4] = image("depthImage" , currentImage)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[5] = image("roughnessImage")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[6] = image("metallicImage")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[7] = image("finalImage")->translateImageUndefined(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[8] = image("filteredAmbientOcclusion")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[9] = image("filteredShadowImage")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -183,73 +173,28 @@ namespace mox{
             return {};
         }
 
-
     private:
 
         VulkanContext* context{nullptr};
         std::string path;
         pShaderPipeType pipe{nullptr};
 
-        RenderImage2* normalImage[2]{nullptr , nullptr};
-        RenderImage2* depthImage[2]{nullptr , nullptr};
-        RenderImage2* HDRImage[2]{nullptr , nullptr};
-        // 6
-        RenderImage2* roughnessImage{nullptr};
-        RenderImage2* metallicImage{nullptr};
-        RenderImage2* pixelCheck{nullptr};
-        RenderImage2* finalImage{nullptr};
-        RenderImage2* albedoImage{nullptr};
-        RenderImage2* filteredAmbientOcclusionImage{nullptr};
-        RenderImage2* filteredShadowImage{nullptr};
-        // 12
-        BufferBase2* luminanceHistory{nullptr};
-        BufferBase2* generalBuffer{nullptr};
-        BufferBase2* generalFeatures{nullptr};
-        // 15
         void processCopy(HDR&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             context = std::exchange(input.context , nullptr);
             path = std::move(input.path);
             pipe = std::move(input.pipe);
-            for(const auto i : {0 , 1}){
-                normalImage[i] = std::exchange(input.normalImage[i] , nullptr);
-                depthImage[i] = std::exchange(input.depthImage[i] , nullptr);
-                HDRImage[i] = std::exchange(input.HDRImage[i] , nullptr);
-            }
-            roughnessImage = std::exchange(input.roughnessImage , nullptr);
-            metallicImage = std::exchange(input.metallicImage , nullptr);
-            pixelCheck = std::exchange(input.pixelCheck , nullptr);
-            finalImage = std::exchange(input.finalImage , nullptr);
-            albedoImage = std::exchange(input.albedoImage , nullptr);
-            filteredAmbientOcclusionImage = std::exchange(input.filteredAmbientOcclusionImage , nullptr);
-            filteredShadowImage = std::exchange(input.filteredShadowImage , nullptr);
-            luminanceHistory = std::exchange(input.luminanceHistory , nullptr);
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
-            generalFeatures = std::exchange(input.generalFeatures , nullptr);
             completedInit = std::exchange(input.completedInit , false);
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             context = nullptr;
             path.clear();
             pipe = nullptr;
-            for(const auto i : {0 , 1}){
-                normalImage[i] = nullptr;
-                depthImage[i] = nullptr;
-                HDRImage[i] = nullptr;
-            }
-            roughnessImage = nullptr;
-            metallicImage = nullptr;
-            pixelCheck = nullptr;
-            finalImage = nullptr;
-            albedoImage = nullptr;
-            filteredAmbientOcclusionImage = nullptr;
-            filteredShadowImage = nullptr;
-            luminanceHistory = nullptr;
-            generalBuffer = nullptr;
-            generalFeatures = nullptr;
             completedInit = false;
         }
 
@@ -296,20 +241,20 @@ namespace mox{
                 {
                     for(auto& id : {0 , 1}){
                         std::vector<DescriptorData2> data(13);
-                        data[0] = DescriptorData2::createData(luminanceHistory , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0);
-                        data[1] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
-                        data[2] = DescriptorData2::createData(generalFeatures , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
+                        data[0] = DescriptorData2::createData(buffer("luminanceHistory") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0);
+                        data[1] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
+                        data[2] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
 
-                        data[3] = DescriptorData2::createData(albedoImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
-                        data[4] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
-                        data[5] = DescriptorData2::createData(HDRImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 5 , 0);
-                        data[6] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 6 , 0);
-                        data[7] = DescriptorData2::createData(depthImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 7 , 0);
-                        data[8] = DescriptorData2::createData(roughnessImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0);
-                        data[9] = DescriptorData2::createData(metallicImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 9 , 0);
-                        data[10] = DescriptorData2::createData(finalImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 10 , 0);
-                        data[11] = DescriptorData2::createData(filteredAmbientOcclusionImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 11 , 0);
-                        data[12] = DescriptorData2::createData(filteredShadowImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0);
+                        data[3] = DescriptorData2::createData(image("albedoImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
+                        data[4] = DescriptorData2::createData(image("normalImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
+                        data[5] = DescriptorData2::createData(image("HDRImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 5 , 0);
+                        data[6] = DescriptorData2::createData(image("pixelCheck") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 6 , 0);
+                        data[7] = DescriptorData2::createData(image("depthImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 7 , 0);
+                        data[8] = DescriptorData2::createData(image("roughnessImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0);
+                        data[9] = DescriptorData2::createData(image("metallicImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 9 , 0);
+                        data[10] = DescriptorData2::createData(image("finalImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 10 , 0);
+                        data[11] = DescriptorData2::createData(image("filteredAmbientOcclusion") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 11 , 0);
+                        data[12] = DescriptorData2::createData(image("filteredShadowImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

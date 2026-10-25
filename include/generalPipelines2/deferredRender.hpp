@@ -26,7 +26,6 @@ namespace mox{
             return *this;
         }
 
-
         struct CreateInfo{
             VulkanContext* context;
             TextureManager2* manager;
@@ -116,14 +115,7 @@ namespace mox{
         [[nodiscard]]  const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<RenderImage2>{"positionImage_0" , &positionImage[0]} , GraphSlot<RenderImage2>{"positionImage_1" , &positionImage[1]} ,
-                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"depthImage_0" , &depthImage[0]} , GraphSlot<RenderImage2>{"depthImage_1" , &depthImage[1]} ,
-                GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} , GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
-                GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} , GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} ,
-                GraphSlot<RenderImage2>{"objectAmbientImage" , &objectAmbientImage} ,
-                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return processInit(inputData);
@@ -136,23 +128,23 @@ namespace mox{
             // the g buffer is written through the color attachments of the dynamic rendering : the load op clears them ,
             // so the old contents are not needed , and the images stay in GENERAL ( the next passes read them as storage images )
             std::array<VkImageMemoryBarrier2 , 8> barriers{};
-            barriers[0] = albedoImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            barriers[1] = positionImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            barriers[2] = normalImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            barriers[3] = depthImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            barriers[4] = roughnessImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            barriers[5] = metallicImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            barriers[6] = pixelCheck->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            barriers[7] = objectAmbientImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-            VkBufferMemoryBarrier2 buffer{};
-            buffer = generalBuffer->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+            barriers[0] = image("albedoImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[1] = image("positionImage" , currentImage)->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[2] = image("normalImage" , currentImage)->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[3] = image("depthImage" , currentImage)->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[4] = image("roughnessImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[5] = image("metallicImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[6] = image("pixelCheck")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[7] = image("objectAmbientImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            VkBufferMemoryBarrier2 generalBufferBarrier{};
+            generalBufferBarrier = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             info.bufferMemoryBarrierCount = 1;
             info.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
             info.pMemoryBarriers = nullptr;
-            info.pBufferMemoryBarriers = &buffer;
+            info.pBufferMemoryBarriers = &generalBufferBarrier;
             info.pImageMemoryBarriers = barriers.data();
             info.memoryBarrierCount = 0;
             info.pNext = nullptr;
@@ -297,7 +289,6 @@ namespace mox{
 
             // dynamic rendering setup
 
-
             {
                 VkRenderingAttachmentInfo depthInfo{};
                 depthInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -312,7 +303,7 @@ namespace mox{
                 depthInfo.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
                 // the g buffer : the order is the order of SV_Target in the fragment shader
-                RenderImage2* targets[8] = {albedoImage , positionImage[currentImage] , normalImage[currentImage] , depthImage[currentImage] , roughnessImage , metallicImage , pixelCheck , objectAmbientImage};
+                RenderImage2* targets[8] = {image("albedoImage") , image("positionImage" , currentImage) , image("normalImage" , currentImage) , image("depthImage" , currentImage) , image("roughnessImage") , image("metallicImage") , image("pixelCheck") , image("objectAmbientImage")};
                 std::array<VkRenderingAttachmentInfo , 8> colorInfo{};
                 for(uint32_t i = 0 ; i < 8 ; i++){
                     colorInfo[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -341,7 +332,6 @@ namespace mox{
                 vkCmdBeginRendering(cmd , &info);
             }
 
-
             // draw
             vkCmdDrawIndexedIndirect(cmd , Mesh2::indirectCmdBuffer->buffer , 0 , Mesh2::totalCmdCount , sizeof(VkDrawIndexedIndirectCommand));
 
@@ -362,61 +352,28 @@ namespace mox{
         VulkanContext* context{nullptr};
         TextureManager2* manager{nullptr};
         
-        RenderImage2* positionImage[2]{nullptr};
-        RenderImage2* normalImage[2]{nullptr};
-        RenderImage2* depthImage[2]{nullptr};
-        // 6
-        RenderImage2* albedoImage{nullptr};
-        RenderImage2* pixelCheck{nullptr};
-        RenderImage2* metallicImage{nullptr};
-        RenderImage2* roughnessImage{nullptr};
-        RenderImage2* objectAmbientImage{nullptr};
-        // 10
-        BufferBase2* generalBuffer{nullptr};
         // total 12 reqs
-
 
         CreateInfo inputData{};
 
         void processCopy(DeferredRender&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
             pipe = std::move(input.pipe);
             context = std::exchange(input.context , nullptr);
             manager = std::exchange(input.manager , nullptr);
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
-            for(auto& i : {0 , 1}){
-                positionImage[i] = std::exchange(input.positionImage[i] , nullptr);
-                normalImage[i] = std::exchange(input.normalImage[i] , nullptr);
-                depthImage[i] = std::exchange(input.depthImage[i] , nullptr);
-            }
 
-
-            albedoImage = std::exchange(input.albedoImage , nullptr);
-            pixelCheck = std::exchange(input.pixelCheck , nullptr);
-            metallicImage = std::exchange(input.metallicImage , nullptr);
-            roughnessImage = std::exchange(input.roughnessImage , nullptr);
-            objectAmbientImage = std::exchange(input.objectAmbientImage , nullptr);
             depthBuffer = std::move(input.depthBuffer);
             completedInit = input.completedInit;
             inputData = input.inputData;
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             pipe = nullptr;
             context = nullptr;
             manager = nullptr;
-            generalBuffer = nullptr;
-            for(auto& i : {0 , 1}){
-                positionImage[i] = nullptr;
-                normalImage[i] = nullptr;
-                depthImage[i] = nullptr;
-            }
-            albedoImage = nullptr;
-            pixelCheck = nullptr;
-            metallicImage = nullptr;
-            roughnessImage = nullptr;
-            objectAmbientImage = nullptr;
             depthBuffer = nullptr;
             completedInit = false;
             inputData = {};
@@ -459,7 +416,7 @@ namespace mox{
                 // the buffers do not depend on the frame , one descriptor buffer is enough
                 {
                     std::vector<DescriptorData2> data(5);
-                    data[0] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
+                    data[0] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
                     data[1] = DescriptorData2::createData(Mesh2::instanceLayoutBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0);
                     data[2] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0);
                     data[3] = DescriptorData2::createData(Mesh2::instanceBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);

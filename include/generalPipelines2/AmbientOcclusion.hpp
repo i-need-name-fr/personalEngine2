@@ -103,12 +103,7 @@ namespace mox{
 
         [[nodiscard]] [[gnu::cold]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
-            const auto bound = bindSources(sources ,
-                GraphSlot<RenderImage2>{"positionImage_0" , &positionImage[0]} , GraphSlot<RenderImage2>{"positionImage_1" , &positionImage[1]} ,
-                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"ambientOcclusionImage_0" , &ambientOcclusionImage[0]} , GraphSlot<RenderImage2>{"ambientOcclusionImage_1" , &ambientOcclusionImage[1]} ,
-                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} ,
-                GraphSlot<BufferBase2>{"generalFeatures" , &features});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -120,15 +115,15 @@ namespace mox{
             const uint8_t id = context->sc->frameIndex %2;
 
             std::array<VkImageMemoryBarrier2 , 4> imageBar;
-            imageBar[0] = positionImage[id]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[1] = normalImage[id]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[0] = image("positionImage" , id)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[1] = image("normalImage" , id)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             // the history is the AO of the previous frame : it is only read
-            imageBar[2] = ambientOcclusionImage[1 - id]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[3] = ambientOcclusionImage[id]->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[2] = image("ambientOcclusionImage" , 1 - id)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[3] = image("ambientOcclusionImage" , id)->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
             std::array<VkBufferMemoryBarrier2 , 3> bufBar;
-            bufBar[0] = generalBuffer->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            bufBar[1] = features->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            bufBar[0] = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            bufBar[1] = buffer("generalFeatures")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             bufBar[2] = kernel->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
             VkDependencyInfo info{};
@@ -159,49 +154,27 @@ namespace mox{
         // device local only : the kernel is written once ( through a staging buffer ) and then only read by the shader
         pGeneralBuffer2<BufferType::Device , false> kernel{nullptr};
 
-        RenderImage2* positionImage[2]{nullptr , nullptr};
-        RenderImage2* normalImage[2]{nullptr , nullptr};
-        RenderImage2* ambientOcclusionImage[2]{nullptr , nullptr};
-
-        BufferBase2* generalBuffer{nullptr};
-        BufferBase2* features{nullptr};
-
         void processCopy(AmbientOcclusion&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             context = std::exchange(input.context , nullptr);
             path = std::move(input.path);
             pipe = std::move(input.pipe);
             kernel = std::move(input.kernel);
 
-            for(const auto i : {0 , 1}){
-                positionImage[i] = std::exchange(input.positionImage[i] , nullptr);
-                normalImage[i] = std::exchange(input.normalImage[i] , nullptr);
-                ambientOcclusionImage[i] = std::exchange(input.ambientOcclusionImage[i] , nullptr);
-            }
-
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
-            features = std::exchange(input.features , nullptr);
-
             completedInit = std::exchange(input.completedInit , false);
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the images and the buffers of the graph are only forgotten here , the kernel and the pipe are the ones of the pass
             pipe = nullptr;
             kernel = nullptr;
             context = nullptr;
             path.clear();
 
-            for(const auto i : {0 , 1}){
-                positionImage[i] = nullptr;
-                normalImage[i] = nullptr;
-                ambientOcclusionImage[i] = nullptr;
-            }
-
-            generalBuffer = nullptr;
-            features = nullptr;
             completedInit = false;
         }
 
@@ -275,12 +248,12 @@ namespace mox{
                 // the images ping-pong , so there are two descriptor buffers : the output of one is the history of the other
                 for(const auto id : {0 , 1}){
                     std::vector<DescriptorData2> data(7);
-                    data[0] = DescriptorData2::createData(positionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
-                    data[1] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0);
-                    data[2] = DescriptorData2::createData(ambientOcclusionImage[1 - id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
-                    data[3] = DescriptorData2::createData(ambientOcclusionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
-                    data[4] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
-                    data[5] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 6 , 0);
+                    data[0] = DescriptorData2::createData(image("positionImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
+                    data[1] = DescriptorData2::createData(image("normalImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0);
+                    data[2] = DescriptorData2::createData(image("ambientOcclusionImage" , 1 - id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
+                    data[3] = DescriptorData2::createData(image("ambientOcclusionImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
+                    data[4] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
+                    data[5] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 6 , 0);
                     data[6] = DescriptorData2::createData(kernel.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 7 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};

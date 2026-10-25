@@ -94,10 +94,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo} ,
-                GraphSlot<BufferBase2>{"lightBuffer" , &lightBuffer} , GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices} ,
-                GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -108,8 +105,8 @@ namespace mox{
             // lets clean 2 buffers
             {
                 std::array<VkBufferMemoryBarrier2 , 2> barriers;
-                barriers[0] = tileLightIndices->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
-                barriers[1] = lightCountPerTile->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+                barriers[0] = buffer("tileLightIndices")->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
+                barriers[1] = buffer("lightCountPerTile")->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT , VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
 
                 VkDependencyInfo info{};
                 info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -124,18 +121,18 @@ namespace mox{
 
                 vkCmdPipelineBarrier2(cmd , &info);
 
-                vkCmdFillBuffer(cmd , tileLightIndices->buffer , 0 , tileLightIndices->getBufferSize() , 0);
-                vkCmdFillBuffer(cmd , lightCountPerTile->buffer , 0 , lightCountPerTile->getBufferSize() , 0);
+                vkCmdFillBuffer(cmd , buffer("tileLightIndices")->buffer , 0 , buffer("tileLightIndices")->getBufferSize() , 0);
+                vkCmdFillBuffer(cmd , buffer("lightCountPerTile")->buffer , 0 , buffer("lightCountPerTile")->getBufferSize() , 0);
 
             }
 
             std::array<VkBufferMemoryBarrier2 , 5> barriers;
 
-            barriers[0] = generalBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            barriers[1] = forwardInfo->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            barriers[2] = lightBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            barriers[3] = tileLightIndices->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            barriers[4] = lightCountPerTile->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            barriers[0] = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            barriers[1] = buffer("forwardInfo")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            barriers[2] = buffer("lightBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            barriers[3] = buffer("tileLightIndices")->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            barriers[4] = buffer("lightCountPerTile")->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -158,12 +155,6 @@ namespace mox{
         pShaderPipeType pipe{nullptr};
         CreateInfo inputData{};
 
-        BufferBase2* generalBuffer{nullptr};
-        BufferBase2* forwardInfo{nullptr};
-        BufferBase2* lightBuffer{nullptr};
-        BufferBase2* tileLightIndices{nullptr};
-        BufferBase2* lightCountPerTile{nullptr};
-
         [[nodiscard]] ErrorDataOutput<void> createPipe() noexcept{
             VulkanContext* context = inputData.context;
 
@@ -178,7 +169,6 @@ namespace mox{
                     data[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
                     data[4] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
-
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -200,11 +190,11 @@ namespace mox{
 
                 {
                     std::vector<DescriptorData2> data(5);
-                    data[0] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
-                    data[1] = DescriptorData2::createData(forwardInfo , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
-                    data[2] = DescriptorData2::createData(lightBuffer , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0);
-                    data[3] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);
-                    data[4] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
+                    data[0] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
+                    data[1] = DescriptorData2::createData(buffer("forwardInfo") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
+                    data[2] = DescriptorData2::createData(buffer("lightBuffer") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0);
+                    data[3] = DescriptorData2::createData(buffer("tileLightIndices") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);
+                    data[4] = DescriptorData2::createData(buffer("lightCountPerTile") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
@@ -238,16 +228,12 @@ namespace mox{
         void processCopy(ForwardPlus&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             pipe = std::move(input.pipe);
             inputData = input.inputData;
 
             // the buffers of the graph
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
-            forwardInfo = std::exchange(input.forwardInfo , nullptr);
-            lightBuffer = std::exchange(input.lightBuffer , nullptr);
-            tileLightIndices = std::exchange(input.tileLightIndices , nullptr);
-            lightCountPerTile = std::exchange(input.lightCountPerTile , nullptr);
 
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
@@ -255,14 +241,9 @@ namespace mox{
         }
 
         void processDelete(void) noexcept{
+            clearAttributes();
             // the buffers belong to the graph , they are only forgotten
             pipe = nullptr;
-
-            generalBuffer = nullptr;
-            forwardInfo = nullptr;
-            lightBuffer = nullptr;
-            tileLightIndices = nullptr;
-            lightCountPerTile = nullptr;
 
             inputData = {};
             completedInit = false;

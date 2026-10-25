@@ -233,17 +233,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<Skybox2>{"skybox" , &skybox} ,
-                GraphSlot<RenderImage2>{"transmissionLUT" , &transmissionLUT} , GraphSlot<RenderImage2>{"multiScatter" , &multiScatter} ,
-                GraphSlot<RenderImage2>{"positionImage_0" , &positionImage[0]} , GraphSlot<RenderImage2>{"positionImage_1" , &positionImage[1]} ,
-                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
-                GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} , GraphSlot<BufferBase2>{"generalFeatures" , &features} ,
-                GraphSlot<BufferBase2>{"forwardInfo" , &forwardInfo} , GraphSlot<BufferBase2>{"skyBuffer" , &skyBuffer} ,
-                GraphSlot<BufferBase2>{"sunBuffer" , &sunBuffer} ,
-                GraphSlot<BufferBase2>{"tileLightIndices" , &tileLightIndices} , GraphSlot<BufferBase2>{"lightCountPerTile" , &lightCountPerTile} ,
-                GraphSlot<BufferBase2>{"lightBuffer" , &lightBuffer});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             // the info of the cascades : the manager keeps it , the buffer is not read back
@@ -273,13 +263,13 @@ namespace mox{
             imageBar.reserve(6 + inputData.probes->cascades.size());
 
             // sampled : the sky , the transmittance of the sun and the LUT of the multi scattering
-            imageBar.push_back(skybox->translateImage(read , stage));
-            imageBar.push_back(transmissionLUT->translateImage(read , stage));
-            imageBar.push_back(multiScatter->translateImage(read , stage));
+            imageBar.push_back(skybox("skybox")->translateImage(read , stage));
+            imageBar.push_back(image("transmissionLUT")->translateImage(read , stage));
+            imageBar.push_back(image("multiScatter")->translateImage(read , stage));
             // the G buffer of this frame : the placement reads it
-            imageBar.push_back(positionImage[id]->translateImage(read , stage));
-            imageBar.push_back(normalImage[id]->translateImage(read , stage));
-            imageBar.push_back(pixelCheck->translateImage(read , stage));
+            imageBar.push_back(image("positionImage" , id)->translateImage(read , stage));
+            imageBar.push_back(image("normalImage" , id)->translateImage(read , stage));
+            imageBar.push_back(image("pixelCheck")->translateImage(read , stage));
             // the images of the cascades : the rays write them , the merge reads and writes them
             for(auto& cascade : inputData.probes->cascades){
                 imageBar.push_back(cascade->translateImage(read | write , stage));
@@ -288,16 +278,16 @@ namespace mox{
             std::vector<VkBufferMemoryBarrier2> bufBar{};
             bufBar.reserve(20);
 
-            bufBar.push_back(generalBuffer->translateBuffer(uniformRead , stage));
-            bufBar.push_back(features->translateBuffer(uniformRead , stage));
-            bufBar.push_back(forwardInfo->translateBuffer(uniformRead , stage));
-            bufBar.push_back(skyBuffer->translateBuffer(uniformRead , stage));
-            bufBar.push_back(sunBuffer->translateBuffer(uniformRead , stage));
+            bufBar.push_back(buffer("generalBuffer")->translateBuffer(uniformRead , stage));
+            bufBar.push_back(buffer("generalFeatures")->translateBuffer(uniformRead , stage));
+            bufBar.push_back(buffer("forwardInfo")->translateBuffer(uniformRead , stage));
+            bufBar.push_back(buffer("skyBuffer")->translateBuffer(uniformRead , stage));
+            bufBar.push_back(buffer("sunBuffer")->translateBuffer(uniformRead , stage));
 
             // the lamps of the tiles ( the bindings 6 7 and 8 of the set 0 are still there ) and the world grid of the lamps ( the set 3 )
-            bufBar.push_back(tileLightIndices->translateBuffer(read , stage));
-            bufBar.push_back(lightCountPerTile->translateBuffer(read , stage));
-            bufBar.push_back(lightBuffer->translateBuffer(read , stage));
+            bufBar.push_back(buffer("tileLightIndices")->translateBuffer(read , stage));
+            bufBar.push_back(buffer("lightCountPerTile")->translateBuffer(read , stage));
+            bufBar.push_back(buffer("lightBuffer")->translateBuffer(read , stage));
             bufBar.push_back(inputData.lights->lightCellBuffer->translateBuffer(read , stage));
             bufBar.push_back(inputData.lights->lightCascadeBuffer->translateBuffer(uniformRead , stage));
 
@@ -354,23 +344,6 @@ namespace mox{
         // the info of the cascades : a copy of the data of the probe manager
         std::vector<RC::CascadeInfo> cascadeInfos{};
 
-        Skybox2* skybox{nullptr};
-        RenderImage2* transmissionLUT{nullptr};
-        RenderImage2* multiScatter{nullptr};
-
-        RenderImage2* positionImage[2]{nullptr , nullptr};
-        RenderImage2* normalImage[2]{nullptr , nullptr};
-        RenderImage2* pixelCheck{nullptr};
-
-        BufferBase2* generalBuffer{nullptr};
-        BufferBase2* features{nullptr};
-        BufferBase2* forwardInfo{nullptr};
-        BufferBase2* skyBuffer{nullptr};
-        BufferBase2* sunBuffer{nullptr};
-        BufferBase2* tileLightIndices{nullptr};
-        BufferBase2* lightCountPerTile{nullptr};
-        BufferBase2* lightBuffer{nullptr};
-
         static VkDescriptorBufferBindingInfoEXT descriptorBufferInfo(const VkDeviceAddress address) noexcept{
             VkDescriptorBufferBindingInfoEXT info{};
             info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
@@ -408,6 +381,7 @@ namespace mox{
         void processCopy(RadianceCascade&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             rtPipe = std::move(input.rtPipe);
             sbt = std::move(input.sbt);
@@ -418,31 +392,13 @@ namespace mox{
             inputData = input.inputData;
             cascadeInfos = std::move(input.cascadeInfos);
 
-            skybox = std::exchange(input.skybox , nullptr);
-            transmissionLUT = std::exchange(input.transmissionLUT , nullptr);
-            multiScatter = std::exchange(input.multiScatter , nullptr);
-
-            for(const auto i : {0 , 1}){
-                positionImage[i] = std::exchange(input.positionImage[i] , nullptr);
-                normalImage[i] = std::exchange(input.normalImage[i] , nullptr);
-            }
-            pixelCheck = std::exchange(input.pixelCheck , nullptr);
-
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
-            features = std::exchange(input.features , nullptr);
-            forwardInfo = std::exchange(input.forwardInfo , nullptr);
-            skyBuffer = std::exchange(input.skyBuffer , nullptr);
-            sunBuffer = std::exchange(input.sunBuffer , nullptr);
-            tileLightIndices = std::exchange(input.tileLightIndices , nullptr);
-            lightCountPerTile = std::exchange(input.lightCountPerTile , nullptr);
-            lightBuffer = std::exchange(input.lightBuffer , nullptr);
-
             // the moved from pass has no pipes any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
             input.inputData = {};
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the images and the buffers belong to the graph , they are only forgotten . the SBT is destroyed before the pipeline it was made from
             sbt = nullptr;
             rtPipe = nullptr;
@@ -450,25 +406,6 @@ namespace mox{
             placePipe = nullptr;
             sampler = nullptr;
             cascadeInfos.clear();
-
-            skybox = nullptr;
-            transmissionLUT = nullptr;
-            multiScatter = nullptr;
-
-            for(const auto i : {0 , 1}){
-                positionImage[i] = nullptr;
-                normalImage[i] = nullptr;
-            }
-            pixelCheck = nullptr;
-
-            generalBuffer = nullptr;
-            features = nullptr;
-            forwardInfo = nullptr;
-            skyBuffer = nullptr;
-            sunBuffer = nullptr;
-            tileLightIndices = nullptr;
-            lightCountPerTile = nullptr;
-            lightBuffer = nullptr;
 
             inputData = {};
             completedInit = false;
@@ -538,15 +475,15 @@ namespace mox{
 
                     data[0] = DescriptorData2::createData(inputData.as , 0 , 0);
 
-                    data[1] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
-                    data[2] = DescriptorData2::createData(forwardInfo , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
-                    data[3] = DescriptorData2::createData(skyBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 3 , 0);
-                    data[4] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 4 , 0);
-                    data[5] = DescriptorData2::createData(sunBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
+                    data[1] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
+                    data[2] = DescriptorData2::createData(buffer("forwardInfo") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
+                    data[3] = DescriptorData2::createData(buffer("skyBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 3 , 0);
+                    data[4] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 4 , 0);
+                    data[5] = DescriptorData2::createData(buffer("sunBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
 
-                    data[6] = DescriptorData2::createData(tileLightIndices , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 6 , 0);
-                    data[7] = DescriptorData2::createData(lightCountPerTile , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 7 , 0);
-                    data[8] = DescriptorData2::createData(lightBuffer , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 8 , 0);
+                    data[6] = DescriptorData2::createData(buffer("tileLightIndices") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 6 , 0);
+                    data[7] = DescriptorData2::createData(buffer("lightCountPerTile") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 7 , 0);
+                    data[8] = DescriptorData2::createData(buffer("lightBuffer") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 8 , 0);
 
                     data[9] = DescriptorData2::createData(Mesh2::vertexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 9 , 0);
                     data[10] = DescriptorData2::createData(Mesh2::indicesBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 10 , 0);
@@ -555,10 +492,10 @@ namespace mox{
                     data[13] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
                     data[14] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 14 , 0);
 
-                    data[15] = DescriptorData2::createData(skybox , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 15 , 0);
+                    data[15] = DescriptorData2::createData(skybox("skybox") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 15 , 0);
                     data[16] = DescriptorData2::createData(sampler.get() , 16 , 0);
-                    data[17] = DescriptorData2::createData(transmissionLUT , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 17 , 0);
-                    data[18] = DescriptorData2::createData(multiScatter , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 18 , 0);
+                    data[17] = DescriptorData2::createData(image("transmissionLUT") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 17 , 0);
+                    data[18] = DescriptorData2::createData(image("multiScatter") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 18 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
@@ -739,10 +676,10 @@ namespace mox{
                     // the G buffer is ping pong : the descriptor buffer with the parity of the frame holds the images of this frame
                     for(const auto id : {0 , 1}){
                         std::vector<DescriptorData2> data(6);
-                        data[0] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
-                        data[1] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
-                        data[2] = DescriptorData2::createData(positionImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0);
-                        data[3] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
+                        data[0] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
+                        data[1] = DescriptorData2::createData(image("normalImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
+                        data[2] = DescriptorData2::createData(image("positionImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0);
+                        data[3] = DescriptorData2::createData(image("pixelCheck") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
                         data[4] = DescriptorData2::createData(inputData.probes->probesBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
                         data[5] = DescriptorData2::createData(inputData.probes->cascadeBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 5 , 0);
 

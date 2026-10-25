@@ -5,8 +5,6 @@
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../Sampler/Sampler.hpp"
 
-
-
 namespace mox{
 
     // the last step before the tone mapping : diffuse * albedo + specular ( both are already denoised ) , then the fog , into HDRImage
@@ -134,19 +132,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<RenderImage2>{"diffuseImage_0" , &diffuseImage[0]} , GraphSlot<RenderImage2>{"diffuseImage_1" , &diffuseImage[1]} ,
-                GraphSlot<RenderImage2>{"specularImage_0" , &specularImage[0]} , GraphSlot<RenderImage2>{"specularImage_1" , &specularImage[1]} ,
-                GraphSlot<RenderImage2>{"depthImage_0" , &depthImage[0]} , GraphSlot<RenderImage2>{"depthImage_1" , &depthImage[1]} ,
-                GraphSlot<RenderImage2>{"indirectImage_0" , &indirectImage[0]} , GraphSlot<RenderImage2>{"indirectImage_1" , &indirectImage[1]} ,
-                GraphSlot<RenderImage2>{"HDRImage_0" , &HDRImage[0]} , GraphSlot<RenderImage2>{"HDRImage_1" , &HDRImage[1]} ,
-                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} , GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} ,
-                GraphSlot<RenderImage2>{"filteredShadowImage" , &filteredShadowImage} , GraphSlot<RenderImage2>{"filteredAmbientOcclusion" , &filteredAmbientOcclusion} ,
-                GraphSlot<Skybox2>{"skybox" , &skybox} ,
-                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"fogImage" , &fogImage} ,
-                GraphSlot<BufferBase2>{"generalFeatures" , &features} , GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer} ,
-                GraphSlot<BufferBase2>{"fogData" , &fogData});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -165,30 +151,30 @@ namespace mox{
             std::array<VkImageMemoryBarrier2 , 12> imageBar;
 
             // the denoised light , the depth , the sky marks and the fog volume : only read
-            imageBar[0] = diffuseImage[id]->translateImage(read , stage);
-            imageBar[1] = specularImage[id]->translateImage(read , stage);
-            imageBar[2] = depthImage[id]->translateImage(read , stage);
-            imageBar[3] = indirectImage[id]->translateImage(read , stage);
-            imageBar[4] = pixelCheck->translateImage(read , stage);
-            imageBar[5] = albedoImage->translateImage(read , stage);
-            imageBar[6] = fogImage->translateImage(read , stage);
+            imageBar[0] = image("diffuseImage" , id)->translateImage(read , stage);
+            imageBar[1] = image("specularImage" , id)->translateImage(read , stage);
+            imageBar[2] = image("depthImage" , id)->translateImage(read , stage);
+            imageBar[3] = image("indirectImage" , id)->translateImage(read , stage);
+            imageBar[4] = image("pixelCheck")->translateImage(read , stage);
+            imageBar[5] = image("albedoImage")->translateImage(read , stage);
+            imageBar[6] = image("fogImage")->translateImage(read , stage);
 
             // the result
-            imageBar[7] = HDRImage[id]->translateImage(write , stage);
+            imageBar[7] = image("HDRImage" , id)->translateImage(write , stage);
 
             // the shadows and the occlusion
-            imageBar[8] = filteredShadowImage->translateImage(read , stage);
-            imageBar[9] = filteredAmbientOcclusion->translateImage(read , stage);
+            imageBar[8] = image("filteredShadowImage")->translateImage(read , stage);
+            imageBar[9] = image("filteredAmbientOcclusion")->translateImage(read , stage);
 
             // the ambient light of the sky
-            imageBar[10] = skybox->translateImage(read , stage);
-            imageBar[11] = normalImage[id]->translateImage(read , stage);
+            imageBar[10] = skybox("skybox")->translateImage(read , stage);
+            imageBar[11] = image("normalImage" , id)->translateImage(read , stage);
 
             std::array<VkBufferMemoryBarrier2 , 3> bufBar;
 
-            bufBar[0] = features->translateBuffer(uniformRead , stage);
-            bufBar[1] = generalBuffer->translateBuffer(uniformRead , stage);
-            bufBar[2] = fogData->translateBuffer(uniformRead , stage);
+            bufBar[0] = buffer("generalFeatures")->translateBuffer(uniformRead , stage);
+            bufBar[1] = buffer("generalBuffer")->translateBuffer(uniformRead , stage);
+            bufBar[2] = buffer("fogData")->translateBuffer(uniformRead , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -215,52 +201,15 @@ namespace mox{
         // samp of the shader : the fog volume is filtered
         pSampler sampler{nullptr};
 
-        RenderImage2* diffuseImage[2]{nullptr , nullptr};
-        RenderImage2* specularImage[2]{nullptr , nullptr};
-        RenderImage2* depthImage[2]{nullptr , nullptr};
-        RenderImage2* indirectImage[2]{nullptr , nullptr};
-        RenderImage2* HDRImage[2]{nullptr , nullptr};
-        RenderImage2* pixelCheck{nullptr};
-        RenderImage2* albedoImage{nullptr};
-        RenderImage2* filteredShadowImage{nullptr};
-        RenderImage2* filteredAmbientOcclusion{nullptr};
-        RenderImage2* fogImage{nullptr};
-        RenderImage2* normalImage[2]{nullptr , nullptr};
-        Skybox2* skybox{nullptr};
-
-        BufferBase2* features{nullptr};
-        BufferBase2* generalBuffer{nullptr};
-        BufferBase2* fogData{nullptr};
-
         // the macro of the move operators already checks this == &input , the check here keeps the function safe on its own
         void processCopy(PostProcess&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             pipe = std::move(input.pipe);
             inputData = input.inputData;
             sampler = std::move(input.sampler);
-
-            for(const auto i : {0 , 1}){
-                diffuseImage[i] = std::exchange(input.diffuseImage[i] , nullptr);
-                specularImage[i] = std::exchange(input.specularImage[i] , nullptr);
-                depthImage[i] = std::exchange(input.depthImage[i] , nullptr);
-                indirectImage[i] = std::exchange(input.indirectImage[i] , nullptr);
-                HDRImage[i] = std::exchange(input.HDRImage[i] , nullptr);
-            }
-
-            pixelCheck = std::exchange(input.pixelCheck , nullptr);
-            albedoImage = std::exchange(input.albedoImage , nullptr);
-            filteredShadowImage = std::exchange(input.filteredShadowImage , nullptr);
-            filteredAmbientOcclusion = std::exchange(input.filteredAmbientOcclusion , nullptr);
-            fogImage = std::exchange(input.fogImage , nullptr);
-            skybox = std::exchange(input.skybox , nullptr);
-            normalImage[0] = std::exchange(input.normalImage[0] , nullptr);
-            normalImage[1] = std::exchange(input.normalImage[1] , nullptr);
-
-            features = std::exchange(input.features , nullptr);
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
-            fogData = std::exchange(input.fogData , nullptr);
 
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
@@ -268,30 +217,10 @@ namespace mox{
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the images and the buffers belong to the graph , they are only forgotten
             pipe = nullptr;
             sampler = nullptr;
-
-            for(const auto i : {0 , 1}){
-                diffuseImage[i] = nullptr;
-                specularImage[i] = nullptr;
-                depthImage[i] = nullptr;
-                indirectImage[i] = nullptr;
-                HDRImage[i] = nullptr;
-            }
-
-            pixelCheck = nullptr;
-            albedoImage = nullptr;
-            filteredShadowImage = nullptr;
-            filteredAmbientOcclusion = nullptr;
-            fogImage = nullptr;
-            skybox = nullptr;
-            normalImage[0] = nullptr;
-            normalImage[1] = nullptr;
-
-            features = nullptr;
-            generalBuffer = nullptr;
-            fogData = nullptr;
 
             inputData = {};
             completedInit = false;
@@ -360,26 +289,26 @@ namespace mox{
 
                         std::vector<DescriptorData2> data(16);
 
-                        data[0] = DescriptorData2::createData(diffuseImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
-                        data[1] = DescriptorData2::createData(specularImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
-                        data[2] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0);
-                        data[3] = DescriptorData2::createData(depthImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
-                        data[4] = DescriptorData2::createData(indirectImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
-                        data[5] = DescriptorData2::createData(albedoImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 5 , 0);
-                        data[6] = DescriptorData2::createData(HDRImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 6 , 0);
+                        data[0] = DescriptorData2::createData(image("diffuseImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0);
+                        data[1] = DescriptorData2::createData(image("specularImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0);
+                        data[2] = DescriptorData2::createData(image("pixelCheck") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0);
+                        data[3] = DescriptorData2::createData(image("depthImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
+                        data[4] = DescriptorData2::createData(image("indirectImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
+                        data[5] = DescriptorData2::createData(image("albedoImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 5 , 0);
+                        data[6] = DescriptorData2::createData(image("HDRImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 6 , 0);
 
-                        data[7] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 7 , 0);
-                        data[8] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 8 , 0);
-                        data[9] = DescriptorData2::createData(fogData , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 9 , 0);
+                        data[7] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 7 , 0);
+                        data[8] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 8 , 0);
+                        data[9] = DescriptorData2::createData(buffer("fogData") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 9 , 0);
 
                         data[10] = DescriptorData2::createData(sampler.get() , 10 , 0);
-                        data[11] = DescriptorData2::createData(fogImage , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 11 , 0);
+                        data[11] = DescriptorData2::createData(image("fogImage") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 11 , 0);
 
-                        data[12] = DescriptorData2::createData(filteredShadowImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0);
-                        data[13] = DescriptorData2::createData(filteredAmbientOcclusion , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 13 , 0);
+                        data[12] = DescriptorData2::createData(image("filteredShadowImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0);
+                        data[13] = DescriptorData2::createData(image("filteredAmbientOcclusion") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 13 , 0);
 
-                        data[14] = DescriptorData2::createData(skybox , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 14 , 0);
-                        data[15] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 15 , 0);
+                        data[14] = DescriptorData2::createData(skybox("skybox") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 14 , 0);
+                        data[15] = DescriptorData2::createData(image("normalImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 15 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

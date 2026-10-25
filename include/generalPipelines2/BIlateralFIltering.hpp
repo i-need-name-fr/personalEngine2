@@ -4,7 +4,6 @@
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 
-
 namespace mox{
 
     class BilateralFiltering : public GraphPass2{
@@ -155,15 +154,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<RenderImage2>{"depthImage_0" , &depthImage[0]} , GraphSlot<RenderImage2>{"depthImage_1" , &depthImage[1]} ,
-                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"shadowImage_0" , &shadowImage[0]} , GraphSlot<RenderImage2>{"shadowImage_1" , &shadowImage[1]} ,
-                GraphSlot<RenderImage2>{"ambientOcclusionImage_0" , &ambientOcclusionImage[0]} , GraphSlot<RenderImage2>{"ambientOcclusionImage_1" , &ambientOcclusionImage[1]} ,
-                GraphSlot<RenderImage2>{"filteredAmbientOcclusion" , &filteredAmbientOcclusionImage} ,
-                GraphSlot<RenderImage2>{"filteredShadowImage" , &filteredShadowImage} ,
-                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
-                GraphSlot<BufferBase2>{"generalFeatures" , &features});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
             return createPipe();
         }
@@ -172,19 +163,18 @@ namespace mox{
             const uint8_t id = context->sc->frameIndex %2;
 
             std::array<VkImageMemoryBarrier2 , 7> imageBar;
-            imageBar[0] = shadowImage[id]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[1] = ambientOcclusionImage[id]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[0] = image("shadowImage" , id)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[1] = image("ambientOcclusionImage" , id)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-            imageBar[2] = normalImage[id]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[3] = depthImage[id]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[2] = image("normalImage" , id)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[3] = image("depthImage" , id)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-            imageBar[4] = filteredAmbientOcclusionImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            imageBar[5] = filteredShadowImage->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[4] = image("filteredAmbientOcclusion")->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[5] = image("filteredShadowImage")->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-            imageBar[6] = pixelCheck->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            imageBar[6] = image("pixelCheck")->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-
-            VkBufferMemoryBarrier2 bufBar = features->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            VkBufferMemoryBarrier2 bufBar = buffer("generalFeatures")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -202,7 +192,6 @@ namespace mox{
             return {};
         }
 
-
     private:
 
         VulkanContext* context{nullptr};
@@ -210,60 +199,27 @@ namespace mox{
 
         pShaderPipeType pipe = nullptr;
 
-        RenderImage2* depthImage[2]{nullptr , nullptr};
-        RenderImage2* normalImage[2]{nullptr , nullptr};
-        RenderImage2* shadowImage[2]{nullptr , nullptr};
-        RenderImage2* ambientOcclusionImage[2]{nullptr , nullptr};
-
-        RenderImage2* filteredAmbientOcclusionImage{nullptr};
-        RenderImage2* filteredShadowImage{nullptr};  
-        
-        RenderImage2* pixelCheck{nullptr};
-
-        BufferBase2* features{nullptr};
-
         // the macro of the move operators already checks this == &input , the check here keeps the function safe on its own
         void processCopy(BilateralFiltering&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             context = std::exchange(input.context , nullptr);
             path = std::move(input.path);
             pipe = std::move(input.pipe);
-
-            for(const auto i : {0 , 1}){
-                depthImage[i] = std::exchange(input.depthImage[i] , nullptr);
-                normalImage[i] = std::exchange(input.normalImage[i] , nullptr);
-                shadowImage[i] = std::exchange(input.shadowImage[i] , nullptr);
-                ambientOcclusionImage[i] = std::exchange(input.ambientOcclusionImage[i] , nullptr);
-            }
-
-            filteredAmbientOcclusionImage = std::exchange(input.filteredAmbientOcclusionImage , nullptr);
-            filteredShadowImage = std::exchange(input.filteredShadowImage , nullptr);
-            pixelCheck = std::exchange(input.pixelCheck , nullptr);
-            features = std::exchange(input.features , nullptr);
 
             // the moved from pass is not initialized any more : its pipe is gone
             completedInit = std::exchange(input.completedInit , false);
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the pointers belong to the graph , so they are only forgotten here , nothing is destroyed
             pipe = nullptr;
             context = nullptr;
             path.clear();
 
-            for(const auto i : {0 , 1}){
-                depthImage[i] = nullptr;
-                normalImage[i] = nullptr;
-                shadowImage[i] = nullptr;
-                ambientOcclusionImage[i] = nullptr;
-            }
-
-            filteredAmbientOcclusionImage = nullptr;
-            filteredShadowImage = nullptr;
-            pixelCheck = nullptr;
-            features = nullptr;
             completedInit = false;
         }
 
@@ -307,14 +263,14 @@ namespace mox{
                 {   // shadows
                     for(auto& id : { 0 , 1}){
                         std::vector<DescriptorData2> data(6);
-                        data[0] = DescriptorData2::createData(shadowImage[id] , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 0 , 0);
-                        data[1] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1 , 0);
-                        data[2] = DescriptorData2::createData(depthImage[id] , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 2 , 0);
+                        data[0] = DescriptorData2::createData(image("shadowImage" , id) , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 0 , 0);
+                        data[1] = DescriptorData2::createData(image("normalImage" , id) , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1 , 0);
+                        data[2] = DescriptorData2::createData(image("depthImage" , id) , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 2 , 0);
 
-                        data[3] = DescriptorData2::createData(filteredShadowImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
-                        data[4] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
+                        data[3] = DescriptorData2::createData(image("filteredShadowImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
+                        data[4] = DescriptorData2::createData(image("pixelCheck") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
 
-                        data[5] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
+                        data[5] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
@@ -328,14 +284,14 @@ namespace mox{
                 {   // shadows
                     for(auto& id : { 0 , 1}){
                         std::vector<DescriptorData2> data(6);
-                        data[0] = DescriptorData2::createData(ambientOcclusionImage[id] , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 0 , 0);
-                        data[1] = DescriptorData2::createData(normalImage[id] , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1 , 0);
-                        data[2] = DescriptorData2::createData(depthImage[id] , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 2 , 0);
+                        data[0] = DescriptorData2::createData(image("ambientOcclusionImage" , id) , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 0 , 0);
+                        data[1] = DescriptorData2::createData(image("normalImage" , id) , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1 , 0);
+                        data[2] = DescriptorData2::createData(image("depthImage" , id) , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 2 , 0);
 
-                        data[3] = DescriptorData2::createData(filteredAmbientOcclusionImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
-                        data[4] = DescriptorData2::createData(pixelCheck , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
+                        data[3] = DescriptorData2::createData(image("filteredAmbientOcclusion") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0);
+                        data[4] = DescriptorData2::createData(image("pixelCheck") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 4 , 0);
 
-                        data[5] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
+                        data[5] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 5 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

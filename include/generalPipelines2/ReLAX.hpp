@@ -6,7 +6,6 @@
 #include "../Image2/TextureManager2.hpp"
 #include "../Object2/Mesh2.hpp"
 
-
 namespace mox{
 
     class ReLAX : public GraphPass2{
@@ -182,14 +181,7 @@ namespace mox{
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
 
-            const auto bound = bindSources(sources ,
-                GraphSlot<RenderImage2>{"depthImage_0" , &depthImage[0]} , GraphSlot<RenderImage2>{"depthImage_1" , &depthImage[1]} ,
-                GraphSlot<RenderImage2>{"normalImage_0" , &normalImage[0]} , GraphSlot<RenderImage2>{"normalImage_1" , &normalImage[1]} ,
-                GraphSlot<RenderImage2>{"positionImage_0" , &positionImage[0]} , GraphSlot<RenderImage2>{"positionImage_1" , &positionImage[1]} ,
-                GraphSlot<RenderImage2>{"specularImage_0" , &specularImage[0]} , GraphSlot<RenderImage2>{"specularImage_1" , &specularImage[1]} ,
-                GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} , GraphSlot<RenderImage2>{"motionVector" , &motionVector} ,
-                GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} , GraphSlot<RenderImage2>{"viewImage" , &viewImage} ,
-                GraphSlot<BufferBase2>{"generalFeatures" , &features} , GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -209,27 +201,27 @@ namespace mox{
             std::array<VkImageMemoryBarrier2 , 14> imageBar;
 
             // the g buffer of this frame and of the previous one
-            imageBar[0] = depthImage[id]->translateImage(read , stage);
-            imageBar[1] = depthImage[prev]->translateImage(read , stage);
-            imageBar[2] = normalImage[id]->translateImage(read , stage);
-            imageBar[3] = normalImage[prev]->translateImage(read , stage);
-            imageBar[4] = positionImage[id]->translateImage(read , stage);
-            imageBar[5] = positionImage[prev]->translateImage(read , stage);
+            imageBar[0] = image("depthImage" , id)->translateImage(read , stage);
+            imageBar[1] = image("depthImage" , prev)->translateImage(read , stage);
+            imageBar[2] = image("normalImage" , id)->translateImage(read , stage);
+            imageBar[3] = image("normalImage" , prev)->translateImage(read , stage);
+            imageBar[4] = image("positionImage" , id)->translateImage(read , stage);
+            imageBar[5] = image("positionImage" , prev)->translateImage(read , stage);
 
             // specular : [id] is the input of this frame and the place of the result , [prev] is the history
-            imageBar[6] = specularImage[id]->translateImage(readWrite , stage);
-            imageBar[7] = specularImage[prev]->translateImage(read , stage);
+            imageBar[6] = image("specularImage" , id)->translateImage(readWrite , stage);
+            imageBar[7] = image("specularImage" , prev)->translateImage(read , stage);
             imageBar[8] = specularCount[id]->translateImage(readWrite , stage);
             imageBar[9] = specularCount[prev]->translateImage(read , stage);
 
-            imageBar[10] = motionVector->translateImage(read , stage);
-            imageBar[11] = pixelCheck->translateImage(read , stage);
-            imageBar[12] = roughnessImage->translateImage(read , stage);
-            imageBar[13] = viewImage->translateImage(read , stage);
+            imageBar[10] = image("motionVector")->translateImage(read , stage);
+            imageBar[11] = image("pixelCheck")->translateImage(read , stage);
+            imageBar[12] = image("roughnessImage")->translateImage(read , stage);
+            imageBar[13] = image("viewImage")->translateImage(read , stage);
 
             std::array<VkBufferMemoryBarrier2 , 2> bufBar;
-            bufBar[0] = features->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
-            bufBar[1] = generalBuffer->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
+            bufBar[0] = buffer("generalFeatures")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
+            bufBar[1] = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -247,7 +239,6 @@ namespace mox{
             return {};
         }
 
-
     private:
 
         pShaderPipeType pipe{nullptr};
@@ -257,25 +248,13 @@ namespace mox{
         pRenderImage2 specularCount[2]{nullptr};
         pRenderImage2 outputImage{nullptr};
 
-        RenderImage2* positionImage[2]{nullptr , nullptr};
-        RenderImage2* depthImage[2]{nullptr , nullptr};
-        RenderImage2* normalImage[2]{nullptr , nullptr};
-        RenderImage2* specularImage[2]{nullptr , nullptr};
-        // 8
-        RenderImage2* pixelCheck{nullptr};
-        RenderImage2* motionVector{nullptr};
-        RenderImage2* roughnessImage{nullptr};
         // the direction from the surface to the camera
-        RenderImage2* viewImage{nullptr};
-        // 12
-        BufferBase2* features{nullptr};
-        BufferBase2* generalBuffer{nullptr};
-        // 14
 
         // the macro of the move operators already checks this == &input , the check here keeps the function safe on its own
         void processCopy(ReLAX&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
 
             pipe = std::move(input.pipe);
             inputData = input.inputData;
@@ -287,18 +266,6 @@ namespace mox{
             outputImage = std::move(input.outputImage);
 
             // the images and the buffers of the graph
-            for(const auto i : {0 , 1}){
-                positionImage[i] = std::exchange(input.positionImage[i] , nullptr);
-                depthImage[i] = std::exchange(input.depthImage[i] , nullptr);
-                normalImage[i] = std::exchange(input.normalImage[i] , nullptr);
-                specularImage[i] = std::exchange(input.specularImage[i] , nullptr);
-            }
-            pixelCheck = std::exchange(input.pixelCheck , nullptr);
-            motionVector = std::exchange(input.motionVector , nullptr);
-            roughnessImage = std::exchange(input.roughnessImage , nullptr);
-            viewImage = std::exchange(input.viewImage , nullptr);
-            features = std::exchange(input.features , nullptr);
-            generalBuffer = std::exchange(input.generalBuffer , nullptr);
 
             // the moved from pass has no pipe any more : it is not initialized
             completedInit = std::exchange(input.completedInit , false);
@@ -306,6 +273,7 @@ namespace mox{
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             // the pipe and the images of the pass are the ones of the pass , the pointers of the graph are only forgotten
             pipe = nullptr;
 
@@ -313,19 +281,6 @@ namespace mox{
                 specularCount[i] = nullptr;
             }
             outputImage = nullptr;
-
-            for(const auto i : {0 , 1}){
-                positionImage[i] = nullptr;
-                depthImage[i] = nullptr;
-                normalImage[i] = nullptr;
-                specularImage[i] = nullptr;
-            }
-            pixelCheck = nullptr;
-            motionVector = nullptr;
-            roughnessImage = nullptr;
-            viewImage = nullptr;
-            features = nullptr;
-            generalBuffer = nullptr;
 
             inputData = {};
             completedInit = false;
@@ -409,28 +364,28 @@ namespace mox{
 
                         std::vector<DescriptorData2> data(17);
 
-                        data[0] = DescriptorData2::createData(specularImage[id] ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0 );
-                        data[1] = DescriptorData2::createData(specularImage[!id] ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0 );
+                        data[0] = DescriptorData2::createData(image("specularImage" , id) ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0 );
+                        data[1] = DescriptorData2::createData(image("specularImage" , !id) ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0 );
                         data[2] = DescriptorData2::createData(specularCount[id].get() ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 2 , 0 );
                         data[3] = DescriptorData2::createData(specularCount[!id].get() ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 3 , 0 );
 
-                        data[4] = DescriptorData2::createData(depthImage[id] ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 4 , 0 );
-                        data[5] = DescriptorData2::createData(depthImage[!id] ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 5 , 0 );
-                        data[6] = DescriptorData2::createData(normalImage[id] ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 6 , 0 );
-                        data[7] = DescriptorData2::createData(normalImage[!id] ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 7 , 0 );
+                        data[4] = DescriptorData2::createData(image("depthImage" , id) ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 4 , 0 );
+                        data[5] = DescriptorData2::createData(image("depthImage" , !id) ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 5 , 0 );
+                        data[6] = DescriptorData2::createData(image("normalImage" , id) ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 6 , 0 );
+                        data[7] = DescriptorData2::createData(image("normalImage" , !id) ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 7 , 0 );
 
-                        data[8] = DescriptorData2::createData(motionVector ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0 );
+                        data[8] = DescriptorData2::createData(image("motionVector") ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 8 , 0 );
 
-                        data[9] = DescriptorData2::createData(positionImage[id] ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 9 , 0 );
-                        data[10] = DescriptorData2::createData(positionImage[!id] ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 10 , 0 );
+                        data[9] = DescriptorData2::createData(image("positionImage" , id) ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 9 , 0 );
+                        data[10] = DescriptorData2::createData(image("positionImage" , !id) ,VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 10 , 0 );
 
                         data[11] = DescriptorData2::createData(outputImage.get() ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 11 , 0 );
-                        data[12] = DescriptorData2::createData(pixelCheck ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0 );
-                        data[13] = DescriptorData2::createData(viewImage ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 13 , 0 );
-                        data[14] = DescriptorData2::createData(roughnessImage ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 14 , 0 );
+                        data[12] = DescriptorData2::createData(image("pixelCheck") ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0 );
+                        data[13] = DescriptorData2::createData(image("viewImage") ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 13 , 0 );
+                        data[14] = DescriptorData2::createData(image("roughnessImage") ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 14 , 0 );
 
-                        data[15] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 15 , 0);
-                        data[16] = DescriptorData2::createData(generalBuffer , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 16 , 0);
+                        data[15] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 15 , 0);
+                        data[16] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 16 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

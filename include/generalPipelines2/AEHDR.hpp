@@ -105,9 +105,7 @@ namespace mox{
 
         [[nodiscard]] [[gnu::cold]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
             if(completedInit) return {};
-            const auto bound = bindSources(sources ,
-                GraphSlot<RenderImage2>{"HDRImage_0" , &HDRImage[0]} , GraphSlot<RenderImage2>{"HDRImage_1" , &HDRImage[1]} ,
-                GraphSlot<BufferBase2>{"luminanceHistory" , &history});
+            const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
 
             return createPipe();
@@ -119,8 +117,8 @@ namespace mox{
 
             const uint8_t currentImage = context->sc->frameIndex %2;
             
-            auto imageBar = HDRImage[currentImage]->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-            auto bufBar = history->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT ,VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT );
+            auto imageBar = image("HDRImage" , currentImage)->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            auto bufBar = buffer("luminanceHistory")->translateBuffer(VK_ACCESS_2_TRANSFER_WRITE_BIT ,VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT );
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -135,9 +133,9 @@ namespace mox{
             // we will translate the buffer first
             vkCmdPipelineBarrier2(cmd , &info);
 
-            vkCmdFillBuffer(cmd , history->buffer , 0 , history->getBufferSize() , 0);
+            vkCmdFillBuffer(cmd , buffer("luminanceHistory")->buffer , 0 , buffer("luminanceHistory")->getBufferSize() , 0);
 
-            bufBar = history->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT );
+            bufBar = buffer("luminanceHistory")->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT );
 
             info.imageMemoryBarrierCount = 1;
             info.pImageMemoryBarriers = &imageBar;
@@ -151,9 +149,6 @@ namespace mox{
 
         VulkanContext* context{nullptr};
 
-        RenderImage2* HDRImage[2]{nullptr , nullptr};
-        BufferBase2* history{nullptr};
-
         pShaderPipeType pipe{nullptr};
 
         std::string pathToFile{};
@@ -161,20 +156,16 @@ namespace mox{
         void processCopy(AEHDR&& input) noexcept{
             if(this == &input) return;
             processDelete();
+            GraphPass2::operator=(std::move(input));
             context = std::exchange(input.context, nullptr) ;
-            HDRImage[0] = std::exchange(input.HDRImage[0], nullptr);
-            HDRImage[1] = std::exchange(input.HDRImage[1], nullptr);
-            history = std::exchange(input.history,nullptr);
             pipe = std::move(input.pipe);
             completedInit = std::exchange(input.completedInit , false);
             pathToFile = std::move(input.pathToFile);
         }
 
         void processDelete() noexcept{
+            clearAttributes();
             context = nullptr;
-            HDRImage[0] = nullptr;
-            HDRImage[1] = nullptr;
-            history = nullptr;
             completedInit = false;
             pipe = nullptr;
             pathToFile.clear();
@@ -214,8 +205,8 @@ namespace mox{
                     pipe->buffers.resize(2);
                     for(auto& id : {0 , 1}){
                         std::vector<DescriptorData2> data(2);
-                        data[0] = DescriptorData2::createData(HDRImage[id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  0 , 0);
-                        data[1] = DescriptorData2::createData(history , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 ,0);
+                        data[0] = DescriptorData2::createData(image("HDRImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  0 , 0);
+                        data[1] = DescriptorData2::createData(buffer("luminanceHistory") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 ,0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
