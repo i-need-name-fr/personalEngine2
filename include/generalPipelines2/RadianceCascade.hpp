@@ -56,6 +56,8 @@ namespace mox{
             std::string shadowMissPath;     // miss 1
             std::string hitPath;            // hit group 0 : the closest hit
             std::string shadowAnyHitPath;   // hit group 1 : the any hit
+            // the any hit of the alpha test ( glTF MASK ) for the group 0 , optional : without it the masked materials are opaque for the rays ( the payload has to be the one of the closest hit )
+            std::string alphaAnyHitPath;
             std::string shadowHitPath;      // hit group 1 , optional : the closest hit ( the group is an any hit only when it is empty )
             std::string combinePath;        // the compute shader that merges two cascades
         };
@@ -511,12 +513,14 @@ namespace mox{
                 ShaderModuleType shadowMiss(context , inputData.shadowMissPath);
                 ShaderModuleType hit(context , inputData.hitPath);
                 ShaderModuleType shadowAnyHit(context , inputData.shadowAnyHitPath);
+                std::optional<ShaderModuleType> alphaAnyHit;
+                if(!inputData.alphaAnyHitPath.empty()) alphaAnyHit.emplace(context , inputData.alphaAnyHitPath);
                 std::optional<ShaderModuleType> shadowHit;
                 if(!inputData.shadowHitPath.empty()) shadowHit.emplace(context , inputData.shadowHitPath);
 
                 // the SBT stores no names , only the order : THIS ORDER is what the miss index and the hit offset of TraceRay mean
                 std::vector<VkPipelineShaderStageCreateInfo> stages{};
-                stages.reserve(6);
+                stages.reserve(8);
 
                 const auto addStage = [&stages](const VkShaderStageFlagBits stage , const VkShaderModule module) -> uint32_t{
                     VkPipelineShaderStageCreateInfo info{};
@@ -537,6 +541,7 @@ namespace mox{
                 const uint32_t hitStage = addStage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR , hit.module);
                 const uint32_t shadowAnyHitStage = addStage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR , shadowAnyHit.module);
                 const uint32_t shadowHitStage = shadowHit.has_value() ? addStage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR , shadowHit->module) : VK_SHADER_UNUSED_KHR;
+                const uint32_t alphaStage = alphaAnyHit.has_value() ? addStage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR , alphaAnyHit->module) : VK_SHADER_UNUSED_KHR;
 
                 const auto generalGroup = [](const uint32_t stage){
                     VkRayTracingShaderGroupCreateInfoKHR group{};
@@ -568,7 +573,7 @@ namespace mox{
                     generalGroup(rayGenerationStage) ,
                     generalGroup(missStage) ,                            // miss 0 : the sky
                     generalGroup(shadowMissStage) ,                      // miss 1 : the shadow
-                    hitGroup(hitStage , VK_SHADER_UNUSED_KHR) ,          // hit 0 : the closest hit
+                    hitGroup(hitStage , alphaStage) ,                       // hit 0 : the closest hit
                     hitGroup(shadowHitStage , shadowAnyHitStage)         // hit 1 : the shadow
                 };
 

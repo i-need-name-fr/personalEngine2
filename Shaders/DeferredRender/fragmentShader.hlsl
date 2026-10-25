@@ -41,8 +41,7 @@ float2 calculateParallax(float2 currentUV , float3 V , int depthID){
     return currentUV - float2(p.x , -p.y);
 }
 
-// the shader has no side effects and does not change the depth , so the depth test may run before it
-[earlydepthstencil]
+// no [earlydepthstencil] : the alpha test discards pixels , and the depth of a discarded pixel must not be written ( an early test writes it before the shader runs )
 [shader("pixel")]
 PsOutput main(VsOutput input){
 
@@ -79,6 +78,14 @@ PsOutput main(VsOutput input){
         output.albedo = allTextures[id].Sample(samp , uv);
     }else{
         output.albedo = float4(lut.color , 1.0f);
+    }
+
+    // the alpha test ( glTF MASK ) : a pixel of the base colour map under the cutoff does not exist . the alpha of the albedo image is the alpha of the map for the tested
+    // materials ( it is always over the cutoff here ) and 1 for the others
+    if(lut.alphaMode != 0){
+        if(output.albedo.a < lut.alphaCutoff) discard;
+    }else{
+        output.albedo.a = 1.0f;
     }
 
     if(lut.metallicTextureID != NON_VALID_SLOT){

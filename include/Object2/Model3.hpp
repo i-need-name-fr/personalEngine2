@@ -3,6 +3,8 @@
 #include "Mesh2.hpp"
 
 #include <filesystem>
+#include <string>
+#include <unordered_map>
 
 #include <fastgltf/core.hpp>
 #include <fastgltf/glm_element_traits.hpp>
@@ -32,6 +34,16 @@ namespace mox
             glm::vec3 color{0.5f , 0.5f , 0.5f};
             float roughness{1.0f};
             float metallic{0.0f};
+
+            // false ( the default ) : the matrix of every NODE is baked into its vertices , the model has one matrix for all of its meshes ( a modular kit stays as the file
+            // lays it out ) . true : the vertices stay in the space of the node ( a part of a kit around its own origin ) , the meshes are grouped by the NAME of the node
+            // ( getPart ) , and every part can be put in the scene many times with its own matrices ( Mesh2::addMatrix ) . every mesh still has the instance 0 at the identity
+            bool keepNodeSpace{false};
+
+            // true : the metallicRoughness map of the file is a packed ARM map ( the red channel is the occlusion : the maps of Poly Haven , the modular kits ) , so the ao map is
+            // taken from the same file . false ( the default ) : the red channel of the map is NOT trusted ( the glTF spec does not use it , Sponza has 0 there : the occlusion 0 turned
+            // all the direct light black ) , the ao map is only the occlusionTexture of the material when it has one
+            bool armPackedOcclusion{false};
         };
 
         explicit Model3(const CreateInfo &info)
@@ -86,19 +98,32 @@ namespace mox
             return meshes;
         }
 
+        // the meshes of the node with this name ( keepNodeSpace ) : a node can have several primitives , every one is a mesh of its own . empty when there is no such node
+        [[nodiscard]] const std::vector<pMesh2>& getPart(const std::string &name) const noexcept{
+            static const std::vector<pMesh2> empty{};
+            const auto it = parts.find(name);
+            return it == parts.end() ? empty : it->second;
+        }
+
+        [[nodiscard]] const std::unordered_map<std::string , std::vector<pMesh2>>& getParts() const noexcept{
+            return parts;
+        }
+
     private:
         
         void processCopy(Model3&& input) noexcept
         {
             meshes = std::move(input.meshes);
+            parts = std::move(input.parts);
         }
 
         void processDelete() noexcept
         {
             meshes.clear();
+            parts.clear();
         }
 
-        void _implProcessTextures(Mesh2::CreateInfo &info , const gl::Primitive &prim , const gl::Asset &asset , const std::filesystem::path &directory) noexcept
+        void _implProcessTextures(Mesh2::CreateInfo &info , const gl::Primitive &prim , const gl::Asset &asset , const std::filesystem::path &directory , const bool armPackedOcclusion) noexcept
         {
             // the uri of a texture in glTF is relative to the folder of the .gltf file ( "textures/x.jpg" ) , not to the working directory of the program
             const auto fullPath = [&directory](const std::filesystem::path &relative) -> std::string{
@@ -172,9 +197,19 @@ namespace mox
                             const auto path = uriSource->uri.fspath();
                             info.roughnessPath = fullPath(path);
                             info.metallicPath = fullPath(path);
-                            info.aoPath = fullPath(path);
+                            // only when the model says that the red channel is the occlusion ( and the material has no occlusionTexture of its own )
+                            if(armPackedOcclusion && info.aoPath == NonTexturePath){
+                                info.aoPath = fullPath(path);
+                            }
                         }
                     }
+                }
+
+                // the alpha test ( MASK ) : the pixels of the base colour map under the cutoff do not exist . BLEND is not supported : it is drawn as an opaque one
+                if(mat.alphaMode == gl::AlphaMode::Mask)
+                {
+                    info.alphaMasked = true;
+                    info.alphaCutoff = static_cast<float>(mat.alphaCutoff);
                 }
 
                 // the factors of the material multiply the maps in glTF , the shaders do not multiply : a map with the factor 0 is not used .
@@ -257,7 +292,7 @@ namespace mox
                     }
                 }
 
-                _implProcessTextures(info , mesh , asset , input.path.parent_path());
+                _implProcessTextures(info , mesh , asset , input.path.parent_path() , input.armPackedOcclusion);
                 if(input.personalMetallic != NonTexturePath)
                 {
                     info.metallicPath = input.personalMetallic.string();
@@ -332,7 +367,14 @@ namespace mox
                 gl::iterateSceneNodes(asset , sceneIndex , gl::math::fmat4x4() , [&](gl::Node &node , const gl::math::fmat4x4 &matrix) -> void {
                     if(!status.has_value() || !node.meshIndex.has_value()) return;
                     const glm::mat4 world = glm::make_mat4(matrix.data());
-                    status = _implProcessMesh(asset.meshes[node.meshIndex.value()] , asset , input , world);
+                    const std::size_t before = meshes.size();
+                    status = _implProcessMesh(asset.meshes[node.meshIndex.value()] , asset , input , input.keepNodeSpace ? glm::mat4(1.0f) : world);
+
+                    // the meshes that this node has made belong to the part of its name
+                    const std::string name = node.name.empty() ? std::format("mesh_{}" , node.meshIndex.value()) : std::string(node.name.begin() , node.name.end());
+                    for(std::size_t i = before ; i < meshes.size() ; i++){
+                        parts[name].push_back(meshes[i]);
+                    }
                 });
                 if(!status.has_value()) return status;
             }
@@ -349,6 +391,7 @@ namespace mox
         }
         inline static std::optional<gl::Parser> Parser_{};
         std::vector<pMesh2> meshes{};
+        std::unordered_map<std::string , std::vector<pMesh2>> parts{};
     };
 
     using pModel3 = std::shared_ptr<Model3>;

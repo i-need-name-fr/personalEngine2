@@ -248,6 +248,7 @@ namespace mox{
                     info.context = context.get();
                     info.as = tlas.get();
                     info.path = getShaderPath("../Shaders/RayQueryShadows/rayQueryShadows");
+                    info.manager = manager.get();
 
                     shadows = std::make_shared<RayQueryShadows>(info);
                 }
@@ -343,6 +344,7 @@ namespace mox{
                     info.hitPath = getShaderPath("../Shaders/RadianceCascade/RChit");
                     info.shadowAnyHitPath = getShaderPath("../Shaders/RadianceCascade/RCshadowAnyHit");
                     info.shadowHitPath = getShaderPath("../Shaders/RadianceCascade/RCshadowHit");
+                    info.alphaAnyHitPath = getShaderPath("../Shaders/RadianceCascade/RCalphaAnyHit");
                     info.combinePath = getShaderPath("../Shaders/RadianceCascade/CombineCascades");
 
                     rc = std::make_shared<RadianceCascade>(info);
@@ -360,6 +362,8 @@ namespace mox{
                     info.shadowHitPath = getShaderPath("../Shaders/RayTracing/shadowHit");
                     info.giHitPath = getShaderPath("../Shaders/RayTracing/GI_hit");
                     info.giMissPath = getShaderPath("../Shaders/RayTracing/GI_miss");
+                    info.generalAlphaAnyHitPath = getShaderPath("../Shaders/RayTracing/alphaAnyHit");
+                    info.giAlphaAnyHitPath = getShaderPath("../Shaders/RayTracing/GI_alphaAnyHit");
                     info.manager = manager.get();
                     info.lights = light_m.get();
                     info.probes = RCManager.get();
@@ -382,6 +386,8 @@ namespace mox{
                     info.secondaryHitPath = getShaderPath("../Shaders/PathTracing/PTSecondaryHit");
                     info.shadowAnyHitPath = getShaderPath("../Shaders/PathTracing/shadowAnyHit");
                     info.shadowHitPath = getShaderPath("../Shaders/PathTracing/shadowHit");
+                    info.primaryAlphaAnyHitPath = getShaderPath("../Shaders/PathTracing/PTalphaAnyHit");
+                    info.secondaryAlphaAnyHitPath = getShaderPath("../Shaders/PathTracing/PTSecondaryAlphaAnyHit");
 
                     pt = std::make_shared<PathTracing>(info);
                 }
@@ -619,58 +625,6 @@ namespace mox{
                     if(!result.has_value()) return result;
                 }
 
-                // all meshes and models
-                {
-                    constexpr float floorHalfSize = 100.0f;
-                    constexpr float floorTileSize = 4.0f;
-                    std::vector<Vertex> floorVertices = cube::vertices;
-                    for(auto& vertex : floorVertices) vertex.UV *= (2.0f * floorHalfSize) / floorTileSize;
-
-                    Mesh2::CreateInfo info{};
-                    info.isALightObject=  false;
-                    info.color = {0.0f , 0.0f , 0.0f};
-                    info.diffusePath = "../textures/earthDiffuse.png";
-                    info.normalPath = "../textures/earthNormal.png";
-                    info.depthPath = "../textures/earthDepth.png";
-                    info.metallicPath = NonTexturePath;
-                    info.roughnessPath = "../textures/earthRoughness.png";
-                    info.needsCalcTBN = true;
-                    info.inputVertices = floorVertices;
-                    info.inputIndices = cube::indices;
-                    info.roughness = 1.0f;
-                    info.metallic = 0.0f;
-                    info.emission = {0.0f, 0.0f , 0.0f};
-
-                    meshes.push_back(std::make_shared<Mesh2>(info));
-                    glm::mat4 model = glm::mat4(1.0f);
-                    // the cube is ( -1 , 1 ) , scaled by 2 in height it is 4 high : its top is at FLOOR_Y when the centre is 2 under it
-                    model = glm::translate(model , glm::vec3(0.0f , FLOOR_Y - 2.0f , 0.0f));
-                    model = glm::scale(model , glm::vec3(floorHalfSize , 2.0f , floorHalfSize));
-                    meshes[0]->updateMatrix( model, 0);
-                }
-
-                {
-                    Mesh2::CreateInfo info{};
-                    info.isALightObject=  false;
-                    info.color = {0.5f , 0.5f , 0.5f};
-                    info.diffusePath = NonTexturePath;
-                    info.normalPath = NonTexturePath;
-                    info.depthPath = NonTexturePath;
-                    info.metallicPath = NonTexturePath;
-                    info.roughnessPath = NonTexturePath;
-                    info.needsCalcTBN = true;
-                    info.inputVertices = cube::vertices;
-                    info.inputIndices = cube::indices;
-                    info.roughness = 0.3f;
-                    info.metallic = 1.0f;
-                    info.emission = {0.0f, 0.0f , 0.0f};
-                    meshes.push_back(std::make_shared<Mesh2>(info));
-                    glm::mat4 model = glm::mat4(1.0f);
-                    // the cube is ( -1 , 1 ) , scaled by 2 in height it is 4 high : its top is at FLOOR_Y when the centre is 2 under it
-                    model = glm::translate(model , glm::vec3(-11.0f , 1.9f ,4.0f));
-                    meshes[1]->updateMatrix( model, 0);
-                }
-
                 {
                     const auto result = createLights();
                     if(!result.has_value()) return result;
@@ -703,30 +657,15 @@ namespace mox{
                     // the fort from glTF : the node transforms are baked into the vertices , the textures are found next to the .gltf
                     Model3::CreateInfo info{};
                     info.color = glm::vec3(0.0f);
-                    info.path = "../models/modular_fort_01/modular_fort_01.gltf";
+                    info.path = "../models/Sponza/Sponza.gltf";
                     info.metallic = 0.0f;
                     info.roughness = 1.0f;
                     models.push_back(std::make_shared<Model3>(info));
                     glm::mat4 model(1.0f);
-                    model = glm::translate(model , glm::vec3(-40.0f ,-2.0f, 0.0f));
-                    model = glm::scale(model , glm::vec3(1.0f));
+                    model = glm::translate(model , glm::vec3(0.0f ,10.0f, 0.0f));
+                    model = glm::scale(model , glm::vec3(2.0f));
                     models[0]->setMatrix(model , 0);
                 }
-
-                {
-                    // the fort from glTF : the node transforms are baked into the vertices , the textures are found next to the .gltf
-                    Model3::CreateInfo info{};
-                    info.color = glm::vec3(0.0f);
-                    info.path = "../models/modular_metal_gutter/modular_metal_gutter.gltf";
-                    info.metallic = 0.0f;
-                    info.roughness = 1.0f;
-                    models.push_back(std::make_shared<Model3>(info));
-                    glm::mat4 model(1.0f);
-                    model = glm::translate(model , glm::vec3(-40.0f ,20.0f, 0.0f));
-                    model = glm::scale(model , glm::vec3(3.0f));
-                    models[1]->setMatrix(model , 0);
-                }
-
             }
             catch(std::exception &e){
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create models"});
@@ -737,7 +676,7 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createLights() noexcept{
             // 3 lights
             {
-                std::vector<lg::LightSource> lights(4);
+                std::vector<lg::LightSource> lights(3);
 
                 std::mt19937 rng{std::random_device{}()};
                 const auto rnd = [&rng](const float low , const float high){
@@ -746,28 +685,32 @@ namespace mox{
                 };
 
                 // the first two : violet , not too bright , a random strength and reach
-                for(uint32_t i = 0 ; i < 4 ; i++){
+                for(uint32_t i = 0 ; i < 3 ; i++){
                     const float intensity = rnd(4.0f , 10.0f);
-                    lights[i].diffuse = glm::vec3(rnd(0.2f , 0.5f) , rnd(0.0f , 1.0f) , rnd(0.2f , 1.0f)) * intensity;
+                    lights[i].diffuse = glm::vec3(rnd(0.1f , 1.0f) , rnd(0.0f , 1.0f) , rnd(0.1f , 1.0f)) * intensity;
                     lights[i].radius = rnd(15.0f , 30.0f);
                     lights[i].Linear = rnd(0.05f , 0.012f);
                     lights[i].Quadratic = rnd(0.02f , 0.004f);
                     // the size of the lamp itself ( meters ) : the penumbra of its shadow
-                    lights[i].sourceRadius = rnd(1.0f , 2.0f);
+                    lights[i].sourceRadius = rnd(1.0f , 5.0f);
                 }
 
 
 
-                lights[0].position = glm::vec3(-23.0f , 4.0f , -1.0f);
-                lights[1].position = glm::vec3(2.2f , 3.7f , 27.0f);
-                lights[2].position = glm::vec3(-19.0f , 3.5 , 19);
-                lights[3].position = glm::vec3(-5.7f , 9.5f, -16.0f);
+                lights[0].position = glm::vec3(-3.7f , 13.0f , -8.7f);
+                lights[1].position = glm::vec3(-13.5f , 20.4f , -7.2f);
+                lights[2].position = glm::vec3(15.5f , 12.6f , 7.2);
                 // the names : the lamps are found by them , not by the index in a vector . the grid and the buffers are written by light_m->updateGrid every frame
                 for(uint32_t i = 0 ; i < lights.size() ; i++){
                     light_m->addLight(lights[i] , std::format("light_{}" , i));
                 }
             }
             return {};
+        }
+
+        void updateLightPoses(const float dt) noexcept
+        {
+            
         }
 
         void recordCmd(VkCommandBuffer& cmd , const uint32_t index) noexcept{

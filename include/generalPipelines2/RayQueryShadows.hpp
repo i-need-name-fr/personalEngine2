@@ -5,6 +5,7 @@
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../AS2/AccelerationStructureBase.hpp"
 #include "../Object2/Mesh2.hpp"
+#include "../Image2/TextureManager2.hpp"
 
 namespace mox{
 
@@ -17,6 +18,8 @@ namespace mox{
         struct CreateInfo{
             VulkanContext* context;
             AccelerationStructure* as{};
+            // the textures : the alpha test of the leaves reads the base colour map ( set 1 )
+            TextureManager2* manager{};
             std::string path;
         };
 
@@ -24,6 +27,11 @@ namespace mox{
             const auto result = checkRequirements(VkReqTypeLogicalDevice | VkReqTypePhysicalDevice |VkReqTypeQueueManager , info.context);
             if(!result.has_value()){
                 engineLogger(result);
+                THROW_MESSAGE;
+            }
+
+            if(!info.manager){
+                engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create RayQueryShadows , since the texture manager is nullptr ( the alpha test needs the textures )"});
                 THROW_MESSAGE;
             }
 
@@ -122,17 +130,23 @@ namespace mox{
             cmdBindShadersEXT(cmd , 1 , stages , shaders);
 
             {
-                VkDescriptorBufferBindingInfoEXT info{};
-                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
-                info.address = pipe->buffers[currentImage]->pBuffer;
-                info.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
-                info.pNext = nullptr;
+                std::array<VkDescriptorBufferBindingInfoEXT , 2> info{};
+                info[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info[0].address = pipe->buffers[currentImage]->pBuffer;
+                info[0].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                info[0].pNext = nullptr;
 
-                cmdBindDescriptorBuffersEXT(cmd , 1,  &info);
+                // set 1 : the textures of the TextureManager2
+                info[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info[1].address = inputData.manager->dbuffer->pBuffer;
+                info[1].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                info[1].pNext = nullptr;
 
-                uint32_t sets[1] = {0};
-                VkDeviceSize offset[] = {0};
-                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 1 , sets , offset);
+                cmdBindDescriptorBuffersEXT(cmd , 2 ,  info.data());
+
+                uint32_t sets[2] = {0 , 1};
+                VkDeviceSize offset[2] = {0 , 0};
+                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 2 , sets , offset);
             }
 
             vkCmdDispatch(cmd , x , y, 1);
@@ -178,7 +192,7 @@ namespace mox{
             // the indirect light of the last frame
             images[5] = image("indirectImage" , !currentImage)->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
-            std::array<VkBufferMemoryBarrier2 , 10> buffers;
+            std::array<VkBufferMemoryBarrier2 , 13> buffers;
 
             buffers[0] = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[1] = features->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
@@ -192,8 +206,12 @@ namespace mox{
             buffers[7] = buffer("tileLightIndices")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[8] = buffer("lightCountPerTile")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[9] = buffer("forwardInfo")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            // the geometry of the candidates : the UV for the alpha test
+            buffers[10] = Mesh2::vertexBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[11] = Mesh2::indicesBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[12] = Mesh2::MeshBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
-            auto dep = TypicalDependency<10 , 6>(images.data() , buffers.data());
+            auto dep = TypicalDependency<13 , 6>(images.data() , buffers.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -213,7 +231,7 @@ namespace mox{
 
                 pipe = std::make_shared<ShaderPipeType>(context);
                 {
-                    std::vector<DescriptorLayoutData> data(17);
+                    std::vector<DescriptorLayoutData> data(20);
                     data[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
@@ -241,6 +259,11 @@ namespace mox{
                     // the indirect light of the last frame
                     data[16] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
+                    // the geometry of the candidates ( the alpha test ) : the vertices , the indices , the meshes
+                    data[17] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[18] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[19] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -253,7 +276,7 @@ namespace mox{
 
                 {
                     PipelineLayout::CreateInfo info{};
-                    info.layouts = {pipe->descriptorLayouts[0].get()};
+                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.manager->layout.get()};
                     info.context = context;
                     info.ranges = {};
 
@@ -262,7 +285,7 @@ namespace mox{
 
                 {
                     for(auto id : {0  ,1}){
-                        std::vector<DescriptorData2> data(17);
+                        std::vector<DescriptorData2> data(20);
                         data[0] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
                         data[1] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
                         data[2] = DescriptorData2::createData(buffer("sunBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
@@ -288,6 +311,10 @@ namespace mox{
                         // the indirect light of the frame before this one ( the same parity rule as the shadow image of the last frame )
                         data[16] = DescriptorData2::createData(image("indirectImage" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 16 , 0);
 
+                        data[17] = DescriptorData2::createData(Mesh2::vertexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 17 , 0);
+                        data[18] = DescriptorData2::createData(Mesh2::indicesBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 18 , 0);
+                        data[19] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 19 , 0);
+
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
                         info.data = data;
@@ -303,7 +330,7 @@ namespace mox{
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;
                     info.filePath = inputData.path;
-                    info.layouts = {pipe->descriptorLayouts[0].get()};
+                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.manager->layout.get()};
                     info.pushes = {};
 
                     pipe->addShader(info);

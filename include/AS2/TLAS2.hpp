@@ -128,6 +128,14 @@ namespace mox{
                 data.accelerationStructureReference = Mesh2::BLAS_storage[Mesh2::totalInstanceLayouts[i].BLAS_index]->pAS;
                 data.instanceCustomIndex = i;
                 data.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+                // the rays do not force the any hit shader on everything ( no RAY_FLAG_FORCE_NON_OPAQUE ) : only the instances that need it run it , the bodies of the lamps ( the
+                // shadows go through them ) and the materials with the alpha test ( the holes of the leaves ) . the other geometry is opaque : no any hit , no cost
+                {
+                    const LUT& lut = Mesh2::LUTs[Mesh2::totalInstanceLayouts[i].LUT_index];
+                    if(lut.isLightSource != 0 || lut.alphaMode != 0){
+                        data.flags |= VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR;
+                    }
+                }
                 data.instanceShaderBindingTableRecordOffset = 0;
                 data.mask = 0xFF;
                 data.transform = matrixTransform34(Mesh2::instances[instanceID]);

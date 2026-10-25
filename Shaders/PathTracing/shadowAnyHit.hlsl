@@ -68,6 +68,14 @@
 [[vk::binding(33 , 0)]] RWTexture2D<float> pixelCheck;
 
 
+// set 1 : the textures of the TextureManager2 ( the alpha of the base colour map )
+[[vk::binding(0 , 1)]] StructuredBuffer<uint> virtualTextureIndex;
+[[vk::binding(1 , 1)]] SamplerState typicalSampler;
+[[vk::binding(2 , 1)]] Texture2D allTextures[];
+
+#define ALPHA_TEST_SAMPLER typicalSampler
+#include "../../include/ShaderStructures/AlphaTest.h"
+
 struct [raypayload] ShadowRayPayLoad{
     bool inShadow : read(closesthit , miss, caller) : write(closesthit , miss , caller);
     float depth : read(closesthit , miss, caller) : write(closesthit , miss , caller);
@@ -81,6 +89,10 @@ void main(inout ShadowRayPayLoad payload , in BuiltInTriangleIntersectionAttribu
     // accepted hit by their own flag ( RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH ) , and the rays of the shadow of the sun with a fade go on to the NEAREST
     // hit ( an AcceptHitAndEndSearch here would stop them at the first one that the traversal found , not at the nearest )
     if(LUT_Buffer[instance.LUT_index].isLightSource != 0){
+        IgnoreHit();
+    }
+    // the holes of the leaves do not cover anything either ( the alpha test of the material )
+    else if(!passesAlphaTest(InstanceID() , PrimitiveIndex() , attr.barycentrics)){
         IgnoreHit();
     }
 }

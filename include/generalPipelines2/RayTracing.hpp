@@ -62,6 +62,11 @@ namespace mox{
             std::string shadowAnyHitPath;    // RT_HITGROUP_SHADOW : the any hit
             std::string shadowHitPath;       // RT_HITGROUP_SHADOW , optional : the closest hit ( the group is an any hit only when it is empty )
             std::string generalHitPath;      // RT_HITGROUP_GENERAL , optional : an empty hit group when it is empty
+
+            // the any hit shaders of the alpha test ( glTF MASK ) : the holes of the leaves are not hit . optional , without them the masked materials are opaque for the rays .
+            // the payload of an any hit has to be the one of the closest hit of its group
+            std::string generalAlphaAnyHitPath;   // RT_HITGROUP_GENERAL
+            std::string giAlphaAnyHitPath;        // RT_HITGROUP_HITINFO
         };
 
         explicit RayTracing(const CreateInfo &info){
@@ -483,11 +488,15 @@ namespace mox{
                 ShaderModuleType shadowAnyHit(context , inputData.shadowAnyHitPath);
                 std::optional<ShaderModuleType> shadowHit;
                 if(!inputData.shadowHitPath.empty()) shadowHit.emplace(context , inputData.shadowHitPath);
+                std::optional<ShaderModuleType> generalAlphaAnyHit;
+                if(!inputData.generalAlphaAnyHitPath.empty()) generalAlphaAnyHit.emplace(context , inputData.generalAlphaAnyHitPath);
+                std::optional<ShaderModuleType> giAlphaAnyHit;
+                if(!inputData.giAlphaAnyHitPath.empty()) giAlphaAnyHit.emplace(context , inputData.giAlphaAnyHitPath);
 
                 // ------------------------------------------------------------ the stages and the groups
                 // the SBT stores no names , only the order : THIS ORDER is what RT_MISS_* and RT_HITGROUP_* mean
                 std::vector<VkPipelineShaderStageCreateInfo> stages{};
-                stages.reserve(8);
+                stages.reserve(10);
 
                 const auto addStage = [&stages](const VkShaderStageFlagBits stage , const VkShaderModule module) -> uint32_t{
                     VkPipelineShaderStageCreateInfo info{};
@@ -510,6 +519,8 @@ namespace mox{
                 const uint32_t giHitStage = addStage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR , giHit.module);
                 const uint32_t shadowAnyHitStage = addStage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR , shadowAnyHit.module);
                 const uint32_t shadowHitStage = shadowHit.has_value() ? addStage(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR , shadowHit->module) : VK_SHADER_UNUSED_KHR;
+                const uint32_t generalAlphaStage = generalAlphaAnyHit.has_value() ? addStage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR , generalAlphaAnyHit->module) : VK_SHADER_UNUSED_KHR;
+                const uint32_t giAlphaStage = giAlphaAnyHit.has_value() ? addStage(VK_SHADER_STAGE_ANY_HIT_BIT_KHR , giAlphaAnyHit->module) : VK_SHADER_UNUSED_KHR;
 
                 const auto generalGroup = [](const uint32_t stage){
                     VkRayTracingShaderGroupCreateInfoKHR group{};
@@ -543,8 +554,8 @@ namespace mox{
                     generalGroup(generalMissStage) ,     // RT_MISS_GENERAL
                     generalGroup(giMissStage) ,          // RT_MISS_HITINFO
                     generalGroup(shadowMissStage) ,      // RT_MISS_SHADOW
-                    hitGroup(generalHitStage , VK_SHADER_UNUSED_KHR) ,   // RT_HITGROUP_GENERAL
-                    hitGroup(giHitStage , VK_SHADER_UNUSED_KHR) ,        // RT_HITGROUP_HITINFO
+                    hitGroup(generalHitStage , generalAlphaStage) ,      // RT_HITGROUP_GENERAL
+                    hitGroup(giHitStage , giAlphaStage) ,                // RT_HITGROUP_HITINFO
                     hitGroup(shadowHitStage , shadowAnyHitStage)         // RT_HITGROUP_SHADOW
                 };
 

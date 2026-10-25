@@ -26,8 +26,20 @@
 
 // what a hit is : TLAS gives the index of the instance ( InstanceID = instanceCustomIndex = the index in totalInstanceLayouts ) , the instance gives the material ( LUT ) ,
 // and the material knows if the object is a body of a lamp
-[[vk::binding(11 , 0)]] RWStructuredBuffer<InstanceData> instanceLayouts;
-[[vk::binding(12 , 0)]] RWStructuredBuffer<LUT> luts;
+[[vk::binding(11 , 0)]] RWStructuredBuffer<InstanceData> instanceLayout;
+[[vk::binding(12 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
+
+// the geometry of the hit ( the UV of the candidate ) and the textures : the alpha test of the leaves
+[[vk::binding(17 , 0)]] RWStructuredBuffer<Vertex> vertices;
+[[vk::binding(18 , 0)]] RWStructuredBuffer<uint> indices;
+[[vk::binding(19 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
+
+[[vk::binding(0 , 1)]] StructuredBuffer<uint> virtualTextureIndex;
+[[vk::binding(1 , 1)]] SamplerState typicalSampler;
+[[vk::binding(2 , 1)]] Texture2D allTextures[];
+
+#define ALPHA_TEST_SAMPLER typicalSampler
+#include "../../include/ShaderStructures/AlphaTest.h"
 
 // the lamps of the tile of the pixel ( Forward+ ) : the shadow is made from all of them , not from the one that ReSTIR DI has chosen
 [[vk::binding(13 , 0)]] RWStructuredBuffer<uint> tileLightIndices;
@@ -40,11 +52,14 @@
 
 
 
-// true when something ( but a body of a lamp ) is in the way . depth is the distance to the NEAREST blocker , it is only looked for when needDepth is true
+// true when something ( but a body of a lamp and a hole of a leaf ) is in the way . depth is the distance to the NEAREST blocker , it is only looked for when needDepth is true
 // ( without it the first blocker ends the search ) . the same as the closest hit shadowHit.hlsl of the RT path , which writes RayTCurrent()
+//
+// the ray does not force the any hit on everything ( no RAY_FLAG_FORCE_NON_OPAQUE ) : the opaque triangles are committed by the traversal itself , and only the candidates of the
+// instances that the TLAS marks as non opaque ( the bodies of the lamps and the materials with the alpha test ) come to the loop
 bool shadowTraceRay(float3 direction , float3 startPos , const float tMax , const bool needDepth , out float depth){
 
-    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_NON_OPAQUE> rayQuery;
+    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> rayQuery;
 
     RayDesc ray;
     ray.Origin = startPos;
@@ -52,26 +67,30 @@ bool shadowTraceRay(float3 direction , float3 startPos , const float tMax , cons
     ray.TMax = tMax;
     ray.TMin = 0.01f;
 
-    depth = tMax;
-    bool blocked = false;
-
-    rayQuery.TraceRayInline(TLAS , RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES , 0xFF , ray);
+    // a ray that wants only "is something there" ends at the first blocker
+    const uint flags = needDepth ? RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES : (RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH);
+    rayQuery.TraceRayInline(TLAS , flags , 0xFF , ray);
 
     while(rayQuery.Proceed()){
         if(rayQuery.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE) continue;
 
-        const InstanceData instance = instanceLayouts[rayQuery.CandidateInstanceID()];
-        if(luts[instance.LUT_index].isLightSource != 0) continue;
+        const uint instanceID = rayQuery.CandidateInstanceID();
+        const InstanceData instance = instanceLayout[instanceID];
+        // the bodies of the lamps do not cover anything
+        if(LUT_Buffer[instance.LUT_index].isLightSource != 0) continue;
+        // the holes of the leaves neither
+        if(!passesAlphaTest(instanceID , rayQuery.CandidatePrimitiveIndex() , rayQuery.CandidateTriangleBarycentrics())) continue;
 
-        blocked = true;
+        // a blocker : it is committed ( the traversal then looks only for the nearer ones )
+        rayQuery.CommitNonOpaqueTriangleHit();
         if(!needDepth){
             rayQuery.Abort();
             break;
         }
-        // the candidates do not come in the order of the distance
-        depth = min(depth , rayQuery.CandidateTriangleRayT());
     }
 
+    const bool blocked = (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT);
+    depth = blocked ? rayQuery.CommittedRayT() : tMax;
     return blocked;
 }
 

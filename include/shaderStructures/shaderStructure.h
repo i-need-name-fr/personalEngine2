@@ -169,6 +169,11 @@ struct LUT{
     // the map of the ambient occlusion
     int32_t aoTextureID = -1;
 
+    // alpha test ( glTF alphaMode MASK ) : 1 - the pixels of the diffuse map with the alpha under alphaCutoff do not exist ( the raster discards them , the rays ignore the hit ) .
+    // they take the 8 bytes of padding : the struct is still 80 bytes
+    float alphaCutoff = 0.0f;
+    int32_t alphaMode = 0;
+
 #else
 
     float3 color;
@@ -186,6 +191,9 @@ struct LUT{
 
     int armTextureID;
     int aoTextureID;
+
+    float alphaCutoff;
+    int alphaMode;
 
 #endif
 

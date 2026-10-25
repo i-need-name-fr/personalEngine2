@@ -285,7 +285,7 @@ float calculateShadows(float3 position , float3 direction , float maxDistance){
     ShadowRayPayLoad shadow;
     shadow.inShadow = true;
     shadow.depth = maxDistance;
-    TraceRay(TLAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_NON_OPAQUE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
+    TraceRay(TLAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
     const float data = (shadow.inShadow )? 0.0f  : 1.0f;
     return data;
 }
@@ -302,7 +302,7 @@ float calculateShadowAtt(float3 position , float3 direction , float maxDistance)
     shadow.inShadow = true;
     shadow.depth = maxDistance;
     // no ACCEPT_FIRST_HIT : the depth has to be the one of the NEAREST blocker ( the first accepted hit can be a farther one ) , as in calculateSunShadow
-    TraceRay(TLAS, RAY_FLAG_FORCE_NON_OPAQUE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
+    TraceRay(TLAS, RAY_FLAG_NONE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
     float data = 1.0f;
     if(!shadow.inShadow) return data;
     // VISIBILITY of the lamp along this ray : r = depth / distance to the lamp . a blocker at the pixel ( r -> 0 ) gives 0 ( the full shadow ) , a blocker at the lamp
@@ -326,12 +326,12 @@ float calculateSunShadow(float3 position , float3 direction , float maxDistance 
     shadow.depth = maxDistance;
 
     if(fadeDistance <= 0.0f){
-        TraceRay(TLAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_NON_OPAQUE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
+        TraceRay(TLAS, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
         return shadow.inShadow ? 0.0f : 1.0f;
     }
 
     // no ACCEPT_FIRST_HIT : the closest hit shader runs for the NEAREST accepted hit ( the lamp bodies are ignored by the any hit ) , and its depth is what is needed
-    TraceRay(TLAS, RAY_FLAG_FORCE_NON_OPAQUE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
+    TraceRay(TLAS, RAY_FLAG_NONE , 0xFF , RT_HITGROUP_SHADOW , 0 , RT_MISS_SHADOW , ray, shadow);
     if(!shadow.inShadow) return 1.0f;
     return smoothstep(0.0f , fadeDistance , shadow.depth);
 }
@@ -393,6 +393,16 @@ float calculateShadowInSphere(inout uint seed , lg::LightSource light , const fl
     const float sampleDistance = length(toSample);
     const float3 dir = toSample / max(sampleDistance , 1e-4f);
     return calculateShadowAtt(offsetRay(P , N , generalBuffer.playerPosition) , dir , sampleDistance);
+}
+
+// the shadow of a lamp for the INDIRECT light ( the lamps that light the hits of the GI , Radiance Cascade , the reflections and the bounces of the path tracer ) : the ray goes to the
+// CENTRE of the lamp , not to a random point of its sphere . with a big sphere the random point is on the other side of a wall , and the light of a lamp under the floor leaked through
+float calculateShadowToCenter(lg::LightSource light , const float3 P , const float3 N){
+    const float3 toLight = light.position - P;
+    const float distance = length(toLight);
+    const float3 dir = toLight / max(distance , 1e-4f);
+    // the FULL shadow ( 0 or 1 ) : calculateShadowAtt gives the visibility r = depth / distance , a wall near the lamp then let a part of the light through
+    return calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , dir , distance);
 }
 
 
@@ -561,7 +571,8 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed, const float rough
         data.V = V;
         float3 L = light.position - data.P;
         L = normalize(L);
-        float3 lightPos = randomInLightRadius(seed , light , L);
+        // the centre of the lamp , not a random point of its sphere ( the indirect light : a big sphere reached through the walls )
+        float3 lightPos = light.position;
         float3 realL = lightPos - data.P;
         const float dist = length(realL);
         realL = normalize(realL);
@@ -569,7 +580,7 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed, const float rough
         computeLight(data ,realL , diffuse , specular );
 
         const float NdotL = saturate(dot(data.N , realL));  
-        float shadow = calculateShadowInSphere(seed , light , data.P , data.N);
+        float shadow = calculateShadowToCenter(light , data.P , data.N);
         float window = lightAttenuation(light, dist);
         diffuse /= saveAlbedo;
         result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;

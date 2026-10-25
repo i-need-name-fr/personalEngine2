@@ -297,6 +297,10 @@ namespace mox{
 
             uint8_t isALightObject{false};
 
+            // the alpha test ( glTF alphaMode MASK ) : the pixels of the diffuse map with the alpha under alphaCutoff are not drawn and are not hit by the rays
+            uint8_t alphaMasked{false};
+            float alphaCutoff{0.5f};
+
             float roughness{0.0f};
             float metallic{0.0f};
 
@@ -421,21 +425,6 @@ namespace mox{
             const uint32_t instanceID = totalMeshesData[meshID].instanceIndex;
             instances[instanceID] = matrix;
 
-            needsUpdate = true;
-        }
-
-        void changeMatrixStatus(const uint32_t index , const bool status) noexcept{
-            if(index >= instanceLayoutIndices.size()){
-                static uint32_t totalMessageCount = 0;
-                if(totalMessageCount < 10){
-                    std::cerr << std::format("couldnt update matrix for mesh , since the matrix index is out of range, message count -> {}", totalMessageCount ) << '\n';
-                    totalMessageCount++;
-                }
-                return;
-            }
-            const uint32_t id = instanceLayoutIndices[index];
-            totalInstanceLayouts[id].needsToBeDraw = status;
-            
             needsUpdate = true;
         }
 
@@ -591,6 +580,8 @@ namespace mox{
             lut.color = input.color;
             lut.emission = input.emission;
             lut.isLightSource = input.isALightObject;
+            lut.alphaMode = input.alphaMasked ? 1 : 0;
+            lut.alphaCutoff = input.alphaCutoff;
 
             lut.metallic = input.metallic;
             lut.roughness = input.roughness;

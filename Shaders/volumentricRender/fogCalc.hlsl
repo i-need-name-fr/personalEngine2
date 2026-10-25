@@ -87,6 +87,6 @@ void main(uint3 id : SV_DispatchThreadID){
     }
 
     // the light of the lamps and of the sun is shadowed , the own glow of the fog is not
-    const float3 scattered = Lin * filteredShadowImage[pixel].x + fogData.color;
+    const float3 scattered = Lin + fogData.color;
     fogImage[id] = float4(scattered * sigmaS , sigmaT);
 }
