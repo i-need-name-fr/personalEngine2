@@ -56,7 +56,7 @@ namespace mox{
 
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
-            std::vector<GraphParameterInfo> reqs(11);
+            std::vector<GraphParameterInfo> reqs(12);
 
             reqs[0].type = moxGraphTypeImage;
             reqs[0].name = "positionImage_0";
@@ -101,6 +101,10 @@ namespace mox{
             reqs[10].type = moxGraphTypeBuffer;
             reqs[10].name = "generalBuffer";
 
+            reqs[11].type = moxGraphTypeImage;
+            reqs[11].name = "objectAmbientImage";
+            reqs[11].imageSpecification.type = ImageType::RenderImage2;
+
             return reqs;
          } 
 
@@ -118,6 +122,7 @@ namespace mox{
                 GraphSlot<RenderImage2>{"depthImage_0" , &depthImage[0]} , GraphSlot<RenderImage2>{"depthImage_1" , &depthImage[1]} ,
                 GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} , GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
                 GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} , GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} ,
+                GraphSlot<RenderImage2>{"objectAmbientImage" , &objectAmbientImage} ,
                 GraphSlot<BufferBase2>{"generalBuffer" , &generalBuffer});
             if(!bound.has_value()) return bound;
 
@@ -130,7 +135,7 @@ namespace mox{
 
             // the g buffer is written through the color attachments of the dynamic rendering : the load op clears them ,
             // so the old contents are not needed , and the images stay in GENERAL ( the next passes read them as storage images )
-            std::array<VkImageMemoryBarrier2 , 7> barriers{};
+            std::array<VkImageMemoryBarrier2 , 8> barriers{};
             barriers[0] = albedoImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[1] = positionImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[2] = normalImage[currentImage]->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
@@ -138,13 +143,14 @@ namespace mox{
             barriers[4] = roughnessImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[5] = metallicImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[6] = pixelCheck->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[7] = objectAmbientImage->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             VkBufferMemoryBarrier2 buffer{};
             buffer = generalBuffer->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             info.bufferMemoryBarrierCount = 1;
-            info.imageMemoryBarrierCount = 7;
+            info.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
             info.pMemoryBarriers = nullptr;
             info.pBufferMemoryBarriers = &buffer;
             info.pImageMemoryBarriers = barriers.data();
@@ -224,10 +230,11 @@ namespace mox{
             cmdSetSampleMaskEXT(cmd , VK_SAMPLE_COUNT_1_BIT , &sampleMask);
             cmdSetAlphaToCoverageEnableEXT(cmd , VK_FALSE);
 
-            // the seven color attachments : no blending , everything is written
+            // the eight color attachments : no blending , everything is written
             {
-                const VkBool32 blend[7] = {VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE};
-                const VkColorComponentFlags mask[7] = {
+                const VkBool32 blend[8] = {VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE};
+                const VkColorComponentFlags mask[8] = {
+                    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
                     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
                     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
                     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
@@ -236,8 +243,8 @@ namespace mox{
                     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT ,
                     VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
 
-                cmdSetColorBlendEnableEXT(cmd , 0 , 7 , blend);
-                cmdSetColorWriteMaskEXT(cmd , 0 , 7 , mask);
+                cmdSetColorBlendEnableEXT(cmd , 0 , 8 , blend);
+                cmdSetColorWriteMaskEXT(cmd , 0 , 8 , mask);
             }
 
             // the vertex shader writes SV_ShadingRate , so the primitive rate replaces the pipeline one
@@ -305,9 +312,9 @@ namespace mox{
                 depthInfo.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
                 // the g buffer : the order is the order of SV_Target in the fragment shader
-                RenderImage2* targets[7] = {albedoImage , positionImage[currentImage] , normalImage[currentImage] , depthImage[currentImage] , roughnessImage , metallicImage , pixelCheck};
-                std::array<VkRenderingAttachmentInfo , 7> colorInfo{};
-                for(uint32_t i = 0 ; i < 7 ; i++){
+                RenderImage2* targets[8] = {albedoImage , positionImage[currentImage] , normalImage[currentImage] , depthImage[currentImage] , roughnessImage , metallicImage , pixelCheck , objectAmbientImage};
+                std::array<VkRenderingAttachmentInfo , 8> colorInfo{};
+                for(uint32_t i = 0 ; i < 8 ; i++){
                     colorInfo[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
                     colorInfo[i].pNext = nullptr;
                     colorInfo[i].imageView = targets[i]->view;
@@ -363,9 +370,10 @@ namespace mox{
         RenderImage2* pixelCheck{nullptr};
         RenderImage2* metallicImage{nullptr};
         RenderImage2* roughnessImage{nullptr};
+        RenderImage2* objectAmbientImage{nullptr};
         // 10
         BufferBase2* generalBuffer{nullptr};
-        // total 11 reqs
+        // total 12 reqs
 
 
         CreateInfo inputData{};
@@ -388,6 +396,7 @@ namespace mox{
             pixelCheck = std::exchange(input.pixelCheck , nullptr);
             metallicImage = std::exchange(input.metallicImage , nullptr);
             roughnessImage = std::exchange(input.roughnessImage , nullptr);
+            objectAmbientImage = std::exchange(input.objectAmbientImage , nullptr);
             depthBuffer = std::move(input.depthBuffer);
             completedInit = input.completedInit;
             inputData = input.inputData;
@@ -407,6 +416,7 @@ namespace mox{
             pixelCheck = nullptr;
             metallicImage = nullptr;
             roughnessImage = nullptr;
+            objectAmbientImage = nullptr;
             depthBuffer = nullptr;
             completedInit = false;
             inputData = {};

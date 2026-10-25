@@ -45,6 +45,10 @@
 [[vk::image_format("r32f")]]
 [[vk::binding(26 , 0)]] RWTexture2D<float> roughnessImage;
 
+// the ao map of the material : 1 where there is no map . the DIRECT light is multiplied by it
+[[vk::image_format("r32f")]]
+[[vk::binding(39 , 0)]] RWTexture2D<float> objectAmbientImage;
+
 [[vk::image_format("r32f")]]
 [[vk::binding(27 , 0)]] RWTexture2D<float> metallicImage;
 
@@ -82,6 +86,11 @@
 [[vk::binding(0 , 2)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 [[vk::binding(1 , 2)]] RWStructuredBuffer<lg::LightCell> lightCells;
 [[vk::binding(2 , 2)]] ConstantBuffer<lg::GridCascadeInfo> gridInfo;
+
+// set 1 : the textures of the TextureManager2 ( the same set as in GI_hit.hlsl ) : the hit of a reflection ray reads its material from them
+[[vk::binding(0 , 1)]] StructuredBuffer<uint> virtualTextureIndex;
+[[vk::binding(1 , 1)]] SamplerState typicalSampler;
+[[vk::binding(2 , 1)]] Texture2D allTextures[];
 
 
 [[vk::binding(0 , 3)]] RWStructuredBuffer<RC::ProbeInfo> RCProbeBuffer;
@@ -685,6 +694,15 @@ namespace ReSTIRGI{
         return res;
     }
 
+    // the history of GI is the one of the same SURFACE : the position of the pixel of the last frame has to be about the same as the position of this one . without it the
+    // reservoir of whatever was behind ( or in front of ) the point in the last frame was reused : the light of another surface . w == 0 marks a sky texel
+    bool historyMatchesPosition(const float3 P , const uint2 prevPixel){
+        const float4 prevPosition = prevPositionImage[prevPixel];
+        if(prevPosition.w == 0.0f) return false;
+        // the same tolerance as the check of the shadow and of Radiance Cascade ( RC::checkDisocclusion )
+        return length(P - prevPosition.xyz) <= 0.05f;
+    }
+
     ReservoirGI temporalReuse_GI( inout uint seed ,ReservoirGI current , uint2 prevCoord , GeneralObjectInfo info){
         ReservoirGI r = (ReservoirGI)0;
 
@@ -832,7 +850,10 @@ namespace ReSTIRGI{
             const bool validUV = (uv.x >= 0.0f && uv.x < 1.0f && uv.y >= 0.0f && uv.y < 1.0f);
             if(validUV){
                 const uint2 prevPixel = min(uint2(uv * float2(size)) , size - 1u);
-                res = temporalReuse_GI(seed , res , prevPixel ,info);
+                // only the history of the same surface is reused ( the position of the last frame is close to this one )
+                if(historyMatchesPosition(info.P , prevPixel)){
+                    res = temporalReuse_GI(seed , res , prevPixel ,info);
+                }
             }
         }
 
@@ -1018,7 +1039,7 @@ float3 traceRayReflection(const float3 direction , const float3 position , out f
 
     TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , RT_HITGROUP_GENERAL , 0 , RT_MISS_GENERAL , ray , load);
 
-    hitDistance = load.lightInfo.specularHitDistance;
+    hitDistance = min(load.lightInfo.specularHitDistance , 900u);
     if(load.pixelInfo.pixelType == SKYBOX_PIXEL){
         return load.lightInfo.diffuse;
     }
@@ -1026,8 +1047,8 @@ float3 traceRayReflection(const float3 direction , const float3 position , out f
     // the diffuse of the hit is demodulated ( divided by max( albedo , 0.02 ) ) and holds the indirect light too : the albedo brings it back , the indirect
     // light is taken out of it and put back without the shadow ( the shadow belongs to the direct light only , the indirect light has its own visibility inside )
     const float3 indirect = load.lightInfo.indirect;
-    const float3 directDiffuse = max(load.lightInfo.diffuse * max(load.pixelInfo.albedo , 0.02f) + indirect , 0.0f);
-    return (directDiffuse + load.lightInfo.specular) * load.lightInfo.shadow + indirect* load.lightInfo.shadow;
+    const float3 directDiffuse = max(load.lightInfo.diffuse * max(load.pixelInfo.albedo , 0.02f), 0.0f);
+    return (directDiffuse + load.lightInfo.specular) * load.lightInfo.shadow + indirect;
 }
 
 // Cascade radiance
@@ -1237,97 +1258,104 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     float diffuseHitDistance = 0.0f;
     float specularHitDistance = 0.0f;
 
+    // the ao map of the material takes the DIRECT light only ( the sun and the lamps ) : not the indirect light , not the ambient one and not the reflection ray
+    // the strength is the same slider as the one of the SSAO / HBAO ( features.AO_intens ) : the same pow as in PostProcess
+    const float objectAmbient = pow(objectAmbientImage[pixel].x , features.AO_intens);
+    float3 reflectedSpecular = 0.0f;
+
     if(needSpecular && !load.fromReflection){
         float3 L; float pdf;
         ReSTIRGI::sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
-
         if(pdf > 0.0f){
             const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
             float distance;
             const float3 radiance = traceRayReflection(L , rayOrigin , distance);
-            const float3 reflectedColor = (1.0f - info.roughness) * info.metallic * radiance * fcos / pdf;
+            const float3 reflectedColor =  radiance * fcos / pdf;
             nextDir = L;
-            totalSpecular += reflectedColor;
+            reflectedSpecular += reflectedColor;
             specularHitDistance = distance;
         }          
     }
 
     ReservoirGI gi = (ReservoirGI)0;
-    if(features.ReSTIRGI)
-    {
-        if(load.fromReflection){
-            gi = ReSTIRGI::generateReservoirGI(info , pixel , load.seed);
-        }else{
-            gi = ReSTIRGI::ReSTIR_GI_generation(load.seed , info);
-        }
-        if(gi.M > 0u){
-            const float3 L = normalize(gi.samplePos - info.P);
-            diffuseHitDistance = length(gi.samplePos - info.P);
-            totalIndirect = gi.radiance * ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic) * gi.W;
-        }
-    }
-    else if(features.RadianceCascade)
-    {
-        // the distance of the hit that the probes see : it is not used yet ( diffuseHitDistance is for the radius of the filter of the denoiser )
-        float rcHitDistance = 0.0f;
-        // we need halfVector
-        const bool reflective = ReSTIRGI::isSpecularMode(info.roughness ,info.metallic);
-        if(!reflective)
+    if(needDiffuse)
         {
-            float pdf= 0.0f;
-            float3 L = 0.0f;
-            ReSTIRGI::sampleDiffuseDirection(float2(randNoise() , randNoise()) , info.N , L , pdf);
-            float3 rcResult = 0.0f;
-            if(pdf > 0.0f)
+        if(features.ReSTIRGI)
+        {
+            if(load.fromReflection){
+                gi = ReSTIRGI::generateReservoirGI(info , pixel , load.seed);
+            }else{
+                gi = ReSTIRGI::ReSTIR_GI_generation(load.seed , info);
+            }
+            if(gi.M > 0u){
+                const float3 L = normalize(gi.samplePos - info.P);
+                diffuseHitDistance = length(gi.samplePos - info.P);
+                totalIndirect = gi.radiance * ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic) * gi.W;
+            }
+        }
+        else if(features.RadianceCascade)
+        {
+            // the distance of the hit that the probes see : it is not used yet ( diffuseHitDistance is for the radius of the filter of the denoiser )
+            float rcHitDistance = 0.0f;
+            // we need halfVector
+            const bool reflective = ReSTIRGI::isSpecularMode(info.roughness ,info.metallic);
+            if(!reflective)
             {
-                const float3 brdf = ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic);
-                rcResult  = brdf * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
-                diffuseHitDistance = rcHitDistance;
-            }   
+                float pdf= 0.0f;
+                float3 L = 0.0f;
+                ReSTIRGI::sampleDiffuseDirection(float2(randNoise() , randNoise()) , info.N , L , pdf);
+                float3 rcResult = 0.0f;
+                if(pdf > 0.0f)
+                {
+                    const float3 brdf = ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic);
+                    rcResult  = brdf * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
+                    diffuseHitDistance = rcHitDistance;
+                }   
 
-            if(validUV)
+                if(validUV)
+                {
+                    const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
+                    const float currentLum = luminance(rcResult);
+                    const float prevLum = luminance(prevRC);
+                    // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
+                    const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
+                    const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
+                    const float alpha = lerp(0.7f , 1.0f , k);
+                    rcResult = lerp(prevRC , rcResult , alpha);
+                }
+
+                totalIndirect = rcResult;
+            }
+            else
             {
-                const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
-                const float currentLum = luminance(rcResult);
-                const float prevLum = luminance(prevRC);
-                // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
-                const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
-                const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
-                const float alpha = lerp(0.7f , 1.0f , k);
-                rcResult = lerp(prevRC , rcResult , alpha);
+                float pdf= 0.0f;
+                float3 L = 0.0f;
+                float3 rcResult = 0.0f;
+
+                ReSTIRGI::sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
+                if(pdf > 0.0f)
+                {
+                    const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
+                    rcResult = fcos * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
+                    diffuseHitDistance = rcHitDistance;
+                }   
+        
+                if(validUV)
+                {
+                    const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
+                    const float currentLum = luminance(rcResult);
+                    const float prevLum = luminance(prevRC);
+                    // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
+                    const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
+                    const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
+                    const float alpha = lerp(0.7f , 1.0f , k);
+                    rcResult = lerp(prevRC , rcResult , alpha);
+                }
+
+                totalIndirect = rcResult;
             }
 
-            totalIndirect = rcResult;
         }
-        else
-        {
-            float pdf= 0.0f;
-            float3 L = 0.0f;
-            float3 rcResult = 0.0f;
-
-            ReSTIRGI::sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
-            if(pdf > 0.0f)
-            {
-                const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
-                rcResult = fcos * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
-                diffuseHitDistance = rcHitDistance;
-            }   
-    
-            if(validUV)
-            {
-                const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
-                const float currentLum = luminance(rcResult);
-                const float prevLum = luminance(prevRC);
-                // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
-                const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
-                const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
-                const float alpha = lerp(0.7f , 1.0f , k);
-                rcResult = lerp(prevRC , rcResult , alpha);
-            }
-
-            totalIndirect = rcResult;
-        }
-
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour
     
@@ -1360,6 +1388,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
 
             sunShadow /= float(features.RayQuerySunSampleCount);
         }
+
+        specular = lerp(0.0f, specular , sunShadow);
+
         totalDiffuse += diffuse * diff * sunNdotL;
         totalSpecular += specular * diff * sunNdotL;
     }
@@ -1408,7 +1439,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
 
         }
-
+        di.specularColor = lerp(0.0f, di.specularColor , lightShadow);
         totalDiffuse += di.diffuseColor.xyz;
         totalSpecular += di.specularColor.xyz;
     }
@@ -1436,27 +1467,242 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     }
 
     const float3 albedoSafe = max(info.albedo , 0.02f);
-    const float3 diffuseOut = (totalDiffuse) / albedoSafe;
+    const float3 diffuseOut = (totalDiffuse * objectAmbient) / albedoSafe;
     load.pixelInfo.albedo = info.albedo;
 
     load.lightInfo.diffuseHitDistance = min(diffuseHitDistance , 10000.0f);
     if(!load.fromReflection) load.lightInfo.specularHitDistance = min(specularHitDistance , 10000.0f);
-    load.pixelInfo.viewDir = info.P + nextDir * specularHitDistance;
+    // the direction to the camera : ReLAX_temporal reflects it by the normal to find the virtual position ( it was a POINT here , reflect() of a point is garbage )
+    load.pixelInfo.viewDir = info.V;
     load.lightInfo.shadow = totalShadow;
     load.lightInfo.shadowFrames = float(shadowFrames);
     load.lightInfo.diffuse = diffuseOut;
     load.lightInfo.indirect = totalIndirect / albedoSafe;
-    load.lightInfo.specular = totalSpecular;
+    load.lightInfo.specular = totalSpecular * objectAmbient + reflectedSpecular;
     load.pixelInfo.motionVector = prevUV - uv;
     if(!load.fromReflection) ReSTIRGIBuffer[bufferIndex(pixel)] = gi;
     if(!load.fromReflection) ReSTIRDIBuffer[bufferIndex(pixel)] = di;
 }
 
 
+// =============================== the hit of a REFLECTION ray ===============================
+// a ray of the camera hits the surface that the G buffer holds in this PIXEL : processPixel reads the G buffer . but the ray of a reflection hits another surface , the one
+// that the mirror shows , and the G buffer of the pixel of the mirror is the mirror itself : the reflected surface was lit with the position , the normal and the albedo of the
+// mirror ( it came out black or grey ) . so the hit of a reflection takes everything from the hit : the material from the LUT and the textures ( readHitData ) , the lamps from
+// the world grid by the position of the HIT ( computeLightAt ) , and it has no pixel of its own ( no reservoirs , no history )
+namespace Reflection{
+
+    struct HitSurface{
+        float3 normal;
+        float3 tangent;
+        float3 bitangent;
+        float2 uv;
+    };
+
+    // the attributes of the triangle in the object space , interpolated by the barycentrics . the indices of a mesh are LOCAL ( the draw has vertexOffset = firstVertex ,
+    // the BLAS has firstVertex ) , so the vertex is firstVertex + index
+    HitSurface interpolateHit(const uint meshID , const uint primitive , const float2 barycentrics){
+        const MeshData mesh = meshBuffer[meshID];
+        const uint base = mesh.firstIndex + primitive * 3u;
+
+        const uint i0 = mesh.firstVertex + indices[base + 0u];
+        const uint i1 = mesh.firstVertex + indices[base + 1u];
+        const uint i2 = mesh.firstVertex + indices[base + 2u];
+
+        const float w0 = 1.0f - barycentrics.x - barycentrics.y;
+        const float w1 = barycentrics.x;
+        const float w2 = barycentrics.y;
+
+        HitSurface surface;
+        surface.normal    = vertices[i0].normal    * w0 + vertices[i1].normal    * w1 + vertices[i2].normal    * w2;
+        surface.tangent   = vertices[i0].tangent   * w0 + vertices[i1].tangent   * w1 + vertices[i2].tangent   * w2;
+        surface.bitangent = vertices[i0].bitangent * w0 + vertices[i1].bitangent * w1 + vertices[i2].bitangent * w2;
+        surface.uv        = vertices[i0].UV        * w0 + vertices[i1].UV        * w1 + vertices[i2].UV        * w2;
+        return surface;
+    }
+
+    // the same as the one of the fragment shader , but SampleLevel : a ray has no derivatives
+    float2 calculateParallaxAtHit(const float2 currentUV , const float3 V , const int depthID){
+        if(depthID == NON_VALID_SLOT) return currentUV;
+        const uint physicalIndex = virtualTextureIndex[depthID];
+        const float depth = allTextures[physicalIndex].SampleLevel(typicalSampler , currentUV , 0).x;
+        const float height = 1.0f - depth;
+        const float height_scale = 0.001f;
+        const float2 p = (V.xy) / V.z * height * height_scale;
+        return currentUV - float2(p.x , -p.y);
+    }
+
+    // the surface that the ray hit : the position , the normal ( with the normal map ) , the albedo , the roughness and the metallic from the textures of its LUT
+    GeneralObjectInfo readHitData(const float2 barycentrics){
+        const InstanceData instance = instanceLayout[InstanceID()];
+        const uint meshID = instance.meshDataIndex;
+        const LUT lut = LUT_Buffer[instance.LUT_index];
+
+        const HitSurface surface = interpolateHit(meshID , PrimitiveIndex() , barycentrics);
+
+        // the same model matrix as the vertex shader of the Deferred render uses
+        const float4x4 model = instanceBuffer[meshBuffer[meshID].instanceIndex];
+
+        // normalMatrix3x3 already is inverse( transpose( model ) ) ( see the vertex shader ) , the matrix is on the left
+        const float3 N = normalize(mul(normalMatrix3x3((float3x3)model) , surface.normal));
+        const float3 T = normalize(mul(model , float4(surface.tangent , 0.0f)).xyz);
+        const float3 B = normalize(mul(model , float4(surface.bitangent , 0.0f)).xyz);
+        const float3x3 TBN = float3x3(T , B , N);
+
+        const float3 hitPoint = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+        // the direction back to the point that the ray comes from
+        const float3 V = -WorldRayDirection();
+        const float3 V_TBN = mul(TBN , V);
+
+        const float2 uv = calculateParallaxAtHit(surface.uv , V_TBN , lut.depthID);
+
+        float3 normal = N;
+        if(lut.normalID != NON_VALID_SLOT){
+            const uint nID = virtualTextureIndex[lut.normalID];
+            float3 n;
+            n.xy = allTextures[nID].SampleLevel(typicalSampler , uv , 0).xy * 2.0f - 1.0f;
+            n.z = sqrt(saturate(1.0f - dot(n.xy , n.xy)));
+            // OpenGL maps ( green up ) are used as they are with this TBN , the DirectX ones ( green down ) are flipped
+            n.y = (generalBuffer.normalMapOpenGL != 0u) ? n.y : -n.y;
+            normal = normalize(mul(n , TBN));
+        }
+
+        float3 albedo = lut.color;
+        if(lut.diffuseID != NON_VALID_SLOT){
+            const uint id = virtualTextureIndex[lut.diffuseID];
+            albedo = allTextures[id].SampleLevel(typicalSampler , uv , 0).xyz;
+        }
+
+        float metallic = lut.metallic;
+        if(lut.metallicTextureID != NON_VALID_SLOT){
+            const uint id = virtualTextureIndex[lut.metallicTextureID];
+            // RGBA8 map : a grey picture has the value in every channel , an ARM map has the metallic in B
+            metallic = allTextures[id].SampleLevel(typicalSampler , uv , 0).z;
+        }
+
+        float roughness = lut.roughness;
+        if(lut.roughnessTextureID != NON_VALID_SLOT){
+            const uint id = virtualTextureIndex[lut.roughnessTextureID];
+            // RGBA8 map : a grey picture has the value in every channel , an ARM map has the roughness in G
+            roughness = allTextures[id].SampleLevel(typicalSampler , uv , 0).y;
+        }
+
+        // the packed PBR map ( R occlusion , G roughness , B metallic ) : the occlusion is not used yet
+        if(lut.armTextureID != NON_VALID_SLOT){
+            const uint id = virtualTextureIndex[lut.armTextureID];
+            const float3 arm = allTextures[id].SampleLevel(typicalSampler , uv , 0).xyz;
+            roughness = arm.y;
+            metallic = arm.z;
+        }
+
+        // the map of the ambient occlusion : not used yet
+        if(lut.aoTextureID != NON_VALID_SLOT){
+        }
+
+        GeneralObjectInfo info = (GeneralObjectInfo)0;
+        info.albedo = albedo;
+        info.metallic = metallic;
+        // the GGX of a perfect mirror ( roughness 0 ) is degenerate : D is 0 almost everywhere , the surface came out black
+        info.roughness = max(roughness , 0.1f);
+        info.N = normal;
+        info.V = V;
+        info.P = hitPoint;
+        return info;
+    }
+
+    // the light of the hit : the sun , one lamp of the world grid ( by the position of the HIT ) and the ambient of the sky ( kD ) , like the hits of the probes of
+    // Radiance Cascade . the result is the radiance that goes back along the ray , the albedo is in it ( diffuse * albedo + specular )
+    float3 computeLightAt(const GeneralObjectInfo data , inout uint seed , const float3 V){
+        uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
+        findLightIndices(data.P , lightIndices , lightCount);
+
+        const float3 saveAlbedo = max(data.albedo , 1e-20f);
+
+        // the diffuse part has no albedo while it is summed ( it is multiplied at the end ) , the specular part has none at all
+        float3 diffuseSum = 0.0f;
+        float3 specularSum = 0.0f;
+
+        if(lightCount){
+            const uint id = (uint)(rand(seed) * lightCount);
+            lg::LightSource light = lightBuffer[lightIndices[id]];
+            float3 diffuse , specular;
+
+            float3 L = light.position - data.P;
+            L = normalize(L);
+            const float3 lightPos = randomInLightRadius(seed , light , L);
+            float3 realL = lightPos - data.P;
+            const float dist = length(realL);
+            realL = normalize(realL);
+
+            computeLight(data , realL , diffuse , specular);
+
+            const float NdotL = saturate(dot(data.N , realL));
+            const float shadow = calculateShadowInSphere(seed , light , data.P , data.N);
+            const float window = lightAttenuation(light , dist);
+            const float3 energy = NdotL * light.diffuse * shadow * window * float(lightCount);
+            diffuseSum += (diffuse / saveAlbedo) * energy;
+            specularSum += specular * energy;
+        }
+
+        if(sunBuffer.intensity > 0.0f)
+        {
+            float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
+            const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
+            const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+            computeLight(data , L , sunDiffuse , sunSpecular);
+            const float energy = saturate(dot(data.N , L)) * sunShadow;
+            diffuseSum += (sunDiffuse / saveAlbedo) * sunBuffer.diffuse * energy;
+            specularSum += sunSpecular * sunBuffer.diffuse * energy;
+        }
+
+        {
+            const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
+            const float NdotV = max(dot(data.N , V) , 0.0001f);
+            const float3 F = F_fresnel(F0 , NdotV);
+            const float3 kD = (1.0f - F) * (1.0f - data.metallic);
+            diffuseSum += sampleSkybox(data.N) * kD;
+        }
+
+        return diffuseSum + specularSum;
+    }
+}
+
+// the payload that traceRayReflection expects : lightInfo.diffuse * max( albedo , 0.02 ) is the light , the others are 0 , the shadow is 1 ( the shadow is in the light already )
+void processReflectionHit(inout RayPayLoad load , const GeneralObjectInfo info){
+    const float3 light = Reflection::computeLightAt(info , load.seed , info.V);
+    const float3 albedoSafe = max(info.albedo , 0.02f);
+    const float hitDistance = RayTCurrent();
+
+    load.lightInfo.diffuse = light;
+    load.lightInfo.specular = float3(0.0f , 0.0f , 0.0f);
+    load.lightInfo.indirect = float3(0.0f , 0.0f , 0.0f);
+    load.lightInfo.shadow = 1.0f;
+    load.lightInfo.shadowFrames = 0.0f;
+    load.lightInfo.diffuseHitDistance = min(hitDistance , 10000.0f);
+    load.lightInfo.specularHitDistance = min(hitDistance , 10000.0f);
+
+    // every field of the payload is written : the caller reads all of them
+    load.pixelInfo.position = info.P;
+    load.pixelInfo.normal = info.N;
+    load.pixelInfo.albedo = info.albedo;
+    load.pixelInfo.viewDir = info.V;
+    load.pixelInfo.motionVector = float2(0.0f , 0.0f);
+    load.pixelInfo.depth = hitDistance;
+    load.pixelInfo.metallic = info.metallic;
+    load.pixelInfo.roughness = info.roughness;
+    load.pixelInfo.pixelType = COLOR_PIXEL;
+}
+
 [shader("closesthit")]
 void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr){
     load.depth++;
     if(load.depth >= MAX_RAY_CAST) return;
+    // the ray of a reflection hits another surface than the one of the G buffer of this pixel : it reads the hit itself
+    if(load.fromReflection){
+        processReflectionHit(load , Reflection::readHitData(attr.barycentrics));
+        return;
+    }
+
     uint2 pixel = DispatchRaysIndex().xy;
     GeneralObjectInfo info = infoFromGBuffer(pixel);
     processPixel(load , info , pixel);

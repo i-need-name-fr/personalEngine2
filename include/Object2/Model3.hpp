@@ -172,6 +172,7 @@ namespace mox
                             const auto path = uriSource->uri.fspath();
                             info.roughnessPath = fullPath(path);
                             info.metallicPath = fullPath(path);
+                            info.aoPath = fullPath(path);
                         }
                     }
                 }

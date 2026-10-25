@@ -142,6 +142,7 @@ namespace mox{
             image("albedoImage" , ImageType::RenderImage2);
             image("roughnessImage" , ImageType::RenderImage2);
             image("metallicImage" , ImageType::RenderImage2);
+            image("objectAmbientImage" , ImageType::RenderImage2);
             image("viewImage" , ImageType::RenderImage2);
             image("motionVector" , ImageType::RenderImage2);
             image("pixelCheck" , ImageType::RenderImage2);
@@ -224,7 +225,8 @@ namespace mox{
                 GraphSlot<RenderImage2>{"indirectImage_0" , &indirectImage[0]} , GraphSlot<RenderImage2>{"indirectImage_1" , &indirectImage[1]} ,
                 GraphSlot<RenderImage2>{"shadowImage_0" , &shadowImage[0]} , GraphSlot<RenderImage2>{"shadowImage_1" , &shadowImage[1]} ,
                 GraphSlot<RenderImage2>{"albedoImage" , &albedoImage} , GraphSlot<RenderImage2>{"roughnessImage" , &roughnessImage} ,
-                GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} , GraphSlot<RenderImage2>{"viewImage" , &viewImage} ,
+                GraphSlot<RenderImage2>{"metallicImage" , &metallicImage} , GraphSlot<RenderImage2>{"objectAmbientImage" , &objectAmbientImage} ,
+                GraphSlot<RenderImage2>{"viewImage" , &viewImage} ,
                 GraphSlot<RenderImage2>{"motionVector" , &motionVector} , GraphSlot<RenderImage2>{"pixelCheck" , &pixelCheck} ,
                 GraphSlot<Skybox2>{"skybox" , &skybox} ,
                 GraphSlot<RenderImage2>{"transmissionLUT" , &transmissionLUT} , GraphSlot<RenderImage2>{"multiScatter" , &multiScatter} ,
@@ -252,7 +254,7 @@ namespace mox{
 
             // the G buffer of this frame and the sky : only read . the images of the light : the shaders add to them , so read and write
             // ( the images that the shaders only bind , like the shadows and the view image , are not touched by this pass )
-            std::array<VkImageMemoryBarrier2 , 19> imageBar;
+            std::array<VkImageMemoryBarrier2 , 20> imageBar;
 
             imageBar[0] = positionImage[id]->translateImage(read , stage);
             imageBar[1] = normalImage[id]->translateImage(read , stage);
@@ -282,6 +284,9 @@ namespace mox{
             imageBar[16] = positionImage[prev]->translateImage(read , stage);
             imageBar[17] = normalImage[prev]->translateImage(read , stage);
             imageBar[18] = depthImage[prev]->translateImage(read , stage);
+
+            // the occlusion of the material : only read
+            imageBar[19] = objectAmbientImage->translateImage(read , stage);
 
             std::array<VkBufferMemoryBarrier2 , 21> bufBar;
 
@@ -316,7 +321,7 @@ namespace mox{
             bufBar[20] = lightCountPerTile->translateBuffer(read , stage);
 
 
-            auto dep = TypicalDependency<21 , 19>(imageBar.data() , bufBar.data());
+            auto dep = TypicalDependency<21 , 20>(imageBar.data() , bufBar.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -342,6 +347,7 @@ namespace mox{
         RenderImage2* albedoImage{nullptr};
         RenderImage2* roughnessImage{nullptr};
         RenderImage2* metallicImage{nullptr};
+        RenderImage2* objectAmbientImage{nullptr};
         RenderImage2* viewImage{nullptr};
         RenderImage2* motionVector{nullptr};
         RenderImage2* pixelCheck{nullptr};
@@ -386,6 +392,7 @@ namespace mox{
             albedoImage = std::exchange(input.albedoImage , nullptr);
             roughnessImage = std::exchange(input.roughnessImage , nullptr);
             metallicImage = std::exchange(input.metallicImage , nullptr);
+            objectAmbientImage = std::exchange(input.objectAmbientImage , nullptr);
             viewImage = std::exchange(input.viewImage , nullptr);
             motionVector = std::exchange(input.motionVector , nullptr);
             pixelCheck = std::exchange(input.pixelCheck , nullptr);
@@ -426,6 +433,7 @@ namespace mox{
             albedoImage = nullptr;
             roughnessImage = nullptr;
             metallicImage = nullptr;
+            objectAmbientImage = nullptr;
             viewImage = nullptr;
             motionVector = nullptr;
             pixelCheck = nullptr;
@@ -463,7 +471,7 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(39);
+                    std::vector<DescriptorLayoutData> data(40);
 
                     data[0] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR , 1};
 
@@ -485,6 +493,9 @@ namespace mox{
                     data[36] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[37] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[38] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
+
+                    // the occlusion of the material ( the ao map of the object ) : the direct light is multiplied by it
+                    data[39] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
 
                     DescriptorLayout::CreateInfo info{};
@@ -509,7 +520,7 @@ namespace mox{
 
                 // ------------------------------------------------------------ set 0 : the descriptor buffers , one per parity of the frame
                 for(const auto id : {0 , 1}){
-                    std::vector<DescriptorData2> data(39);
+                    std::vector<DescriptorData2> data(40);
 
                     data[0] = DescriptorData2::createData(inputData.as , 0 , 0);
 
@@ -558,6 +569,8 @@ namespace mox{
                     data[36] = DescriptorData2::createData(positionImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 36 , 0);
                     data[37] = DescriptorData2::createData(normalImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 37 , 0);
                     data[38] = DescriptorData2::createData(depthImage[!id] , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 38 , 0);
+
+                    data[39] = DescriptorData2::createData(objectAmbientImage , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 39 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

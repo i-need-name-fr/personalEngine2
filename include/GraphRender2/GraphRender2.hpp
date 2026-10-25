@@ -282,6 +282,11 @@ namespace mox{
                 }
 
                 {
+                    const auto result = processInputParameter(data->objectAmbientImage.get() , "objectAmbientImage");
+                    if(!result.has_value()) return result;
+                }
+
+                {
                     const auto result = processInputParameter(data->finalImage.get() , "finalImage");
                     if(!result.has_value()) return result;
                 }

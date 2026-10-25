@@ -61,6 +61,10 @@
 [[vk::binding(24 , 0)]] ConstantBuffer<SkyViewData> skyBuffer;
 [[vk::binding(25 , 0)]] Texture2D transmissionLUT;
 
+// the ao map of the material : 1 where there is no map
+[[vk::image_format("r32f")]]
+[[vk::binding(26 , 0)]] RWTexture2D<float> objectAmbientImage;
+
 uint bufferIndex(uint2 pixel){
     const uint2 clamped = min(pixel , uint2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
     return clamped.x + clamped.y * generalBuffer.screenWidth;
@@ -469,6 +473,15 @@ void main(uint3 id : SV_DispatchThreadID){
             sunSpecular *= NdotL  * sunBuffer.diffuse;
             diffuse += sunDiffuse;
             specular += sunSpecular;
+        }
+
+        // the ao map of the material takes the DIRECT light only ( the lamps and the sun ) : the ambient light and the indirect light are not here , and the SSAO / HBAO of the
+        // post process is a different thing ( it knows nothing about the paint of the object ) . the reservoir keeps the light without it
+        {
+            // the strength is the same slider as the one of the SSAO / HBAO ( features.AO_intens ) : the same pow as in PostProcess
+            const float objectAmbient = pow(objectAmbientImage[id.xy].x , features.AO_intens);
+            diffuse *= objectAmbient;
+            specular *= objectAmbient;
         }
 
         // no weight of the direct light here for now ( directWeight is not applied : the clean colour )

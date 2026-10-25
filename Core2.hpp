@@ -605,6 +605,28 @@ namespace mox{
                 }
 
                 {
+                    Mesh2::CreateInfo info{};
+                    info.isALightObject=  false;
+                    info.color = {0.5f , 0.5f , 0.5f};
+                    info.diffusePath = NonTexturePath;
+                    info.normalPath = NonTexturePath;
+                    info.depthPath = NonTexturePath;
+                    info.metallicPath = NonTexturePath;
+                    info.roughnessPath = NonTexturePath;
+                    info.needsCalcTBN = true;
+                    info.inputVertices = cube::vertices;
+                    info.inputIndices = cube::indices;
+                    info.roughness = 0.3f;
+                    info.metallic = 1.0f;
+                    info.emission = {0.0f, 0.0f , 0.0f};
+                    meshes.push_back(std::make_shared<Mesh2>(info));
+                    glm::mat4 model = glm::mat4(1.0f);
+                    // the cube is ( -1 , 1 ) , scaled by 2 in height it is 4 high : its top is at FLOOR_Y when the centre is 2 under it
+                    model = glm::translate(model , glm::vec3(-11.0f , 1.9f ,4.0f));
+                    meshes[1]->updateMatrix( model, 0);
+                }
+
+                {
                     const auto result = createLights();
                     if(!result.has_value()) return result;
                 }
@@ -646,7 +668,19 @@ namespace mox{
                     models[0]->setMatrix(model , 0);
                 }
 
-
+                {
+                    // the fort from glTF : the node transforms are baked into the vertices , the textures are found next to the .gltf
+                    Model3::CreateInfo info{};
+                    info.color = glm::vec3(0.0f);
+                    info.path = "../models/modular_metal_gutter/modular_metal_gutter.gltf";
+                    info.metallic = 0.0f;
+                    info.roughness = 1.0f;
+                    models.push_back(std::make_shared<Model3>(info));
+                    glm::mat4 model(1.0f);
+                    model = glm::translate(model , glm::vec3(-40.0f ,20.0f, 0.0f));
+                    model = glm::scale(model , glm::vec3(3.0f));
+                    models[1]->setMatrix(model , 0);
+                }
 
             }
             catch(std::exception &e){
@@ -1009,7 +1043,7 @@ namespace mox{
         void drawSettingsForFeatures(GeneralFeatures &info) noexcept{
 
             // AO
-            gui::BeginDisabled(info.PT);
+            gui::BeginDisabled(false);
             {
                 // type
                 if(gui::Button("SSAO")){
@@ -1023,22 +1057,27 @@ namespace mox{
                 if(gui::Button("NO AO")){
                     info.AO = AO_NOT_REQUIRED;
                 }
-                gui::Separator();
-                ImGui::Spacing();
-                // intes
-                gui::SliderFloat("AO intesivity" , &info.AO_intens , 0.0f , 5.0f);
-                gui::Separator();
-                ImGui::Spacing();
+                gui::BeginDisabled(info.AO == AO_NOT_REQUIRED);
+                if(gui::CollapsingHeader("ao parameters"))
+                {
+                    gui::Separator();
+                    ImGui::Spacing();
+                    // intes
+                    gui::SliderFloat("AO intesivity" , &info.AO_intens , 0.0f , 5.0f);
+                    gui::Separator();
+                    ImGui::Spacing();
 
-                // rate
-                gui::Separator();
-                gui::SliderInt("AO SampleCount" , std::bit_cast<int*>(&info.AO_iteration), 0 , 64);
-                gui::Separator();
-                ImGui::Spacing();
+                    // rate
+                    gui::Separator();
+                    gui::SliderInt("AO SampleCount" , std::bit_cast<int*>(&info.AO_iteration), 0 , 64);
+                    gui::Separator();
+                    ImGui::Spacing();
 
-                gui::Separator();
-                gui::SliderFloat("AO Radius" , &info.AOradius, 0 , 20.0f);
-                gui::Separator();
+                    gui::Separator();
+                    gui::SliderFloat("AO Radius" , &info.AOradius, 0 , 20.0f);
+                    gui::Separator();
+                }
+                gui::EndDisabled();
             }
 
             gui::EndDisabled();
@@ -1046,38 +1085,41 @@ namespace mox{
 
             // shadows
             gui::BeginDisabled(info.PT && (!info.RT || !info.RayQuery));
+            if(ImGui::CollapsingHeader("shader Parameters"))
             {
-                gui::SliderInt("Sun SampleCount" , std::bit_cast<int*>(&info.RayQuerySunSampleCount), 0 , 64);
-                gui::Separator();
-                ImGui::Spacing();
+                {
+                    gui::SliderInt("Sun SampleCount" , std::bit_cast<int*>(&info.RayQuerySunSampleCount), 0 , 64);
+                    gui::Separator();
+                    ImGui::Spacing();
 
-                gui::SliderInt("LightPos SampleCount" , std::bit_cast<int*>(&info.RayQueryLightSampleCount), 0 , 64);
-                gui::Separator();
-                ImGui::Spacing();
+                    gui::SliderInt("LightPos SampleCount" , std::bit_cast<int*>(&info.RayQueryLightSampleCount), 0 , 64);
+                    gui::Separator();
+                    ImGui::Spacing();
 
-                gui::SliderFloat("light to Sun proportion" , &info.light_sun_Proportion , 0.0f , 1.0f);
-                gui::Separator();
-                ImGui::Spacing();
+                    gui::SliderFloat("light to Sun proportion" , &info.light_sun_Proportion , 0.0f , 1.0f);
+                    gui::Separator();
+                    ImGui::Spacing();
 
-                gui::SliderFloat("shadow thickness" , &info.shadowThickness , 0.0f , 5.0f);
-                gui::Separator();
-                ImGui::Spacing();
+                    gui::SliderFloat("shadow thickness" , &info.shadowThickness , 0.0f , 5.0f);
+                    gui::Separator();
+                    ImGui::Spacing();
 
-                gui::SliderFloat("temporal occlusion" , &info.temporalShadowK , 0.0f , 1.0f);
-                gui::Separator();
-                ImGui::Spacing();
+                    gui::SliderFloat("temporal occlusion" , &info.temporalShadowK , 0.0f , 1.0f);
+                    gui::Separator();
+                    ImGui::Spacing();
 
-                // how far beyond the radius of a lamp its shadow still counts ( in radii ) : 0 - it ends at the radius with a jump
-                gui::SliderFloat("light shadow fade" , &info.lightShadowFade , 0.0f , 2.0f);
-                gui::Separator();
+                    // how far beyond the radius of a lamp its shadow still counts ( in radii ) : 0 - it ends at the radius with a jump
+                    gui::SliderFloat("light shadow fade" , &info.lightShadowFade , 0.0f , 2.0f);
+                    gui::Separator();
 
-                // RT : the shadow of the sun gets weaker with the distance to what covers the pixel ( meters , 0 - no fade )
-                gui::SliderFloat("sun shadow fade" , &info.sunShadowFade , 0.0f , 200.0f);
-                gui::Separator();
+                    // RT : the shadow of the sun gets weaker with the distance to what covers the pixel ( meters , 0 - no fade )
+                    gui::SliderFloat("sun shadow fade" , &info.sunShadowFade , 0.0f , 200.0f);
+                    gui::Separator();
 
-                // how dark a shadow of the direct light can get : 0 - black , 1 - no shadow
-                gui::SliderFloat("shadow minimum" , &info.shadowMinimum , 0.0f , 1.0f);
-                gui::Separator();
+                    // how dark a shadow of the direct light can get : 0 - black , 1 - no shadow
+                    gui::SliderFloat("shadow minimum" , &info.shadowMinimum , 0.0f , 1.0f);
+                    gui::Separator();
+                }
             }
             gui::EndDisabled();
             gui::Separator();
@@ -1128,7 +1170,6 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
-            // ReSTIR DI : the best lamp of the tile , or the sum of all the lamps ( the exact one )
             gui::BeginDisabled(info.PT);
             {
                 if(gui::Button(info.ReSTIR ? "ReSTIR DI : ON" : "ReSTIR DI : OFF")){
@@ -1138,47 +1179,51 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
-            gui::BeginDisabled(info.PT || !info.RT);
+            gui::BeginDisabled(!info.RT);
+            if(gui::CollapsingHeader("GI"))
             {
-                if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
-                    info.ReSTIRGI = !info.ReSTIRGI;
-                    info.RadianceCascade = false;
+                // ReSTIR DI : the best lamp of the tile , or the sum of all the lamps ( the exact one )
+                {
+                    if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
+                        info.ReSTIRGI = !info.ReSTIRGI;
+                        info.RadianceCascade = false;
+                    }
+                }
+                gui::Separator();
+
+                gui::BeginDisabled(!info.ReSTIRGI);
+                {
+                    if(gui::Button(info.ReSTIRGI_temporal ? "ReSTIR GI temporal: ON" : "ReSTIR GI temporal: OFF")){
+                        info.ReSTIRGI_temporal = !info.ReSTIRGI_temporal;
+                    }
+                }
+                gui::EndDisabled();
+                gui::Separator();
+
+                gui::BeginDisabled(!info.ReSTIRGI);
+                {
+                    if(gui::Button(info.ReSTIRGI_spatial ? "ReSTIR GI spatial: ON" : "ReSTIR GI spatial: OFF")){
+                        info.ReSTIRGI_spatial = !info.ReSTIRGI_spatial;
+                    }
+                }
+                gui::EndDisabled();
+                gui::Separator();
+
+                {
+                    if(gui::Button(info.RadianceCascade ? "Radiance Cascade: ON" : "Radiance Cascade: OFF")){
+                        info.RadianceCascade = !info.RadianceCascade;
+                        info.ReSTIRGI = false;
+                    }
                 }
             }
             gui::EndDisabled();
             gui::Separator();
 
-            gui::BeginDisabled(info.PT || !info.RT);
-            {
-                if(gui::Button(info.ReSTIRGI_temporal ? "ReSTIR GI temporal: ON" : "ReSTIR GI temporal: OFF")){
-                    info.ReSTIRGI_temporal = !info.ReSTIRGI_temporal;
-                }
-            }
-            gui::EndDisabled();
-            gui::Separator();
 
-            gui::BeginDisabled(info.PT || !info.RT);
-            {
-                if(gui::Button(info.ReSTIRGI_spatial ? "ReSTIR GI spatial: ON" : "ReSTIR GI spatial: OFF")){
-                    info.ReSTIRGI_spatial = !info.ReSTIRGI_spatial;
-                }
-            }
-            gui::EndDisabled();
-            gui::Separator();
-
-            gui::BeginDisabled(info.PT || !info.RT);
-            {
-                if(gui::Button(info.RadianceCascade ? "Radiance Cascade: ON" : "Radiance Cascade: OFF")){
-                    info.RadianceCascade = !info.RadianceCascade;
-                    info.ReSTIRGI = false;
-                }
-            }
-            gui::EndDisabled();
-            gui::Separator();
 
 
             // fog render
-            gui::BeginDisabled(info.PT);
+            gui::BeginDisabled(false);
             {
                 if(gui::Button("VOLUMENTRIC RENDER")){
                     info.volumentricFog = !info.volumentricFog;

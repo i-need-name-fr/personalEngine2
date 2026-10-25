@@ -31,12 +31,7 @@ void main(uint3 id : SV_DispatchThreadID){
     }
 
     if(push.isAO ){
-        if(features.AO == AO_NOT_REQUIRED || features.PT){
-            outputImage[pixel] = 1.0f;
-            return;
-        }
-    }else{
-        if(features.PT){
+        if(features.AO == AO_NOT_REQUIRED){
             outputImage[pixel] = 1.0f;
             return;
         }

@@ -1014,7 +1014,8 @@ float D_GGX(float NdotH , float roughness){
     const float a = roughness * roughness;
     const float a2 = a * a;   // was a * 2 - that is not the GGX alpha squared
     const float denum = (NdotH * NdotH) * (a2 - 1.0f) + 1.0f;
-    return a2 / max(denum * denum * PI , 0.0001f);
+    // the divider has only the floor of a division by 0 : the old floor 0.0001 cut the peak of the highlight for roughness < 0.27 ( the peak is 1 / ( PI * a2 ) , 3000 at 0.1 )
+    return a2 / max(denum * denum * PI , 1e-20f);
 }
 
 float3 F_fresnel(float3 F0 , float VdotH){

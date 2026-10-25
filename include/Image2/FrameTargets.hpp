@@ -52,6 +52,9 @@ namespace mox{
         pRenderImage2 roughnessImage{};
         pRenderImage2 metallicImage{};
         pRenderImage2 albedoImage{};
+        // the ambient occlusion of the MATERIAL ( the ao map of the object , 1 : there is no map ) : written by the deferred render , read by the light pass and by the ray tracing .
+        // it is not the SSAO / HBAO ( ambientOcclusionImage ) : this one knows only what the artist painted , and it has no ping pong : it is the G buffer of this frame
+        pRenderImage2 objectAmbientImage{};
         // 16
         
         pRenderImage2 shadowImage[2]{};
@@ -103,7 +106,7 @@ namespace mox{
                 return fromUndefined ? image->translateImageUndefined(access , stage) : image->translateImage(access , stage);
             };
 
-            std::array<VkImageMemoryBarrier2 , 17> barriers;
+            std::array<VkImageMemoryBarrier2 , 18> barriers;
             barriers[0] = translate(positionImage[id].get());
             barriers[1] = translate(normalImage[id].get());
             barriers[2] = translate(depthImage[id].get());
@@ -122,6 +125,7 @@ namespace mox{
             barriers[14] = translate(finalImage.get());
             barriers[15] = translate(motionVector.get());
             barriers[16] = translate(viewImage.get());
+            barriers[17] = translate(objectAmbientImage.get());
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -157,6 +161,7 @@ namespace mox{
             finalImage->cleanTheImage(cmd);
             motionVector->cleanTheImage(cmd);
             viewImage->cleanTheImage(cmd);
+            objectAmbientImage->cleanTheImage(cmd);
         }
 
         [[nodiscard]] ErrorDataOutput<void> createImages(VulkanContext* context) noexcept{
@@ -228,6 +233,9 @@ namespace mox{
 
                 filteredAmbientOcclusion=  std::make_shared<RenderImage2>(info);
                 filteredShadowImage=  std::make_shared<RenderImage2>(info);
+
+                // the occlusion of the material : the clear value is 1 ( no occlusion ) , the format is R32F like the other G buffer images that the deferred render writes
+                objectAmbientImage = std::make_shared<RenderImage2>(info);
 
                 {
                     RenderImage2::CreateInfo info{};
@@ -315,6 +323,7 @@ namespace mox{
             finalImage     = std::move(input.finalImage);
             pixelCheck     = std::move(input.pixelCheck);
             motionVector = std::move(input.motionVector);
+            objectAmbientImage = std::move(input.objectAmbientImage);
 
             std::move(std::begin(input.shadowImage),           std::end(input.shadowImage),           std::begin(shadowImage));
             std::move(std::begin(input.ambientOcclusionImage), std::end(input.ambientOcclusionImage), std::begin(ambientOcclusionImage));
@@ -349,6 +358,7 @@ namespace mox{
             finalImage     = nullptr;
             pixelCheck     = nullptr;
             motionVector = nullptr;
+            objectAmbientImage = nullptr;
 
             std::fill(std::begin(shadowImage),           std::end(shadowImage),           nullptr);
             std::fill(std::begin(ambientOcclusionImage), std::end(ambientOcclusionImage), nullptr);

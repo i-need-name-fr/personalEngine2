@@ -26,6 +26,7 @@ struct PsOutput{
     float  roughness  : SV_Target4;   // r32f
     float  metallic   : SV_Target5;   // r32f
     float  pixelCheck : SV_Target6;   // r32f , COLOR_PIXEL where something was drawn
+    float  objectAmbient : SV_Target7; // r32f , the ao map of the material ( 1 : there is no map ) , the direct light is multiplied by it
 };
 
 // the normal maps are OpenGL style ( green up ) or DirectX style ( green down ) : generalBuffer.normalMapOpenGL ( ImGui ) , the same flag as in RayTracing/GI_hit.hlsl
@@ -106,15 +107,18 @@ PsOutput main(VsOutput input){
     }
 
 
-    // the ambient occlusion of the material goes into the ALPHA of the albedo image ( rgba16f , nobody reads its alpha : every shader takes .xyz ) . 1 : there is no occlusion
-    // ( the material has no map ) . the value is the red channel of the map ( a one channel map is loaded as it is , see aoPath in Mesh2 ) . it is not used by the lighting yet
+    // the ambient occlusion of the material ( objectAmbientImage ) : the value of the map ( the red channel ) or 1 when the material has no map . it is not the SSAO / HBAO :
+    // the lighting multiplies only the DIRECT light by it ( not the ambient and not the indirect one )
     float ambientOcclusion = 1.0f;
     if(lut.aoTextureID != NON_VALID_SLOT)
     {
         const uint id = virtualTextureIndex[lut.aoTextureID];
         ambientOcclusion = allTextures[id].Sample(samp , uv).x;
     }
-    output.albedo.a = ambientOcclusion;
+    output.objectAmbient = ambientOcclusion;
+
+    // a perfect mirror ( roughness 0 ) makes the GGX degenerate : the lower limit is for every path above ( the value , the maps , the ARM )
+    output.roughness = max(output.roughness , 0.1f);
 
     output.pixelCheck = COLOR_PIXEL;
     return output;

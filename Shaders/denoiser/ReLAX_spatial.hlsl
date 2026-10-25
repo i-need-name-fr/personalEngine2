@@ -100,11 +100,14 @@ void main(uint3 id : SV_DispatchThreadID){
         return;
     }
 
-    float radius = ComputeBlurRadius(NormalizeHitDistance(hitDistance , depthImage[id.xy].x , 0) ,historyCount );
-    
     float3 centerNormal = normalImage[id.xy].xyz;
     float centerDepth = depthImage[id.xy].x;
     float roughness = roughnessImage[id.xy].x;
+
+    // the radius had no limit : hitDistance / viewZ of a far wall seen in a mirror is ~30 , so the radius was ~1000 pixels and the 32 samples spread over the screen ( the copies of
+    // the wall ) . it is limited to MAX_RADIUS_PIXELS , and a sharp surface ( a mirror ) gets a small one : the lobe of the reflection is narrow
+    float radius = ComputeBlurRadius(NormalizeHitDistance(hitDistance , centerDepth , 0) ,historyCount );
+    radius = min(radius , MAX_RADIUS_PIXELS) * saturate(roughness / 0.3f);
 
     float3 sum = center;
     float weight= 1.0f;

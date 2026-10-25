@@ -149,9 +149,9 @@ void main(uint3 id : SV_DispatchThreadID){
     const float2 uv = (float2(id.xy) + 0.5f) / float2(screenSize);
     const float3 worldDir = ComputePixelRayDirection(id.xy , screenSize , generalBuffer.invViewProj , generalBuffer.playerPosition);
 
-    if(pixelCheck[id.xy] == SKYBOX_PIXEL || features.PT){
+    if(pixelCheck[id.xy] == SKYBOX_PIXEL){
         float3 sky = diffuseImage[id.xy].xyz;
-        if(!features.PT && features.volumentricFog){
+        if(features.volumentricFog){
             sky = applyFog(sky , FOG_SKY_DISTANCE , worldDir , uv);
         }
         HDRImage[id.xy] = float4(sky , diffuseImage[id.xy].w);
@@ -161,12 +161,12 @@ void main(uint3 id : SV_DispatchThreadID){
     const float3 diffuse = diffuseImage[id.xy].xyz;
     const float3 specular = specularImage[id.xy].xyz;
     const float3 albedo = max(albedoImage[id.xy].xyz , 0.02f);
-    const float3 direct = diffuse * albedo + specular;
+    const float3 direct = diffuse * albedo;
     const float linearDepth = depthImage[id.xy].x;
     const float shadow = saturate(pow(max(filteredShadowImage[id.xy].x , 0.0001f) , features.shadowThickness));
     const float AO = pow(filteredAmbientOcclusion[id.xy].x , features.AO_intens);
     const float3 indirect = indirectImage[id.xy].xyz * albedo;
-    float3 result = direct * shadow * AO + indirect;
+    float3 result = direct * shadow * AO + specular + indirect;
 
     if(features.currentMode == INDIRECT_MODE){
         // a debug view : no fog on it
