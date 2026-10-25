@@ -58,7 +58,7 @@ float3 sampleSkybox(const float3 N){
 [shader("miss")]
 void main(inout RayPayLoad load){
     const float3 dir = normalize(WorldRayDirection());
-    load.finalColor = sampleSkybox(dir);
+    load.finalColor = skybox.SampleLevel(samp , dir , 0).xyz;
     load.alpha = 0.0;
     // the ray left its interval ( or went to the sky ) : the distance is the end of the interval , the last cascade ends far away ( 1000 )
     load.hitDistance = RCCascadesBuffer[load.cascadeID].INTERVAL_END;

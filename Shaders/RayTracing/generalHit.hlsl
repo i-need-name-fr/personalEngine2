@@ -451,16 +451,18 @@ GeneralObjectInfo infoFromGBuffer(uint2 pixel){
     return info;
 }
 
-float3 sampleSkybox(const float3 N){
+float3 sampleSkybox(const float3 P ,const float3 N){
     float3 result = 0.0f;
     // 0 samples : no sky light ( and no division by 0 below )
     if(features.skyboxSampleCount == 0u) return result;
     [loop]
     for(uint i = 0 ; i  < features.skyboxSampleCount ; i++){
         const float3 direction = randomInHemisphere(N);
-        result += skybox.SampleLevel(samp , direction , 0).xyz;
+        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 5.0f);
+        result += skybox.SampleLevel(samp , direction , 0).xyz * shadow;
     }
     result /= float(features.skyboxSampleCount);
+    result = lerp(0.0f , result , sunBuffer.intensity);
     return result;
 }
 
@@ -643,7 +645,7 @@ namespace ReSTIRGI{
             const float NdotV = max(dot(info.normal , V2) , 0.0001f);
             const float3 F = F_fresnel(F0 , NdotV);
             const float3 kD = (1.0f - F) * (1.0f - info.metallic);
-            result += sampleSkybox(info.normal) * kD;
+            result += sampleSkybox(info.worldPos , info.normal) * kD;
         }
 
         result *= saveAlbedo;
@@ -688,7 +690,7 @@ namespace ReSTIRGI{
             const float3 F = F_fresnel(F0 , NdotV);
             // (1 - metallic) and the albedo are NOT here : evalDiffuse ( processPixel , and p_hat below ) has both of them , a second one would be a square
             const float3 kD = (1.0f - F);
-            res.radiance = sampleSkybox(info.N) * kD;
+            res.radiance = sampleSkybox(info.P , info.N) * kD;
             // the same weights as a sample that hit something ( the direction L was chosen with the pdf of the cosine ) : radiance * evalDiffuse * W is
             // radiance * albedo then . W = 1 gave radiance * albedo * cos / PI , 6 times less
             const float3 fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
@@ -915,7 +917,7 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
         dir = normalize(dir);
         float3 candidateDiffuse;
         float3 candidateSpecular;
-        const float shadow = calculateShadowInSphere(seed  , light , info.P , info.N);
+        const float shadow = calculateShadows(info.P , dir , d);
         computeLight(info , dir , candidateDiffuse , candidateSpecular);
 
         float3 radiance = 0.0f;
@@ -1062,6 +1064,30 @@ float3 traceRayReflection(const float3 direction , const float3 position , out f
     return (directDiffuse + load.lightInfo.specular) * load.lightInfo.shadow + indirect;
 }
 
+static const float RC_PLANE_SIGMA_PER_PIXEL = 0.003f;
+static const float RC_DIRECTION_POWER = 16.0f;
+static const float RC_CONFIDENCE_FULL = 0.5f;
+static const float MAX_RC_RADIANCE_LIMIT = 0.7f;
+
+// the SPATIAL REUSE of the probes : 1 - the 2 x 2 probes and the 2 x 2 texels are mixed ( the bilinear ) with the weights of the geometry , of the direction and of the radiance .
+// 0 - NO reuse at all : the nearest probe and the nearest texel of its map , the weight is 1 , nothing is checked ( for the search of what spoils the picture )
+#define RC_SPATIAL_REUSE 1
+
+// the weight of a texel of the map of directions by its distance ( in texels ) from the place that is looked for : the tent ( the bilinear ) or the SMOOTHED tent .
+// smoothstep( 1 - d ) has the zero slope at the texel itself , and for the two neighbours of the window 2 x 2 the weights still add up to 1 ( smoothstep( t ) + smoothstep( 1 - t ) = 1 ) .
+// 1 : smoothed , 0 : the plain tent
+#define RC_SMOOTH_TEXEL_WEIGHT 1
+float rcTexelWeight1D(const float distance , const float radius)
+{
+    const float tent = saturate(1.0f - distance / radius);
+#if RC_SMOOTH_TEXEL_WEIGHT
+    return smoothstep(0.0f , 1.0f , tent);
+#else
+    return tent;
+#endif
+}
+#define RC_DEBUG_CONFIDENCE 0
+
 // Cascade radiance
 namespace RC
 {
@@ -1070,11 +1096,11 @@ namespace RC
     //   floor( probePos )  - the probe on the left / top of the point , the next one is + 1 , and  probePos - floor( probePos )  is the weight of the next one ( the bilinear )
     // returns false if there is no probe for the point : it is behind the camera , or outside of the screen ( the probes of the screen know nothing about it )
     // it does not look at the depth : a point hidden behind something else gets the place of the pixel in front of it , the caller compares the depth / the normal if it matters
-    bool findProbePosition(const float3 P , out float2 probePos)
+    bool findProbePosition(const float3 P , out float2 probePos , const bool current)
     {
         probePos = float2(0.0f , 0.0f);
 
-        const float4 clipPos = mul(generalBuffer.viewProj , float4(P , 1.0f));
+        const float4 clipPos = mul((current ? generalBuffer.viewProj : generalBuffer.prevViewProj) , float4(P , 1.0f));
         if(clipPos.w <= 0.0f) return false;
 
         float2 uv = (clipPos.xy / clipPos.w) * 0.5f + 0.5f;
@@ -1090,10 +1116,10 @@ namespace RC
 
     // the probe of the cascade 0 that is the NEAREST to P : the coordinate ( the column and the row of the tile ) , not an index . int2( -1 , -1 ) if there is no probe
     // the nearest one is the tile that the point falls into , which is the rounding of probePos
-    int2 findProbe(const float3 P)
+    int2 findProbe(const float3 P, const bool current)
     {
         float2 probePos;
-        if(!findProbePosition(P , probePos)) return int2(-1 , -1);
+        if(!findProbePosition(P , probePos , current)) return int2(-1 , -1);
 
         const RC::CascadeInfo cascade = RCCascadesBuffer[0];
         // the last row / column of the tiles is cut by the edge of the screen , but a probe is there : the number of the probes is what the image holds
@@ -1103,18 +1129,20 @@ namespace RC
 
     // hitDistance : the distance of the hit that the probes see in the direction ( meters ) , for the radius of the filter of the denoiser : the mean of the distances of the
     // hits ( the sky : 1000 ) with the same weights as the colour . it is 1000 when there is no probe
-    float3 processRC(const float3 dir , const float3 P , out float hitDistance , const bool currentImage)
+    float3 processRC(const float3 dir , const float3 P, const float3 N , out float hitDistance , const bool currentImage)
     {
         hitDistance = 1000.0f;
         float2 probePos;
-        if(!findProbePosition(P , probePos))
+        if(!findProbePosition(P , probePos, currentImage))
         {
-            return sampleSkybox(dir);
+            return sampleSkybox(P , dir);
         }
 
         const RC::CascadeInfo c = RCCascadesBuffer[0];
         const int buildSize = int(c.BUILD_SIZE);
         const int2 probeCount = int2(c.CASCADE_X , c.CASCADE_Y) / buildSize;
+
+#if RC_SPATIAL_REUSE
 
         // the PROBE : the base is the probe on the left / top of the point , the fraction is how far the point is from it
         const int2 probeBase = int2(floor(probePos));
@@ -1135,6 +1163,24 @@ namespace RC
         float hitWeight = 0.0f;
         float hitDistanceSum = 0.0f;
         float missDistanceSum = 0.0f;
+        // the weight of the valid neighbours without the geometry ( the normal , the plane , the visibility ) : see RC_CONFIDENCE_FULL
+        float idealSum = 0.0f;
+
+        // the REFERENCE of the limit of the radiance : the nearest texel of the nearest probe ( see MAX_RC_RADIANCE_LIMIT )
+        float referenceLuminance = 0.0f;
+        bool hasReference = false;
+        {
+            const int2 referenceProbe = clamp(int2(floor(probePos + 0.5f)) , int2(0 , 0) , probeCount - 1);
+            const uint referenceIndex = c.PROBE_OFFSET + uint(referenceProbe.y) * c.PROBE_PER_ROW + uint(referenceProbe.x);
+            if(RCProbeBuffer[referenceIndex].validProbe != 0u)
+            {
+                const int2 referenceTexel = clamp(int2(floor(texelPos + 0.5f)) , int2(0 , 0) , int2(buildSize - 1 , buildSize - 1));
+                const uint2 referencePixel = uint2(referenceProbe * buildSize + referenceTexel);
+                const float4 referenceData = (currentImage ? RCImages[RC::imageIndex(0u , generalBuffer.frameIndex)][referencePixel] : RCImages[RC::prevImageIndex(generalBuffer.frameIndex)][referencePixel]);
+                referenceLuminance = luminance(referenceData.xyz);
+                hasReference = true;
+            }
+        }
 
         [unroll]
         for(int probeY = 1 - PROBE_SAMPLE_COUNT ; probeY <= PROBE_SAMPLE_COUNT ; probeY++)
@@ -1147,10 +1193,30 @@ namespace RC
 
                 const uint probeIndex = c.PROBE_OFFSET + uint(currentProbe.y) * c.PROBE_PER_ROW + uint(currentProbe.x);
                 if(RCProbeBuffer[probeIndex].validProbe == 0u) continue;
-
+                const RC::ProbeInfo probe = RCProbeBuffer[probeIndex];
                 const float2 probeDistance = abs(float2(probeX , probeY) - probeFrac);
-                const float probeWeight = saturate(1.0f - probeDistance.x / float(PROBE_SAMPLE_COUNT)) * saturate(1.0f - probeDistance.y / float(PROBE_SAMPLE_COUNT));
-                if(probeWeight <= 0.0f) continue;
+                // the bilinear weight of the probe : the weight that it has when the geometry does not matter
+                const float baseWeight = saturate(1.0f - probeDistance.x / float(PROBE_SAMPLE_COUNT)) * saturate(1.0f - probeDistance.y / float(PROBE_SAMPLE_COUNT));
+                if(baseWeight <= 0.0f) continue;
+                const float nW = pow(saturate(dot(N , probe.normal)) , 16.0f);
+                // the distance to the plane of the probe : the weight FALLS with it ( a probe of the neighbour wall is far from this plane ) . the scale is the size of a tile
+                // of the probes in the world
+                const float d = abs(dot(P - probe.position , probe.normal));
+                const float planeSigma = max(probe.cameraDistance * float(c.PROBE_RESOLUTION) * RC_PLANE_SIGMA_PER_PIXEL , 1e-4f);
+                const float planeWeight = exp(-d / planeSigma);
+                float geometryWeight = nW * planeWeight;
+
+                if(baseWeight * geometryWeight > 1e-4f)
+                {
+                    const float3 rayStart = offsetRay(P , N , generalBuffer.playerPosition);
+                    const float3 rayEnd = offsetRay(probe.position , probe.normal , generalBuffer.playerPosition);
+                    const float3 toProbe = rayEnd - rayStart;
+                    const float probeDistance3D = length(toProbe);
+                    if(probeDistance3D > 1e-3f)
+                    {
+                        geometryWeight *= calculateShadows(rayStart , toProbe / probeDistance3D , probeDistance3D * 0.99f);
+                    }
+                }
 
                 [unroll]
                 for(int buildY = 1 - BUILD_SAMPLE_COUNT ; buildY <= BUILD_SAMPLE_COUNT ; buildY++)
@@ -1163,14 +1229,27 @@ namespace RC
                         if(any(currentBuild < 0) || any(currentBuild >= buildSize)) continue;
 
                         const float2 texelDistance = abs(float2(buildX , buildY) - texelFrac);
-                        const float texelWeight = saturate(1.0f - texelDistance.x / float(BUILD_SAMPLE_COUNT)) * saturate(1.0f - texelDistance.y / float(BUILD_SAMPLE_COUNT));
+                        const float texelWeight = rcTexelWeight1D(texelDistance.x , float(BUILD_SAMPLE_COUNT)) * rcTexelWeight1D(texelDistance.y , float(BUILD_SAMPLE_COUNT));
                         if(texelWeight <= 0.0f) continue;
 
                         // the corner of the block of the probe + the texel in it
                         const int2 pixel = currentProbe * buildSize + currentBuild;
 
-                        const float weight = probeWeight * texelWeight;
+                        // the direction of the texel of this probe : the texels of the other directions than the one that is looked for count less
+                        const float3 texelDir = octahedralDecode((float2(currentBuild) + 0.5f) / float(buildSize));
+                        const float directionWeight = pow(saturate(dot(dir , texelDir)) , RC_DIRECTION_POWER);
+
                         const float4 sampleData = (currentImage ? RCImages[RC::imageIndex(0u , generalBuffer.frameIndex)][uint2(pixel)] : RCImages[RC::prevImageIndex(generalBuffer.frameIndex)][uint2(pixel)]);
+
+                        // the limit of the radiance : the texel on the other side of an edge of the light is skipped , and it does not count in the confidence either ( it is not a
+                        // failure of the geometry )
+                        if(hasReference && abs(luminance(sampleData.xyz) - referenceLuminance) > MAX_RC_RADIANCE_LIMIT) continue;
+
+                        // what the texel would weigh without the geometry : the denominator of the confidence
+                        idealSum += baseWeight * texelWeight * directionWeight;
+
+                        const float weight = baseWeight * geometryWeight * texelWeight * directionWeight;
+                        if(weight <= 0.0f) continue;
                         bool sampleHit;
                         float sampleDistance;
                         RC::unpackHit(sampleData.a , sampleHit , sampleDistance);
@@ -1191,11 +1270,35 @@ namespace RC
             }
         }
 
-        if(weightSum <= 0.0f) return sampleSkybox(dir);
+        // how much of the neighbourhood is good : 1 - all of it , 0 - nothing ( every probe is on another surface or does not see the point )
+        const float confidence = (idealSum > 0.0f) ? saturate(weightSum / (idealSum * RC_CONFIDENCE_FULL)) : 0.0f;
+#if RC_DEBUG_CONFIDENCE
+        return float3(confidence , confidence , confidence);
+#endif
+        if(weightSum <= 0.0f) return 0.0f;
 
         // the distance of the hits if there are any , of the misses if there are not
         hitDistance = (hitWeight > 0.0f) ? (hitDistanceSum / hitWeight) : (missDistanceSum / weightSum);
-        return result / weightSum;
+        // the fallback is 0 : the light that the weak weights give is not made into a full one by the division
+        return (result / weightSum) * confidence;
+#else
+        // NO spatial reuse : ONE probe ( the nearest one ) and ONE texel of its map ( the nearest one ) , taken as they are
+        const int2 nearestProbe = clamp(int2(floor(probePos + 0.5f)) , int2(0 , 0) , probeCount - 1);
+        const uint nearestIndex = c.PROBE_OFFSET + uint(nearestProbe.y) * c.PROBE_PER_ROW + uint(nearestProbe.x);
+        // a probe in an object or on the sky : there is nothing to take
+        if(RCProbeBuffer[nearestIndex].validProbe == 0u) return 0.0f;
+
+        const float2 directionUV = octahedralEncode(dir);
+        const int2 nearestTexel = clamp(int2(floor(directionUV * float(buildSize))) , int2(0 , 0) , int2(buildSize - 1 , buildSize - 1));
+        const uint2 nearestPixel = uint2(nearestProbe * buildSize + nearestTexel);
+
+        const float4 data = (currentImage ? RCImages[RC::imageIndex(0u , generalBuffer.frameIndex)][nearestPixel] : RCImages[RC::prevImageIndex(generalBuffer.frameIndex)][nearestPixel]);
+        bool dataHit;
+        float dataDistance;
+        RC::unpackHit(data.a , dataHit , dataDistance);
+        hitDistance = dataDistance;
+        return data.xyz;
+#endif
     }
 
 
@@ -1227,7 +1330,8 @@ bool checkDisocclusion(uint2 pixel , uint2 prevPixel){
         {
             float rcHitDistance;
             const float3 prevP = prevPositionImage[prevPixel].xyz;
-            const float3 prevColor = RC::processRC(L , prevP , rcHitDistance, false);
+            const float3 prevN = prevNormalImage[prevPixel].xyz;
+            const float3 prevColor = RC::processRC(L , prevP, prevN , rcHitDistance, false);
             return prevColor;
         }
 
@@ -1319,7 +1423,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 if(pdf > 0.0f)
                 {
                     const float3 brdf = ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic);
-                    rcResult  = brdf * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
+                    rcResult  = brdf * RC::processRC(L , info.P, info.N, rcHitDistance, true) / pdf;
                     diffuseHitDistance = rcHitDistance;
                 }   
 
@@ -1347,7 +1451,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 if(pdf > 0.0f)
                 {
                     const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
-                    rcResult = fcos * RC::processRC(L , info.P , rcHitDistance, true) / pdf;
+                    rcResult = fcos * RC::processRC(L , info.P, info.N , rcHitDistance, true) / pdf;
                     diffuseHitDistance = rcHitDistance;
                 }   
         
@@ -1401,7 +1505,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         }
 
         specular = lerp(0.0f, specular , sunShadow);
-
+        diffuse = lerp(0.0f , diffuse , sunShadow);
         totalDiffuse += diffuse * diff * sunNdotL;
         totalSpecular += specular * diff * sunNdotL;
     }
@@ -1451,6 +1555,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
 
         }
         di.specularColor = lerp(0.0f, di.specularColor , lightShadow);
+        di.diffuseColor = lerp(0.0f, di.diffuseColor , lightShadow);
         totalDiffuse += di.diffuseColor.xyz;
         totalSpecular += di.specularColor.xyz;
     }
@@ -1496,11 +1601,6 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
 }
 
 
-// =============================== the hit of a REFLECTION ray ===============================
-// a ray of the camera hits the surface that the G buffer holds in this PIXEL : processPixel reads the G buffer . but the ray of a reflection hits another surface , the one
-// that the mirror shows , and the G buffer of the pixel of the mirror is the mirror itself : the reflected surface was lit with the position , the normal and the albedo of the
-// mirror ( it came out black or grey ) . so the hit of a reflection takes everything from the hit : the material from the LUT and the textures ( readHitData ) , the lamps from
-// the world grid by the position of the HIT ( computeLightAt ) , and it has no pixel of its own ( no reservoirs , no history )
 namespace Reflection{
 
     struct HitSurface{
@@ -1672,7 +1772,7 @@ namespace Reflection{
             const float NdotV = max(dot(data.N , V) , 0.0001f);
             const float3 F = F_fresnel(F0 , NdotV);
             const float3 kD = (1.0f - F) * (1.0f - data.metallic);
-            diffuseSum += sampleSkybox(data.N) * kD;
+            diffuseSum += sampleSkybox(data.P , data.N) * kD;
         }
 
         return diffuseSum + specularSum;

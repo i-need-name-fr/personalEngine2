@@ -1195,7 +1195,8 @@ float2 octahedralEncode(float3 dir){
     dir /= (abs(dir.x) + abs(dir.y) + abs(dir.z));
     float2 result = dir.xy;
     if(dir.z < 0.0f){
-        result = (1.0f - abs(dir.yx)) * sign(dir.xy);
+        // signNotZero : sign() gives 0 for a component that is exactly 0 ( the direction ( 0 , 0 , -1 ) came back as ( 0 , 0 , 1 ) ) , the fold needs +1 there
+        result = (1.0f - abs(dir.yx)) * float2((dir.x >= 0.0f) ? 1.0f : -1.0f , (dir.y >= 0.0f) ? 1.0f : -1.0f);
     }
     return result * 0.5f + 0.5f;
 

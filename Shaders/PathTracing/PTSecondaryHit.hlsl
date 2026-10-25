@@ -422,18 +422,21 @@ GeneralObjectInfo infoFromGBuffer(uint2 pixel){
     return info;
 }
 
-float3 sampleSkybox(const float3 N){
+float3 sampleSkybox(const float3 P ,const float3 N){
     float3 result = 0.0f;
     // 0 samples : no sky light ( and no division by 0 below )
     if(features.skyboxSampleCount == 0u) return result;
     [loop]
     for(uint i = 0 ; i  < features.skyboxSampleCount ; i++){
         const float3 direction = randomInHemisphere(N);
-        result += skybox.SampleLevel(samp , direction , 0).xyz;
+        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 5.0f);
+        result += skybox.SampleLevel(samp , direction , 0).xyz * shadow;
     }
     result /= float(features.skyboxSampleCount);
+    result = lerp(0.0f , result , sunBuffer.intensity);
     return result;
 }
+
 
 
 float3 sampleHemisphere(const float2 Xi){
@@ -604,7 +607,7 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed, const float rough
         const float NdotV = max(dot(data.N , V2) , 0.0001f);
         const float3 F = F_fresnel(F0 , NdotV);
         const float3 kD = (1.0f - F) * (1.0f - data.metallic);
-        result += sampleSkybox(data.N) * kD;
+        result += sampleSkybox(data.P , data.N) * kD;
     }
 
     result *= saveAlbedo;
@@ -826,7 +829,7 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
         const float NdotV = max(dot(info.N , V2) , 0.0001f);
         const float3 F = F_fresnel(F0 , NdotV);
         const float3 kD = (1.0f - F) * (1.0f - info.metallic);
-        load.accumulatedColor += load.throughput * sampleSkybox(info.N) * kD * info.albedo * objectAO;
+        load.accumulatedColor += load.throughput * sampleSkybox(info.P , info.N) * kD * info.albedo * objectAO;
     }
 
     // when all light has been calculated , now whats left is to choose the next direction . ONE lobe is chosen : the specular one or the diffuse one ( a metal has no diffuse

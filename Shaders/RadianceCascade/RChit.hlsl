@@ -405,56 +405,68 @@ GeneralObjectInfo readData(const float2 barycentrics){
     return info;
 }
 
-float3 sampleSkybox(const float3 N){
+float3 sampleSkybox(const float3 P ,const float3 N){
     float3 result = 0.0f;
     // 0 samples : no sky light ( and no division by 0 below )
     if(features.skyboxSampleCount == 0u) return result;
     [loop]
     for(uint i = 0 ; i  < features.skyboxSampleCount ; i++){
         const float3 direction = randomInHemisphere(N);
-        result += skybox.SampleLevel(samp , direction , 0).xyz;
+        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 5.0f);
+        result += skybox.SampleLevel(samp , direction , 0).xyz * shadow;
     }
     result /= float(features.skyboxSampleCount);
+    result = lerp(0.0f , result , sunBuffer.intensity);
     return result;
 }
 
-float3 computeLightAt(GeneralObjectInfo data, inout uint seed , const float3 V){
+
+float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
     // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear * 
     uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
     uint2 pixel = DispatchRaysIndex().xy;
 
     findLightIndices(data.P , lightIndices , lightCount);
 
-    
     const float3 saveAlbedo = max(data.albedo , 1e-20);
 
     float3 result = 0.0f ;
     if(lightCount){
-        const uint id = (uint)(rand(seed) * lightCount);
-        lg::LightSource light = lightBuffer[lightIndices[id]];
-        float3 diffuse, specular;
+        // EVERY lamp of the cell of the world grid is added up ( no random choice , so no division by the chance of the choice ) . a lamp that does not see the point is skipped
+        // before its light is computed : outside of its radius , behind the surface , or covered ( the shadow ray to the centre of the lamp )
+        const float3 V = normalize(WorldRayDirection());
+        data.V = V;
+        const float3 rayOrigin = offsetRay(data.P , data.N , generalBuffer.playerPosition);
 
-        float3 L = light.position - data.P;
-        L = normalize(L);
-        // the centre of the lamp , not a random point of its sphere ( the indirect light : a big sphere reached through the walls )
-        float3 lightPos = light.position;
-        float3 realL = lightPos - data.P;
-        const float dist = length(realL);
-        realL = normalize(realL);
-        
-        computeLight(data ,realL , diffuse , specular );
+        for(uint lampSlot = 0u ; lampSlot < lightCount ; lampSlot++)
+        {
+            const lg::LightSource light = lightBuffer[lightIndices[lampSlot]];
 
-        const float NdotL = saturate(dot(data.N , realL));  
-        float shadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , dist);
-        float window = lightAttenuation(light, dist);
-        diffuse /= saveAlbedo;
-        result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
+            // the centre of the lamp , not a random point of its sphere ( the indirect light : a big sphere reached through the walls )
+            float3 realL = light.position - data.P;
+            const float dist = length(realL);
+            realL = realL / max(dist , 1e-4f);
+
+            // the cheap tests first : no ray for a lamp that does not reach the point or looks at its back
+            const float NdotL = saturate(dot(data.N , realL));
+            if(NdotL <= 0.0f) continue;
+            const float window = lightAttenuation(light , dist);
+            if(window <= 0.0f) continue;
+
+            // the lamp is not seen directly : it is skipped
+            const float shadow = calculateShadows(rayOrigin , realL , dist);
+            if(shadow <= 0.0f) continue;
+
+            float3 diffuse , specular;
+            computeLight(data , realL , diffuse , specular);
+            diffuse /= saveAlbedo;
+            result += NdotL * light.diffuse * diffuse * shadow * window;
+        }
     }else{
         result =  0.01f;
     }
 
-    if(sunBuffer.intensity > 0.0f)
-    {
+    if(sunBuffer.intensity > 0.0f){
         float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
         // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
         const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
@@ -465,18 +477,18 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed , const float3 V){
     }
 
     {
+        const float3 V2 = normalize(WorldRayOrigin() - data.P);
         const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
-        const float NdotV = max(dot(data.N , V) , 0.0001f);
+        const float NdotV = max(dot(data.N , V2) , 0.0001f);
         const float3 F = F_fresnel(F0 , NdotV);
         const float3 kD = (1.0f - F) * (1.0f - data.metallic);
-        result += sampleSkybox(data.N) * kD;
+        result += sampleSkybox(data.P , data.N) * kD;
     }
 
     result *= saveAlbedo;
 
     return result;
 }
-
 
 // the pixel of the screen where a point of the world is ( -999 behind the camera ) : the lamps of the Forward+ tile of that pixel light the point
 int2 convertToScreenPixel(const float3 position){
@@ -495,7 +507,7 @@ void processPixel(inout RayPayLoad load , in float2 barycentrics){
     // the light of the hit point : the same as the light of a hit of ReSTIR GI ( computeLightAt ) - the sun , one lamp of the world grid ( it does not need the screen : the hit
     // can be anywhere ) and the AMBIENT of the sky ( kD ) , which fills the shadows . without the ambient the shadows of the probes were black , and the light that the
     // probes gave to the pixels in the shadow was zero
-    load.finalColor = computeLightAt(info , load.seed , info.V);
+    load.finalColor = computeLightAt(info , load.seed);
     // the ray hit something inside of its interval : what is behind the surface does not count
     load.alpha = 1.0f;
     // the distance to the hit : the denoiser takes the radius of its filter from it
@@ -519,7 +531,7 @@ void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr)
 
     const float3 V = WorldRayDirection();
     GeneralObjectInfo info = readData(attr.barycentrics);
-    load.finalColor = computeLightAt(info , load.seed , V);
+    load.finalColor = computeLightAt(info , load.seed);
     load.hitDistance = RayTCurrent();
     load.alpha = 1.0f;
 }

@@ -85,8 +85,11 @@ void main(){
     RayDesc ray;
     ray.Origin = probe.position;
     ray.Direction = dir;
-    ray.TMax = 1000.0f;
-    ray.TMin = 0.0001f;
+    // the ray of a cascade lives only in the interval of this cascade ( RCProbeManager : 6 , 12 , 24 , ... m , the last one 1000 m ) : what is farther is the business of the next cascade ,
+    // and CombineCascades takes it from there ( a ray that stopped at the end of the interval is a miss : RCmiss )
+    ray.TMax = cas_.INTERVAL_END;
+    // the start of the interval ( the cascade 0 starts at 0 : the small number keeps the ray from hitting the surface that the probe stands on )
+    ray.TMin = max(cas_.INTERVAL_START , 0.0001f);
 
     RayPayLoad load = (RayPayLoad)0;
     load.seed = id.x * 3942u + id.y * 3413u + generalBuffer.frameIndex * 9283u;

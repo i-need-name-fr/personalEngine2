@@ -793,7 +793,7 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
         dir = normalize(dir);
         float3 candidateDiffuse;
         float3 candidateSpecular;
-        const float shadow = calculateShadowInSphere(seed  , light , info.P , info.N);
+        const float shadow = calculateShadows(info.P , dir , d);
         computeLight(info , dir , candidateDiffuse , candidateSpecular);
 
         float3 radiance = 0.0f;
@@ -995,7 +995,7 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
         }
 
         specular = lerp(0.0f, specular , sunShadow);
-
+        diffuse = lerp(0.0f , diffuse , sunShadow);
         totalDiffuse += diffuse * diff * sunNdotL;
         totalSpecular += specular * diff * sunNdotL;
     }
@@ -1041,6 +1041,7 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
 
         }
         di.specularColor = lerp(0.0f, di.specularColor , lightShadow);
+        di.diffuseColor = lerp(0.0f, di.diffuseColor , lightShadow);
         totalDiffuse += di.diffuseColor.xyz;
         totalSpecular += di.specularColor.xyz;
     }
