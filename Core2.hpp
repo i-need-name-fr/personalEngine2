@@ -32,6 +32,7 @@
 
 #include "include/GraphRender2/GraphRender2.hpp"
 #include "include/generalPipelines2/RayTracing.hpp"
+#include "include/generalPipelines2/PathTracing.hpp"
 #include "include/RTCompileObjects/RTCompileObjects.hpp"
 #include "include/LightManager/LightManager.hpp"
 #include "include/generalPipelines2/RadianceCascade.hpp"
@@ -122,6 +123,7 @@ namespace mox{
             fog = nullptr;
             bilateral = nullptr;
             shadows = nullptr;
+            pt = nullptr;
             rt = nullptr;
             ao = nullptr;
             forward = nullptr;
@@ -365,6 +367,25 @@ namespace mox{
                     rt = std::make_shared<RayTracing>(info);
                 }
 
+                {
+                    // the path tracer : the primary rays start in its ray generation shader , so it replaces the deferred render and the ray tracing pass
+                    PathTracing::CreateInfo info{};
+                    info.as = tlas.get();
+                    info.context = context.get();
+                    info.manager = manager.get();
+                    info.lights = light_m.get();
+                    info.rayGenerationPath = getShaderPath("../Shaders/PathTracing/PTgen");
+                    info.primaryMissPath = getShaderPath("../Shaders/PathTracing/PTmiss");
+                    info.secondaryMissPath = getShaderPath("../Shaders/PathTracing/PTSecondaryMiss");
+                    info.shadowMissPath = getShaderPath("../Shaders/PathTracing/shadowMiss");
+                    info.primaryHitPath = getShaderPath("../Shaders/PathTracing/PThit");
+                    info.secondaryHitPath = getShaderPath("../Shaders/PathTracing/PTSecondaryHit");
+                    info.shadowAnyHitPath = getShaderPath("../Shaders/PathTracing/shadowAnyHit");
+                    info.shadowHitPath = getShaderPath("../Shaders/PathTracing/shadowHit");
+
+                    pt = std::make_shared<PathTracing>(info);
+                }
+
                 const auto add = [this](GraphPass2* pass) -> ErrorDataOutput<void>{
                     return graph->addGraphPass2(pass , RasterizationPath);
                 };
@@ -404,6 +425,23 @@ namespace mox{
                     imgui.get()
                 };
 
+                // the same passes as the ray tracing , but without Radiance Cascade ( the path tracer has its own bounces )
+                GraphPass2* orderPT[] = {
+                    atmosphere.get() ,   // the sky : the sky view LUT and the cube
+                    render.get() ,       // the g buffer ( the raster has the mip levels of the textures : the primary hit of the path tracer reads it )
+                    forward.get() ,      // the lamps of every tile
+                    pt.get() ,           // the path tracer : the light and the bounces of the pixels of the g buffer , the sky
+                    ao.get() ,           // the occlusion
+                    bilateral.get() ,    // the filter of the shadows and of the occlusion
+                    fog.get() ,          // the froxel volume of the fog
+                    reblur.get() ,       // diffuse
+                    relax.get() ,        // specular
+                    post.get() ,         // diffuse * albedo + specular , the fog
+                    aehdr.get() ,        // the exposure
+                    hdr.get() ,          // the tone mapping into the final image
+                    imgui.get()
+                };
+
                 for(GraphPass2* pass : order){
                     const auto result = add(pass);
                     if(!result.has_value()) return result;
@@ -411,6 +449,11 @@ namespace mox{
 
                 for(GraphPass2* pass : orderRT){
                     const auto result = graph->addGraphPass2(pass , RayTracingPath);
+                    if(!result.has_value()) return result;
+                }
+
+                for(GraphPass2* pass : orderPT){
+                    const auto result = graph->addGraphPass2(pass , PathTracingPath);
                     if(!result.has_value()) return result;
                 }
             }
@@ -427,6 +470,8 @@ namespace mox{
             generalSettings.indirectWeight = 0.5f;
             generalSettings.ambientInIndirect = 1;
             generalSettings.normalMapOpenGL = 1;
+            generalSettings.ReBLUR = 1;
+            generalSettings.ReLAX = 1;
 
             // features
             featureSettings = GeneralFeatures{};
@@ -452,7 +497,7 @@ namespace mox{
             featureSettings.maxDepth = 50.0f;
             featureSettings.ReSTIRGI = true;
             featureSettings.ReSTIRGI_temporal = true;
-            featureSettings.ReSTIRGI_spatial = false;
+            featureSettings.ReSTIRGI_spatial = true;
             featureSettings.lightShadowFade = 0.5f;
             featureSettings.skyboxSampleCount = 2u;
             featureSettings.sunShadowFade = 30.0f;
@@ -751,6 +796,12 @@ namespace mox{
                     vkEndCommandBuffer(cmd);
                     return;
                 }
+            }else if(requiredMode == PathTracingRequired){
+                const auto result = graph->execute(cmd , PathTracingPath);
+                if(!result.has_value()){
+                    vkEndCommandBuffer(cmd);
+                    return;
+                }
             }
 
             VkImageMemoryBarrier2 swapchainBarrier{};
@@ -946,6 +997,16 @@ namespace mox{
             if(gui::Checkbox("Normal maps are OpenGL style" , &normalMapOpenGL)){
                 info.normalMapOpenGL = normalMapOpenGL ? 1u : 0u;
             }
+
+            bool blur = info.ReBLUR;
+            bool lax = info.ReLAX;
+            if(gui::Checkbox("Use ReBLUR" , &blur)){
+                info.ReBLUR = blur ? 1u : 0u;
+            }
+
+            if(gui::Checkbox("Use ReLAX" , &lax)){
+                info.ReLAX = lax ? 1u : 0u;
+            }
         }
 
         void drawSettingsForFog(FogVolume &info) noexcept{
@@ -1084,7 +1145,6 @@ namespace mox{
             gui::Separator();
 
             // shadows
-            gui::BeginDisabled(info.PT && (!info.RT || !info.RayQuery));
             if(ImGui::CollapsingHeader("shader Parameters"))
             {
                 {
@@ -1121,7 +1181,6 @@ namespace mox{
                     gui::Separator();
                 }
             }
-            gui::EndDisabled();
             gui::Separator();
 
             // RT PT rast
@@ -1260,6 +1319,7 @@ namespace mox{
         // here will be imgui
         pImgui2 imgui{};
         pRayTracing rt{};
+        pPathTracing pt{};
         pRadianceCascade rc{};
 
         std::vector<pMesh2> meshes{};

@@ -35,7 +35,7 @@ namespace mox{
 
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
-            std::vector<GraphParameterInfo> reqs(13);
+            std::vector<GraphParameterInfo> reqs(14);
 
             reqs[0].type = moxGraphTypeImage;
             reqs[0].name = "depthImage_0";
@@ -87,6 +87,9 @@ namespace mox{
 
             reqs[12].type = moxGraphTypeBuffer;
             reqs[12].name = "generalFeatures";
+
+            reqs[13].type = moxGraphTypeBuffer;
+            reqs[13].name = "generalBuffer";
 
             return reqs;
         }
@@ -146,14 +149,16 @@ namespace mox{
             imageBar[14] = image("motionVector")->translateImage(read , stage);
             imageBar[15] = image("pixelCheck")->translateImage(read , stage);
 
-            VkBufferMemoryBarrier2 bufBar = buffer("generalFeatures")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
+            std::array<VkBufferMemoryBarrier2 , 2> bufBar;
+            bufBar[0] = buffer("generalFeatures")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
+            bufBar[1] = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            info.bufferMemoryBarrierCount = 1;
+            info.bufferMemoryBarrierCount = static_cast<uint32_t>(bufBar.size());
             info.imageMemoryBarrierCount = static_cast<uint32_t>(imageBar.size());
             info.pMemoryBarriers = nullptr;
-            info.pBufferMemoryBarriers = &bufBar;
+            info.pBufferMemoryBarriers = bufBar.data();
             info.pImageMemoryBarriers = imageBar.data();
             info.memoryBarrierCount = 0;
             info.pNext = nullptr;
@@ -350,7 +355,7 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(14);
+                    std::vector<DescriptorLayoutData> data(15);
                     data[0] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[1] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
@@ -370,6 +375,7 @@ namespace mox{
                     data[12] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
                     data[13] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
+                    data[14] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -393,7 +399,7 @@ namespace mox{
                 {
                     for(auto& id : {0 , 1}){
 
-                        std::vector<DescriptorData2> data(14);
+                        std::vector<DescriptorData2> data(15);
 
                         data[0] = DescriptorData2::createData(image("diffuseImage" , id) ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0 );
                         data[1] = DescriptorData2::createData(image("diffuseImage" , !id) ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0 );
@@ -414,6 +420,7 @@ namespace mox{
                         data[12] = DescriptorData2::createData(image("pixelCheck") ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0 );
 
                         data[13] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 13 , 0);
+                        data[14] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 14 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
@@ -425,7 +432,7 @@ namespace mox{
 
                     for(auto& id : {0 , 1}){
 
-                        std::vector<DescriptorData2> data(14);
+                        std::vector<DescriptorData2> data(15);
 
                         data[0] = DescriptorData2::createData(image("indirectImage" , id) ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 0 , 0 );
                         data[1] = DescriptorData2::createData(image("indirectImage" , !id) ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1 , 0 );
@@ -446,6 +453,7 @@ namespace mox{
                         data[12] = DescriptorData2::createData(image("pixelCheck") ,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 12 , 0 );
 
                         data[13] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 13 , 0);
+                        data[14] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 14 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

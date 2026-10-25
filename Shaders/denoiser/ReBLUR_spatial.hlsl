@@ -47,6 +47,7 @@ static const float NORMAL_POWER = 128.0f;
 
 #include "../../include/ShaderStructures/ShaderStructure.h"
 [[vk::binding(13 , 0)]] ConstantBuffer<GeneralFeatures> features;
+[[vk::binding(14 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
 
 
 float ComputeBlurRadius(float normalizedHitDist, float historyCount) {
@@ -71,6 +72,10 @@ void main(uint3 id : SV_DispatchThreadID){
     if(any(id.xy >= screenSize)) return;
 
     if(pixelCheck[id.xy] == SKYBOX_PIXEL){
+        return;
+    }
+
+    if(!generalBuffer.ReBLUR){
         return;
     }
 

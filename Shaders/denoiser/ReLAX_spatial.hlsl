@@ -90,6 +90,10 @@ void main(uint3 id : SV_DispatchThreadID){
         return;
     }
 
+    if(!generalBuffer.ReLAX){
+        return;
+    }
+
     float3 center = outputSpecular[id.xy].xyz;
     float historyCount = frameCount[id.xy].x;
     float hitDistance = inputSpecular[id.xy].a;

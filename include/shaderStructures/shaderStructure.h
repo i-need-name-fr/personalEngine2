@@ -237,7 +237,8 @@ struct GeneralInfo{
     // of padding after ambientInIndirect , so the struct is still 592 bytes and the shaders that do not read it stay valid
     uint32_t normalMapOpenGL;
 
-
+    uint32_t ReBLUR;
+    uint32_t ReLAX;
 #else
 
     float4x4 inverseProj;
@@ -271,7 +272,8 @@ struct GeneralInfo{
 
     uint normalMapOpenGL;
 
-
+    uint ReBLUR;
+    uint ReLAX;
 #endif
 };
 

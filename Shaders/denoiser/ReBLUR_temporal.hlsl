@@ -36,6 +36,7 @@ static const float MAX_ACCUM_FRAMES = 64.0f;
 #include "../../include/ShaderStructures/ShaderStructure.h"
 
 [[vk::binding(13 , 0)]] ConstantBuffer<GeneralFeatures> features;
+[[vk::binding(14 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
 
 bool checkDisocclusion(int3 currentUV , int3 prevUV){
 
@@ -69,6 +70,10 @@ void main(uint3 id : SV_DispatchThreadID){
 
     if(pixelCheck[id.xy] == SKYBOX_PIXEL){
         frameCount[id.xy] = 0.0f;
+        return;
+    }
+
+    if(!generalBuffer.ReBLUR){
         return;
     }
 

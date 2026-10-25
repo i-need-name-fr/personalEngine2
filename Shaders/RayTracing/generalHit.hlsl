@@ -1695,6 +1695,8 @@ void processReflectionHit(inout RayPayLoad load , const GeneralObjectInfo info){
 
 [shader("closesthit")]
 void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr){
+    // the state of randNoise is private to the entry point : without this every pixel and every frame got the same numbers
+    initNoise(DispatchRaysIndex().xy , generalBuffer.frameIndex);
     load.depth++;
     if(load.depth >= MAX_RAY_CAST) return;
     // the ray of a reflection hits another surface than the one of the G buffer of this pixel : it reads the hit itself

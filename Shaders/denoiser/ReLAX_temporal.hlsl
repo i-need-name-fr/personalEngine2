@@ -104,6 +104,10 @@ void main(uint3 id : SV_DispatchThreadID){
         return;
     }
 
+    if(!generalBuffer.ReLAX){
+        return;
+    }
+
     float2 uv = (float2(id.xy) + 0.5f ) / float2(screenSize);
     float3 current = inputSpecular[id.xy].xyz;
     float roughness = roughnessImage[id.xy].x;
