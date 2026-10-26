@@ -583,6 +583,38 @@ namespace ReSTIRGI{
     }
 
     // next task is to fix the sun shadows
+    // MULTI BOUNCE : the indirect light that the hit point itself gets , taken from the reservoir of ReSTIR GI of the LAST frame . the pixel of the last frame that shows this point is
+    // found by prevViewProj , and its reservoir is used only when it is the same surface ( the normal and the plane ) . DIFFUSE ONLY : the radiance of the stored sample goes through
+    // the diffuse lobe of the hit ( without the albedo : computeLightAt multiplies it back at the end ) . there is no specular path : the spikes came from it
+    float3 previousBounce(const GeneralObjectInfo data)
+    {
+        const float4 clipPos = mul(generalBuffer.prevViewProj , float4(data.P , 1.0f));
+        if(clipPos.w <= 0.0f) return 0.0f;
+
+        float2 prevUV = (clipPos.xy / clipPos.w) * 0.5f + 0.5f;
+        prevUV.y = 1.0f - prevUV.y;
+        if(any(prevUV < 0.0f) || any(prevUV >= 1.0f)) return 0.0f;
+
+        const uint2 screenSize = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+        const uint2 prevPixel = min(uint2(prevUV * float2(screenSize)) , screenSize - 1u);
+
+        // the same surface : the normal is about the same and the point is on the plane of the surface of that pixel ( the tolerance grows with the distance : a pixel is wider there )
+        const float4 prevPosition = prevPositionImage[prevPixel];
+        if(prevPosition.w == 0.0f) return 0.0f;
+        const float3 prevNormal = prevNormalImage[prevPixel].xyz;
+        if(dot(prevNormal , data.N) < 0.9f) return 0.0f;
+        const float tolerance = max(0.05f , 0.01f * length(data.P - generalBuffer.playerPosition));
+        if(abs(dot(data.P - prevPosition.xyz , prevNormal)) > tolerance) return 0.0f;
+
+        const ReservoirGI prev = prevReSTIRGIBuffer[bufferIndex(prevPixel)];
+        if(prev.M == 0u) return 0.0f;
+
+        const float3 L = normalize(prev.samplePos - data.P);
+        const float3 bounce = prev.radiance * evalDiffuse(float3(1.0f , 1.0f , 1.0f) , data.N , L , data.metallic) * prev.W;
+        // NaN is not taken , and a firefly of the last frame is limited ( it would come back through the loop )
+        return sanitizeRadiance(bounce , RC::FEEDBACK_MAX_RADIANCE);
+    }
+
     float3 computeLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
         // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear * 
         if(!info.didHit){
@@ -639,14 +671,8 @@ namespace ReSTIRGI{
             result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
         }
 
-        {
-            const float3 V2 = normalize(x1Pos - info.worldPos);
-            const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
-            const float NdotV = max(dot(info.normal , V2) , 0.0001f);
-            const float3 F = F_fresnel(F0 , NdotV);
-            const float3 kD = (1.0f - F) * (1.0f - info.metallic);
-            result += sampleSkybox(info.worldPos , info.normal) * kD;
-        }
+        // the multi bounce : the light that this point gets itself ( the reservoir of the last frame ) , diffuse only
+        result += previousBounce(data);
 
         result *= saveAlbedo;
 

@@ -823,17 +823,6 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
         }
     }
 
-    {
-        const float3 V2 = normalize(-WorldRayDirection());
-        const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
-        const float NdotV = max(dot(info.N , V2) , 0.0001f);
-        const float3 F = F_fresnel(F0 , NdotV);
-        const float3 kD = (1.0f - F) * (1.0f - info.metallic);
-        load.accumulatedColor += load.throughput * sampleSkybox(info.P , info.N) * kD * info.albedo * objectAO;
-    }
-
-    // when all light has been calculated , now whats left is to choose the next direction . ONE lobe is chosen : the specular one or the diffuse one ( a metal has no diffuse
-    // lobe , its whole bounce is the specular one ) . the chance of the specular lobe is its share of the reflected light : the Fresnel against the diffuse part
     const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
     const float3 Fview = F_fresnel(F0 , max(dot(info.N , info.V) , 0.0001f));
     const float specularWeight = luminance(Fview);

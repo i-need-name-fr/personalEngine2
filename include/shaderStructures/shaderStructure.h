@@ -950,6 +950,13 @@ float lightShadowReach(const float distance , const float lightRadius , const fl
 
 float luminance(float3 color) { return dot(color, float3(0.2126, 0.7152, 0.0722)); }
 
+// a radiance that is safe to store and to filter : NaN and Inf ( a division by 0 somewhere ) become 0 , they would be smeared by the filters and the history , and the rest is
+// limited to [ 0 , maxValue ] ( one very bright ray is a firefly : it is spread over the neighbours and comes back through the cache )
+float3 sanitizeRadiance(const float3 color , const float maxValue){
+    const float3 finite = float3(isfinite(color.x) ? color.x : 0.0f , isfinite(color.y) ? color.y : 0.0f , isfinite(color.z) ? color.z : 0.0f);
+    return clamp(finite , 0.0f , maxValue);
+}
+
 
 // rand() returns [0,1) so this can never produce activeLightCount().
 
@@ -1234,6 +1241,11 @@ namespace RC{
     // the half float ends at 65504
     static const float MAX_HIT_DISTANCE = 60000.0f;
     static const float MAX_RADIANCE_TOLERANCE = 0.35f;
+
+    // the limits of the radiance of the cache ( per channel ) : what a ray brings is limited before it is stored , and what the hits take back from the cache of the last frame
+    // ( the multi bounce ) is limited more strictly , so a firefly can not run in the loop
+    static const float CACHE_MAX_RADIANCE = 32.0f;
+    static const float FEEDBACK_MAX_RADIANCE = 4.0f;
 
     float packHit(const bool hit , const float distance){
         const float d = clamp(distance , 0.0f , MAX_HIT_DISTANCE);

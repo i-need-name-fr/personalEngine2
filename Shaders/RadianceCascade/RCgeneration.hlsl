@@ -82,20 +82,73 @@ void main(){
     if(probeID >= RCProbeInfo.TOTAL_PROBES) return;
     const RC::ProbeInfo probe = RCProbeBuffer[probeID];
 
-    RayDesc ray;
-    ray.Origin = probe.position;
-    ray.Direction = dir;
-    // the ray of a cascade lives only in the interval of this cascade ( RCProbeManager : 6 , 12 , 24 , ... m , the last one 1000 m ) : what is farther is the business of the next cascade ,
-    // and CombineCascades takes it from there ( a ray that stopped at the end of the interval is a miss : RCmiss )
-    ray.TMax = cas_.INTERVAL_END;
-    // the start of the interval ( the cascade 0 starts at 0 : the small number keeps the ray from hitting the surface that the probe stands on )
-    ray.TMin = max(cas_.INTERVAL_START , 0.0001f);
+    // the rays of a texel : 1 << cascade , every one goes to a random point of the CAP of the texel ( the solid angle of a texel of the map is 4 pi / BUILD_SIZE^2 , the cap
+    // 2 pi ( 1 - cos a ) has the same area : cos a = 1 - 2 / BUILD_SIZE^2 ) . coneSamplingVector takes the cap as sin a = r / max( d , r ) , so d = 1 and r = sin a
+    const uint raysCount = 1u << push.id;
+    const float cosA = 1.0f - 2.0f / (float(cas_.BUILD_SIZE) * float(cas_.BUILD_SIZE));
+    const float sinA = sqrt(saturate(1.0f - cosA * cosA));
+
+    // the HITS and the MISSES are averaged apart : a ray that left the interval has the colour of the sky as a placeholder ( RCmiss ) , it must not get into the colour of the hits
+    float3 hitColor = 0.0f;
+    float hitWeight = 0.0f;
+    float hitDistanceSum = 0.0f;
+    float3 missColor = 0.0f;
+    float missWeight = 0.0f;
+    float missDistanceSum = 0.0f;
+    uint missCount = 0;
 
     RayPayLoad load = (RayPayLoad)0;
     load.seed = id.x * 3942u + id.y * 3413u + generalBuffer.frameIndex * 9283u;
     load.cascadeID = push.id;
-    TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , 0 , 0 , 0 , ray, load);
-    const float4 result = float4(load.finalColor , RC::packHit(load.alpha >= 0.5f , load.hitDistance));
 
-    recordData(buildUV , result , probeCoord , push.id);
+    [loop]
+    for(uint i = 0 ; i < raysCount ; i++)
+    {
+        load.seed += 2953u * i;
+        const float3 nextDir = coneSamplingVector(load.seed , dir , 1.0f , sinA);
+        const float dirWeight = pow(saturate(dot(nextDir , dir)) , 5.0f);
+
+        RayDesc ray;
+        ray.Direction = nextDir;
+        ray.Origin = probe.position;
+        ray.TMax = cas_.INTERVAL_END;
+        ray.TMin = max(cas_.INTERVAL_START , 0.0001f);
+
+        TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , 0 , 0 , 0 , ray, load);
+
+        // NaN and Inf of a ray are not stored , and one very bright ray is limited ( a firefly runs through the cache otherwise )
+        const float3 rayColor = sanitizeRadiance(load.finalColor , RC::CACHE_MAX_RADIANCE);
+
+        if(load.alpha == 0.0f)
+        {
+            missCount++;
+            missColor += rayColor * dirWeight;
+            missWeight += dirWeight;
+            missDistanceSum += load.hitDistance * dirWeight;
+        }
+        else
+        {
+            hitColor += rayColor * dirWeight;
+            hitWeight += dirWeight;
+            hitDistanceSum += load.hitDistance * dirWeight;
+        }
+    }
+
+    // the texel is a hit if the rays that missed are not the majority ( then the colour is the one of the hits ) , otherwise it is a miss ( the colour of the sky , the distance is
+    // the end of the interval ) . the alpha is packed ( RC::packHit ) : the hit flag and the distance
+    const bool texelHit = (float(missCount) <= float(raysCount) * 0.5f) && (hitWeight > 0.0f);
+    float3 finalColor;
+    float finalDistance;
+    if(texelHit)
+    {
+        finalColor = hitColor / max(hitWeight , 1e-20f);
+        finalDistance = hitDistanceSum / max(hitWeight , 1e-20f);
+    }
+    else
+    {
+        finalColor = missColor / max(missWeight , 1e-20f);
+        finalDistance = missDistanceSum / max(missWeight , 1e-20f);
+    }
+
+    recordData(buildUV , float4(finalColor , RC::packHit(texelHit , finalDistance)) , probeCoord , push.id);
 }
