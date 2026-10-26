@@ -19,7 +19,7 @@ namespace mox{
     // the miss writes the sky , the bounces start in the closest hit of the primary ray
     //
     // the pipeline is a REAL ray tracing pipeline ( vkCreateRayTracingPipelinesKHR ) , its descriptors are descriptor buffers :
-    //   set 0 : 40 bindings , the same list as in every shader of Shaders/PathTracing , two descriptor buffers , the one with the index frameIndex % 2 is bound ( the ping pong
+    //   set 0 : 42 bindings , the same list as in every shader of Shaders/PathTracing , two descriptor buffers , the one with the index frameIndex % 2 is bound ( the ping pong
     //           images and the reservoirs are swapped inside )
     //   set 1 : the textures of the TextureManager2 ( the same set as the Deferred render )
     //   set 2 : the world grid of the lamps of the LightManager
@@ -155,6 +155,8 @@ namespace mox{
             buffer("ReSTIRDIBuffer_1");
             buffer("ReSTIRGIBuffer_0");
             buffer("ReSTIRGIBuffer_1");
+            buffer("ReSTIRPTBuffer_0");
+            buffer("ReSTIRPTBuffer_1");
             buffer("tileLightIndices");
             buffer("lightCountPerTile");
             return reqs;
@@ -254,7 +256,7 @@ namespace mox{
             imageBar[19] = image("transmissionLUT")->translateImage(read , stage);
             imageBar[20] = image("multiScatter")->translateImage(read , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 20> bufBar;
+            std::array<VkBufferMemoryBarrier2 , 22> bufBar;
 
             bufBar[0] = buffer("generalBuffer")->translateBuffer(uniformRead , stage);
             bufBar[1] = buffer("generalFeatures")->translateBuffer(uniformRead , stage);
@@ -285,7 +287,11 @@ namespace mox{
             bufBar[18] = buffer("tileLightIndices")->translateBuffer(read , stage);
             bufBar[19] = buffer("lightCountPerTile")->translateBuffer(read , stage);
 
-            auto dep = TypicalDependency<20 , 21>(imageBar.data() , bufBar.data());
+            // the reservoirs of ReSTIR PT : this frame writes its own ( and reads it back ) and reads the one of the previous frame
+            bufBar[20] = buffer("ReSTIRPTBuffer" , id)->translateBuffer(read | write , stage);
+            bufBar[21] = buffer("ReSTIRPTBuffer" , prev)->translateBuffer(read , stage);
+
+            auto dep = TypicalDependency<22 , 21>(imageBar.data() , bufBar.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -346,7 +352,7 @@ namespace mox{
                 }
 
                 {
-                    std::vector<DescriptorLayoutData> data(40);
+                    std::vector<DescriptorLayoutData> data(42);
 
                     data[0] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR , 1};
 
@@ -372,6 +378,10 @@ namespace mox{
                     // the occlusion of the material ( the ao map of the object ) : the closest hit writes it , the direct light is multiplied by it
                     data[39] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
 
+                    // the reservoirs of ReSTIR PT : this frame ( 40 ) and the last frame ( 41 )
+                    data[40] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    data[41] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -394,7 +404,7 @@ namespace mox{
 
                 // ------------------------------------------------------------ set 0 : the descriptor buffers , one per parity of the frame
                 for(const auto id : {0 , 1}){
-                    std::vector<DescriptorData2> data(40);
+                    std::vector<DescriptorData2> data(42);
 
                     data[0] = DescriptorData2::createData(inputData.as , 0 , 0);
 
@@ -445,6 +455,10 @@ namespace mox{
                     data[38] = DescriptorData2::createData(image("depthImage" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 38 , 0);
 
                     data[39] = DescriptorData2::createData(image("objectAmbientImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 39 , 0);
+
+                    // the reservoirs of ReSTIR PT : this frame writes the one with its own parity and reads the other
+                    data[40] = DescriptorData2::createData(buffer("ReSTIRPTBuffer" , id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 40 , 0);
+                    data[41] = DescriptorData2::createData(buffer("ReSTIRPTBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 41 , 0);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
@@ -546,9 +560,20 @@ namespace mox{
                 info.pStages = stages.data();
                 info.groupCount = static_cast<uint32_t>(groups.size());
                 info.pGroups = groups.data();
-                // the ray generation shader traces the primary ray ( depth 1 ) , the closest hit of it traces the bounces and the shadow rays ( depth 2 ) , and the closest
-                // hit of a bounce may trace again : MAX_RAY_CAST covers the path
-                info.maxPipelineRayRecursionDepth = MAX_RAY_CAST;
+                // the recursion that the device can do : the pipeline can not ask for more than this
+                uint32_t deviceRecursionLimit = 1u;
+                {
+                    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{};
+                    rtProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+                    VkPhysicalDeviceProperties2 properties2{};
+                    properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                    properties2.pNext = &rtProperties;
+                    vkGetPhysicalDeviceProperties2(context->physicalDevice->device , &properties2);
+                    deviceRecursionLimit = rtProperties.maxRayRecursionDepth;
+                }
+                // the ray generation shader traces the primary ray ( the hit is the level 1 ) , every bounce is one level more , and the shadow ray of the last bounce is one more again :
+                // MAX_PT_RAY_CAST bounces need MAX_PT_RAY_CAST + 2 ( not more than the device can do )
+                info.maxPipelineRayRecursionDepth = std::min(static_cast<uint32_t>(MAX_PT_RAY_CAST) + 2u , deviceRecursionLimit);
                 info.pLibraryInfo = nullptr;
                 info.pLibraryInterface = nullptr;
                 info.pDynamicState = nullptr;

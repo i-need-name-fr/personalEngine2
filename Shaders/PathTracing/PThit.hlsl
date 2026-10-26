@@ -80,6 +80,10 @@
 [[vk::image_format("rgba16")]]
 [[vk::binding(37 , 0)]] RWTexture2D<float4> prevNormalImage;
 
+// the reservoirs of ReSTIR PT : this frame and the last frame ( the bindings 38 and 39 are the previous depth and the ao of the material )
+[[vk::binding(40 , 0)]] RWStructuredBuffer<ReservoirPT> ReSTIRPTBuffer;
+[[vk::binding(41 , 0)]] RWStructuredBuffer<ReservoirPT> prevReSTIRPTBuffer;
+
 [[vk::image_format("r32f")]]
 [[vk::binding(38 , 0)]] RWTexture2D<float> prevDepthImage;
 
@@ -107,6 +111,7 @@ struct [raypayload] RayPayLoad_secondary_
 {
     float3 throughput : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 accumulatedColor : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    float3 hitPoint : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float hitDistance : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint depth : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint seed : write(caller , closesthit , miss) : read(caller , closesthit , miss);
@@ -540,7 +545,7 @@ void sampleSpecularDirection(const float2 Xi , const float3 N , const float3 V ,
 // indirect GI
 // ReSTIR GI
 
-bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f || roughness < 0.4f); }
+bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f && roughness < 0.4f); }
 
 float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const float3 L){
     if(specularMode){
@@ -930,6 +935,115 @@ RayPayLoadSecondary makeBounce(const uint seed)
     return bounce;
 }
 
+// the sharpness of the weight of the temporal sample by its direction : 0 - no check , the bigger - the closer the two directions must be
+static const float PT_TEMPORAL_DIRECTION_POWER = 8.0f;
+
+namespace ReSTIRPT
+{
+    ReservoirPT generateCandidate(GeneralObjectInfo info , inout uint seed)
+    {
+        ReservoirPT r = (ReservoirPT)0;
+        
+        float pdf = 0.0f;
+        float3 L = 0.0f;
+        float3 fcos = 0.0f;
+        
+        const bool spec = isSpecularMode(info.roughness , info.metallic);
+        if(!spec)
+        {
+            sampleDiffuseDirection(float2(randNoise() , randNoise()), info.N , L , pdf);
+            if(pdf > 0.0f)
+            {
+                RayDesc ray;
+                ray.Origin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
+                ray.Direction = L;
+                ray.TMax = 1000.0f;
+                ray.TMin = 0.001f;
+                RayPayLoadSecondary bounce = makeBounce(seed);
+                TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , 1 , 0 , 1 , ray , bounce);
+                fcos = evalDiffuse(info.albedo, info.N , L , info.metallic);
+                r.radiance = bounce.accumulatedColor;
+                r.hD = min(990ul , bounce.hitDistance);
+            }
+            else
+            {
+                r.radiance = 0.0f;
+                r.hD = 990ul;
+            }
+        if(pdf <= 0.0f) return r;
+        }
+        else
+        {
+            sampleSpecularDirection( float2(randNoise() , randNoise()) ,info.N , info.V , info.roughness , L ,pdf);
+            if(pdf > 0.0f)
+            {
+                float3 F0 = lerp(0.04 , info.albedo , info.metallic);
+                RayDesc ray;
+                ray.Origin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
+                ray.Direction = L;
+                ray.TMax = 1000.0f;
+                ray.TMin = 0.001f;
+                RayPayLoadSecondary bounce = makeBounce(seed);
+                TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , 1 , 0 , 1 , ray , bounce);
+                fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
+                r.radiance = bounce.accumulatedColor;
+                r.hD = min(990ul , bounce.hitDistance);
+            }
+            else
+            {
+                r.radiance = 0.0f;
+                r.hD = 990ul;
+            }
+        if(pdf <= 0.0f) return r;
+
+        }
+
+        r.nextDir = L;
+        r.M = 1ul;
+        const float  p_hat = luminance(r.radiance * fcos);
+        r.weightSum = p_hat / pdf;
+        r.W = 1.0f / pdf;    
+
+        return r;
+    }
+
+    ReservoirPT temporalReuse(ReservoirPT c , GeneralObjectInfo info, uint2 prevCoord , inout uint seed)
+    {
+        ReservoirPT r = (ReservoirPT)0;
+
+        ReservoirPT p = prevReSTIRPTBuffer[bufferIndex(prevCoord)];
+
+        // an empty or a broken reservoir of the last frame ( M = 0 , W = 0 , NaN ) has nothing to give : the candidate stays as it is
+        if(p.M == 0u || !(p.W > 0.0f) || isinf(p.W) || any(isnan(p.radiance)) || any(isinf(p.radiance))) return c;
+
+        const uint M_CAP = 30u;
+        p.M = min(p.M , M_CAP * max(c.M , 1u));
+
+        {
+            const float3 L = c.nextDir;
+            const float p_hat = luminance(c.radiance * evalDiffuse(info.albedo , info.N , L , info.metallic)) ;
+            const float w = p_hat * c.W * float(c.M);
+            r.update(c , w , c.M , rand(seed));
+        }
+
+        {
+            const float3 L = p.nextDir;
+            const float p_hat = luminance(p.radiance * evalDiffuse(info.albedo , info.N , L , info.metallic)) ;
+            // the direction of the old sample must look where the direction of the new one looks , like the texels of the probes of RC
+            const float directionWeight = pow(max(dot(c.nextDir , p.nextDir) , 0.0f) , PT_TEMPORAL_DIRECTION_POWER);
+            // the history counts as much as its direction fits : the same factor is in the weight and in M ( the sample that looks elsewhere does not give its M to the sum )
+            const uint scaledM = uint(float(p.M) * directionWeight);
+            const float w = p_hat * p.W * float(scaledM);
+            r.update(p , w , scaledM , rand(seed));
+        }        
+
+        const float3 L = r.nextDir;
+        const float p_hat = luminance(r.radiance * evalDiffuse(info.albedo , info.N , L , info.metallic)) ;
+        r.W = (p_hat > 1e-6f && r.M > 0u ) ? r.weightSum / (float(r.M) * p_hat) : 0.0f;
+        return r;
+    }
+}
+
 void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
 {
     // idea here is simple
@@ -1080,62 +1194,26 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
     const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
     const float3 rayOrigin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
 
-    // every lobe has its own distance ( ReLAX reads the one of the specular image for the virtual motion ) and its own colour : the reflection is the SPECULAR ( it has no albedo
-    // to divide by ) , the diffuse indirect light is demodulated
     float diffuseHitDistance = 0.0f;
     float specularHitDistance = 0.0f;
     float3 reflectedSpecular = 0.0f;
     float3 totalIndirect = 0.0f;
 
-    if(needSpecular)
+    // ReSTIR PT
+
+    ReservoirPT pt = ReSTIRPT::generateCandidate(info , load.seed);
+
+    // the reservoir of the last frame is taken only from the same surface ( the position and the normal , like the history of the shadow )
+    if(validUV && checkDisocclusion(pixel , prevPixel))
     {
-        float pdf = 0.0f;
-        float3 L = 0.0f;
-        sampleSpecularDirection(float2(randNoise() , randNoise()), info.N , info.V , info.roughness , L , pdf);
-        if(pdf > 0.0f)
-        {
-            RayDesc ray;
-            ray.Origin = rayOrigin;
-            ray.Direction = L;
-            ray.TMax = 1000.0f;
-            ray.TMin = 0.001f;
-            RayPayLoadSecondary bounce = makeBounce(load.seed);
-            TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , 1 , 0 , 1 , ray , bounce);
-            load.seed = bounce.seed;
-            const float3 fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
-            reflectedSpecular = bounce.accumulatedColor * fcos / pdf;
-            specularHitDistance = min(bounce.hitDistance , 900.0f);
-        }
-        else
-        {
-            specularHitDistance = 900.0f;
-        }
+        pt = ReSTIRPT::temporalReuse(pt , info , prevPixel , load.seed);
     }
 
-    if(needDiffuse)
-    {
-        float pdf = 0.0f;
-        float3 L = 0.0f;
-        sampleDiffuseDirection(float2(randNoise() , randNoise()), info.N , L , pdf);
-        if(pdf > 0.0f)
-        {
-            RayDesc ray;
-            ray.Origin = rayOrigin;
-            ray.Direction = L;
-            ray.TMax = 1000.0f;
-            ray.TMin = 0.001f;
-            RayPayLoadSecondary bounce = makeBounce(load.seed);
-            TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , 1 , 0 , 1 , ray , bounce);
-            load.seed = bounce.seed;
-            const float3 fcos = evalDiffuse(info.albedo, info.N , L , info.metallic);
-            totalIndirect = bounce.accumulatedColor * fcos / pdf;
-            diffuseHitDistance = min(bounce.hitDistance , 900.0f);
-        }
-        else
-        {
-            diffuseHitDistance = 900.0f;
-        }
-    }
+    totalIndirect = pt.radiance * pt.W *  evalDiffuse(info.albedo, info.N, pt.nextDir, info.metallic);
+
+    diffuseHitDistance = pt.hD;
+    specularHitDistance = 0.0f;
+
 
     totalIndirect /= albedoSafe;
 
@@ -1146,10 +1224,11 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
 
     // the ao of the material takes the direct light only , not the reflection and not the indirect light
     diffuseImage[pixel] = float4(diffuseOut , diffuseHitDistance);
-    specularImage[pixel] = float4(totalSpecular * objectAmbient + reflectedSpecular , specularHitDistance);
+    specularImage[pixel] = float4(totalSpecular * objectAmbient , specularHitDistance);
     indirectImage[pixel] = float4(totalIndirect , diffuseHitDistance);
 
     ReSTIRDIBuffer[bufferIndex(pixel)] = di;
+    ReSTIRPTBuffer[bufferIndex(pixel)] = pt;
     ReSTIRGIBuffer[bufferIndex(pixel)] = gi;
 }
 

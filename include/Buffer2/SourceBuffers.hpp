@@ -37,6 +37,8 @@ namespace mox{
 
         pGeneralBuffer2<BufferType::Device , false> ReSTIRDIBuffer[2] {nullptr , nullptr};
         pGeneralBuffer2<BufferType::Device , false> ReSTIRGIBuffer[2] {nullptr , nullptr};
+        // the reservoirs of ReSTIR PT ( ReservoirPT , one per pixel ) : ping pong like the others , this frame writes its own and reads the other
+        pGeneralBuffer2<BufferType::Device , false> ReSTIRPTBuffer[2] {nullptr , nullptr};
 
         pGeneralBuffer2<BufferType::Device , true> skyBuffer{nullptr};
 
@@ -57,6 +59,8 @@ namespace mox{
             ReSTIRDIBuffer[1] = nullptr;
             ReSTIRGIBuffer[0] = nullptr;
             ReSTIRGIBuffer[1] = nullptr;
+            ReSTIRPTBuffer[0] = nullptr;
+            ReSTIRPTBuffer[1] = nullptr;
             
             tileLightIndices = nullptr;
             lightCountPerTile = nullptr;
@@ -129,6 +133,11 @@ namespace mox{
                     info.size = sizeof(ReservoirGI) * context->sc->extent.width * context->sc->extent.height;
                     const std::vector<ReservoirGI> emptyGI(static_cast<size_t>(context->sc->extent.width) * context->sc->extent.height , ReservoirGI{});
                     ReSTIRGIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , const_cast<void*>(static_cast<const void*>(emptyGI.data())));
+
+                    // the reservoirs of the path tracer start empty too ( M = 0 , W = 0 ) : a device buffer is not zeroed by itself
+                    info.size = sizeof(ReservoirPT) * context->sc->extent.width * context->sc->extent.height;
+                    const std::vector<ReservoirPT> emptyPT(static_cast<size_t>(context->sc->extent.width) * context->sc->extent.height , ReservoirPT{});
+                    ReSTIRPTBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , const_cast<void*>(static_cast<const void*>(emptyPT.data())));
                 }
 
                 {   

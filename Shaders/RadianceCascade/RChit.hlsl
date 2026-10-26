@@ -363,7 +363,9 @@ GeneralObjectInfo readData(const float2 barycentrics){
     const float4x4 model = instanceBuffer[meshBuffer[meshID].instanceIndex];
 
     // normalMatrix3x3 already is inverse( transpose( model ) ) ( see the vertex shader ) , the matrix is on the left
-    const float3 N = normalize(mul(normalMatrix3x3((float3x3)model) , surface.normal));
+    float3 N = normalize(mul(normalMatrix3x3((float3x3)model) , surface.normal));
+    // a double sided surface ( the leaves , the cloth ) hit from the BACK : the interpolated normal looks away from the ray , and NdotV / NdotL of the BRDF are degenerate
+    if(HitKind() == HIT_KIND_TRIANGLE_BACK_FACE) N = -N;
     const float3 T = normalize(mul(model , float4(surface.tangent , 0.0f)).xyz);
     const float3 B = normalize(mul(model , float4(surface.bitangent , 0.0f)).xyz);
     const float3x3 TBN = float3x3(T , B , N);
@@ -764,7 +766,7 @@ void sampleSpecularDirection(const float2 Xi , const float3 N , const float3 V ,
 // indirect GI
 // ReSTIR GI
 
-bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f || roughness < 0.4f); }
+bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f && roughness < 0.4f); }
 
 float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const float3 L){
     if(specularMode){
@@ -788,7 +790,7 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
     if(lightCount){
         // EVERY lamp of the cell of the world grid is added up ( no random choice , so no division by the chance of the choice ) . a lamp that does not see the point is skipped
         // before its light is computed : outside of its radius , behind the surface , or covered ( the shadow ray to the centre of the lamp )
-        const float3 V = normalize(WorldRayDirection());
+        const float3 V = normalize(-WorldRayDirection());
         data.V = V;
         const float3 rayOrigin = offsetRay(data.P , data.N , generalBuffer.playerPosition);
 
@@ -813,7 +815,7 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
 
             float3 diffuse , specular;
             computeLight(data , realL , diffuse , specular);
-            diffuse /= saveAlbedo;
+            // diffuse /= saveAlbedo;
             result += NdotL * light.diffuse * diffuse * shadow * window;
         }
     }else{
@@ -826,14 +828,16 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
         const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
         const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
         computeLight(data , L , sunDiffuse , sunSpecular);
-        sunDiffuse /= saveAlbedo;
+        // sunDiffuse /= saveAlbedo;
         result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
     }
 
     {
         // we will put here instead prev cascade image
         // (const float3 dir , const float3 P, const float3 N , out float hitDistance , const bool currentImage)/
-        {
+        const bool relfective = isSpecularMode(data.roughness , data.metallic);
+
+        if(!relfective){
             float pdf = 0.0f;
             float3 L = 0.0f;
             // rand( seed ) : the state of randNoise is private to the entry point and this shader never calls initNoise
@@ -842,13 +846,27 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
             {   
                 float hitDistance;
                 float3 brdf = evalDiffuse(data.albedo , data.N , L , data.metallic);
-                brdf /= saveAlbedo;
+                // brdf /= saveAlbedo;
+                result += sanitizeRadiance(RC::processRC(L , data.P , data.N , hitDistance , false) , RC::FEEDBACK_MAX_RADIANCE) * brdf / pdf;
+            }
+        }
+        else
+        {
+            float pdf = 0.0f;
+            float3 L = 0.0f;
+            // rand( seed ) : the state of randNoise is private to the entry point and this shader never calls initNoise
+            sampleSpecularDirection(float2(randNoise() , randNoise()) , data.N , data.V , data.roughness , L , pdf );
+            if(pdf > 0.0f && dot(data.V , L) > 0.0f)
+            {   
+                float hitDistance;
+                const float3 F0 = lerp(float3(0.04 , 0.04 , 0.04) , saveAlbedo , data.metallic);
+                float3 brdf = evalBRDF(data.N , data.V , L , max(data.roughness , 0.3f) , F0);
                 result += sanitizeRadiance(RC::processRC(L , data.P , data.N , hitDistance , false) , RC::FEEDBACK_MAX_RADIANCE) * brdf / pdf;
             }
         }
     }
 
-    result *= saveAlbedo;
+    // result *= saveAlbedo;
 
     // NaN and Inf are not stored , one very bright hit is limited : it would be spread over the neighbours by the filters
     return sanitizeRadiance(result , RC::CACHE_MAX_RADIANCE);
@@ -892,7 +910,7 @@ void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr)
         load.hitDistance = RayTCurrent();
         return;
     }
-
+    initNoise(DispatchRaysIndex().xy , generalBuffer.frameIndex);
     const float3 V = WorldRayDirection();
     GeneralObjectInfo info = readData(attr.barycentrics);
     load.finalColor = computeLightAt(info , load.seed);

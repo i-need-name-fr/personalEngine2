@@ -570,7 +570,18 @@ namespace mox{
                 info.pGroups = groups.data();
                 // the ray generation shader traces ( depth 1 ) and the hit shaders do not trace any more : the shadow rays and the GI rays both
                 // start in the ray generation shader . a hit shader that traces needs more
-                info.maxPipelineRayRecursionDepth = MAX_RAY_CAST;
+                // the recursion that the device can do : the pipeline can not ask for more than this
+                uint32_t deviceRecursionLimit = 1u;
+                {
+                    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProperties{};
+                    rtProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+                    VkPhysicalDeviceProperties2 properties2{};
+                    properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                    properties2.pNext = &rtProperties;
+                    vkGetPhysicalDeviceProperties2(context->physicalDevice->device , &properties2);
+                    deviceRecursionLimit = rtProperties.maxRayRecursionDepth;
+                }
+                info.maxPipelineRayRecursionDepth = std::min(static_cast<uint32_t>(MAX_RT_RAY_CAST) , deviceRecursionLimit);
                 info.pLibraryInfo = nullptr;
                 info.pLibraryInterface = nullptr;
                 info.pDynamicState = nullptr;

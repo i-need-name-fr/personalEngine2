@@ -58,7 +58,11 @@ struct Vertex{
 #define MAX_AO_ITERATION 64
 static const float PI = 3.14159265f;
 #define MAX_INSTANCE 15
-#define MAX_RAY_CAST 10
+// the number of the BOUNCES of the path tracer ( the secondary rays of PathTracing ) . the pipeline of the path tracer needs the recursion of MAX_PT_RAY_CAST + 2 : the hit of the
+// primary ray is the level 1 , every bounce is one more , and the shadow ray of the last bounce is one more again
+#define MAX_PT_RAY_CAST 4
+// the depth of the pipeline of the ray tracing ( the hit , its reflection / GI / shadow ray , the shadow ray of the hit of a reflection : 3 are needed , the rest is a reserve )
+#define MAX_RT_RAY_CAST 8
 #define MAX_LIGHT_SOURCE 200
 // ---------------------------------------------------------------------------
 // Shader binding table layout.
@@ -410,6 +414,42 @@ struct ReservoirGI{
     float W;
     float weightSum;
     float roughness;
+};
+
+struct ReservoirPT
+{
+#ifdef __cplusplus
+    alignas(16) glm::vec3 position;
+    alignas(16) glm::vec3 nextDir;
+    alignas(16) glm::vec3 radiance;
+    
+    uint32_t M;
+#else
+
+    float3 position;
+    float3 nextDir;
+    float3 radiance;
+
+    uint M;
+
+    void update(ReservoirPT can , float weight , uint canM , float randValue)
+    {
+        weightSum += weight;
+        M += canM;
+        // same guarded form as ReservoirDI::update - no division by a possibly zero weightSum
+        if(weightSum > 0.0f && randValue * weightSum < weight){
+            position = can.position;
+            nextDir = can.nextDir;
+            radiance = can.radiance;
+            hD = can.hD;
+            // the roughness of the sample point travels with the sample : it tells if the sample can be moved to another pixel
+        }
+    }
+#endif
+
+    float weightSum;
+    float W;
+    float hD;
 };
 
 

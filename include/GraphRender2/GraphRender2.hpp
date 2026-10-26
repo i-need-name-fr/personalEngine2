@@ -127,6 +127,16 @@ namespace mox{
                 const auto result = processInputParameter(data->ReSTIRGIBuffer[1].get() , "ReSTIRGIBuffer_1");
                 if(!result.has_value()) return result;
             }
+
+            {
+                const auto result = processInputParameter(data->ReSTIRPTBuffer[0].get() , "ReSTIRPTBuffer_0");
+                if(!result.has_value()) return result;
+            }
+
+            {
+                const auto result = processInputParameter(data->ReSTIRPTBuffer[1].get() , "ReSTIRPTBuffer_1");
+                if(!result.has_value()) return result;
+            }
             
             return {};
         }

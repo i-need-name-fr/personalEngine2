@@ -55,8 +55,10 @@ float3 ReconstructWorldPos(float2 uv , float depth , float4x4 invViewProj){
 }
 
 float3 ComputeVirtualPosition(float3 worldPos, float3 normal, float3 viewDir, float hitDistance) {
-    float3 reflectDir = reflect(-viewDir, normal);
-    return worldPos + reflectDir * hitDistance; // "куда бы попал взгляд, если бы прошёл сквозь отражение"
+    // the VIRTUAL position : the image of the reflected point behind the surface ( the ray of the camera goes on through the surface for the distance of the reflected ray ) .
+    // reflect( reflectDir , normal ) is the ray of the camera again : the image of the hit point H = P + R * d in the plane of the surface is P - V * d .
+    // for a flat mirror this point does not move with the camera : this is what the history is looked for by ( the real point H is not the one that the pixel shows )
+    return worldPos - viewDir * hitDistance;
 }
 
 float2 ComputeVirtualMotionVector(float3 currentVirtualPos, float4x4 prevViewProj, float2 currentUV) {
@@ -110,13 +112,12 @@ void main(uint3 id : SV_DispatchThreadID){
 
     float2 uv = (float2(id.xy) + 0.5f ) / float2(screenSize);
     float3 current = inputSpecular[id.xy].xyz;
+    // the input is cleaned before it can get into the history
+    if(any(isnan(current)) || any(isinf(current))) current = float3(0.0f , 0.0f , 0.0f);
     float roughness = roughnessImage[id.xy].x;
     float3 normal = normalImage[id.xy].xyz;
     float3 V = viewDirImage[id.xy].xyz;
 
-    // depthImage holds real linearized depth, not NDC z - ReconstructWorldPos expects NDC z and
-    // would produce garbage here (same issue fixed earlier in AmbientOcclusion.hlsl). positionImage
-    // is already bound and holds the world position directly, so just read it.
     float3 P = positionImage[id.xy].xyz;
     float hitDistance = inputSpecular[id.xy].a;
 
@@ -124,11 +125,9 @@ void main(uint3 id : SV_DispatchThreadID){
     float2 virtualUV = ComputeVirtualMotionVector(virtualPos , generalBuffer.prevViewProj , uv);
     float2 prevUV = uv - virtualUV;
 
-    // rounded to the nearest pixel of the last frame ( the plain conversion to uint cut the number off , always towards the top left : the history drifted )
     const uint2 prevCoord = uint2(round(clamp(prevUV * float2(screenSize) - 0.5f , float2(0.0f , 0.0f) , float2(screenSize) - 1.0f)));
 
-    // the history is read only when it is on the screen
-    bool valid = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f)));
+    bool valid = all(prevUV >= float2(0.0f , 0.0f)) && all(prevUV <= float2(1.0f , 1.0f));
     valid = valid && checkDisocclusion(uint3(id.xy , 0) , uint3(prevCoord , 0));
 
     float pCount = 0.0f;
@@ -137,6 +136,11 @@ void main(uint3 id : SV_DispatchThreadID){
     if(valid){
         pCount = prevFrameCount[prevCoord].x;
         history = prevSpecular[prevCoord].xyz;
+        // a NaN / Inf in the history lives forever ( the output of this frame is the history of the next one ) : it is dropped , the pixel starts again
+        if(any(isnan(history)) || any(isinf(history))){
+            history = current;
+            pCount = 0.0f;
+        }
     }
 
     pCount = min(pCount + 1.0f , MAX_ACCUM_FRAMES);

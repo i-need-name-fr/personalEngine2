@@ -107,11 +107,12 @@ struct [raypayload] RayPayLoad_secondary_
 {
     float3 throughput : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 accumulatedColor : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    float3 hitPoint : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float hitDistance : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint depth : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint seed : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     bool firstBounce : write(caller , closesthit , miss) : read(caller , closesthit , miss);
-};  
+};
 
 typedef RayPayLoad_primary_ RayPayLoad;
 typedef RayPayLoad_secondary_ RayPayLoadSecondary;
@@ -543,7 +544,7 @@ void sampleSpecularDirection(const float2 Xi , const float3 N , const float3 V ,
 // indirect GI
 // ReSTIR GI
 
-bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f || roughness < 0.4f); }
+bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f && roughness < 0.4f); }
 
 float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const float3 L){
     if(specularMode){
@@ -794,7 +795,8 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
         const float shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , 1000.0f);
         float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
         computeLight(info , L , sunDiffuse , sunSpecular);
-        load.accumulatedColor += load.throughput * (sunDiffuse + sunSpecular) * diffuse * shadow * NdotL * objectAO;
+        // the diffuse lobe only , like the hit of ReSTIR GI : the bounce goes in a random direction , and the narrow GGX peak of the specular ( roughness 0.1 ) gave the flashes
+        load.accumulatedColor += load.throughput * sunDiffuse * diffuse * shadow * NdotL * objectAO;
     }
 
     // now lets do the lights
@@ -818,7 +820,7 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
             {
                 float3 diffuse = 0.0f, specular = 0.0f;
                 computeLight(info , L , diffuse , specular);
-                load.accumulatedColor += load.throughput * (diffuse + specular) * lightAttenuation(light , d) * lightCount * light.diffuse * cosTheta * objectAO;
+                load.accumulatedColor += load.throughput * diffuse * lightAttenuation(light , d) * lightCount * light.diffuse * cosTheta * objectAO;
             }
         }
     }
@@ -830,13 +832,11 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
     // without the diffuse part ( a metal ) the specular lobe is the only one ; with both , neither of them is given up completely ( a lobe with a tiny chance would bring fireflies )
     const float specularChance = (diffuseWeight <= 1e-6f) ? 1.0f : clamp(specularWeight / max(specularWeight + diffuseWeight , 1e-6f) , 0.05f , 0.95f);
 
-    const bool useSpecular = rand(load.seed) < specularChance;
-    const float lobeChance = useSpecular ? specularChance : (1.0f - specularChance);
-
+    const float lobeChance = 1.0f;
     float pdf = 0.0f; float3 nextDir = 0.0f; float3 fcos = 0.0f;
-    if(useSpecular)
+    if(isSpecularMode(info.roughness , info.metallic))
     {
-        sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , nextDir , pdf);
+        sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N, info.V , info.roughness , nextDir , pdf);
         if(pdf > 0.0f) fcos = evalBRDF(info.N , info.V , nextDir , info.roughness , F0);
     }
     else
@@ -855,6 +855,7 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
         {
             load.firstBounce = false;
             load.hitDistance = RayTCurrent();
+            load.hitPoint = info.P;
         }
 
         // now the chances ( the roulette by the weight of the path ) : the floor keeps the division away from 0
@@ -876,7 +877,7 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
 [shader("closesthit")]
 void main(inout RayPayLoadSecondary load , in BuiltInTriangleIntersectionAttributes attr)
 {
-    if(load.depth >= MAX_RAY_CAST) return;
+    if(load.depth >= MAX_PT_RAY_CAST) return;
     load.depth++;
 
     initNoise(DispatchRaysIndex().xy , generalBuffer.frameIndex);

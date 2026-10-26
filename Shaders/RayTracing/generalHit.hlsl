@@ -1411,7 +1411,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
             float distance;
             const float3 radiance = traceRayReflection(L , rayOrigin , distance);
-            const float3 reflectedColor =  radiance * fcos / pdf;
+            float3 reflectedColor =  radiance * fcos / pdf;
+            // the lobe of a metal is narrow : fcos and pdf are both huge there , and one NaN / Inf goes through the denoiser into the history and lives there ( the whole specular goes black )
+            if(any(isnan(reflectedColor)) || any(isinf(reflectedColor))) reflectedColor = 0.0f;
             nextDir = L;
             reflectedSpecular += reflectedColor;
             specularHitDistance = distance;
@@ -1477,7 +1479,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 if(pdf > 0.0f)
                 {
                     const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
-                    rcResult = fcos * RC::processRC(L , info.P, info.N , rcHitDistance, true) / pdf;
+                    rcResult = fcos * sanitizeRadiance(RC::processRC(L , info.P, info.N , rcHitDistance, true) , RC::FEEDBACK_MAX_RADIANCE) / pdf;
                     diffuseHitDistance = rcHitDistance;
                 }   
         
@@ -1836,7 +1838,7 @@ void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr)
     // the state of randNoise is private to the entry point : without this every pixel and every frame got the same numbers
     initNoise(DispatchRaysIndex().xy , generalBuffer.frameIndex);
     load.depth++;
-    if(load.depth >= MAX_RAY_CAST) return;
+    if(load.depth >= MAX_RT_RAY_CAST) return;
     // the ray of a reflection hits another surface than the one of the G buffer of this pixel : it reads the hit itself
     if(load.fromReflection){
         processReflectionHit(load , Reflection::readHitData(attr.barycentrics));
