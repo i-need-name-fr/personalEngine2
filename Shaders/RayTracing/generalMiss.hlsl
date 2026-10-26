@@ -143,6 +143,18 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
     return skyColor + disc * coverage;
 }
 
+// the motion of the sky : it has no position , only a direction ( w = 0 : the translation of the camera does not move it ) , so only the ROTATION of the camera counts .
+// a zero vector here would give DLSS a trail of the sky when the camera turns
+float2 skyMotionVector(const float3 dir , const uint2 pixel){
+    const float2 size = float2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const float2 uv = (float2(pixel) + 0.5f) / size;
+    const float4 clip = mul(generalBuffer.prevViewProj , float4(dir , 0.0f));
+    if(clip.w <= 1e-6f) return float2(0.0f , 0.0f);
+    float2 prevUV = (clip.xy / clip.w) * 0.5f + 0.5f;
+    prevUV.y = 1.0f - prevUV.y;
+    return prevUV - uv;
+}
+
 [shader("miss")]
 void main(inout RayPayLoad load){
     const float3 dir = WorldRayDirection();
@@ -162,7 +174,7 @@ void main(inout RayPayLoad load){
     load.pixelInfo.normal = -dir;
     load.pixelInfo.position = 999.0f;
     load.pixelInfo.albedo = color;
-    load.pixelInfo.motionVector = 0.0f;
+    load.pixelInfo.motionVector = skyMotionVector(dir , id);
     load.pixelInfo.depth = generalBuffer.playerFar;
     load.pixelInfo.metallic  = 0.0f;
     load.pixelInfo.roughness = 0.0f;

@@ -229,7 +229,7 @@ float lightAttenuation(lg::LightSource light , float lightDistance){
 
 
 // ---------------------------------------------------------------- the sun disc
-static const float SUN_ANGULAR_RADIUS = 0.00465f;
+static const float SUN_ANGULAR_RADIUS = 0.5f;
 static const float SUN_DISC_BRIGHTNESS = 100.0f;
 static const float SUN_DISC_MAX = 60000.0f;
 

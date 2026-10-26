@@ -137,6 +137,18 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
     return skyColor + disc * coverage;
 }
 
+// the motion of the sky : it has no position , only a direction ( w = 0 : the translation of the camera does not move it ) , so only the ROTATION of the camera counts .
+// a zero vector here would give DLSS a trail of the sky when the camera turns
+float2 skyMotionVector(const float3 dir , const uint2 pixel){
+    const float2 size = float2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const float2 uv = (float2(pixel) + 0.5f) / size;
+    const float4 clip = mul(generalBuffer.prevViewProj , float4(dir , 0.0f));
+    if(clip.w <= 1e-6f) return float2(0.0f , 0.0f);
+    float2 prevUV = (clip.xy / clip.w) * 0.5f + 0.5f;
+    prevUV.y = 1.0f - prevUV.y;
+    return prevUV - uv;
+}
+
 // the primary ray left the scene : this pixel is the sky . the closest hit writes everything for a surface , so the miss writes everything for the sky ( the pixel check , the
 // images that the denoisers and the next frame read , and an empty history of the reservoirs )
 [shader("miss")]
@@ -163,7 +175,7 @@ void main(inout RayPayLoad load){
     metallicImage[pixel] = 0.0f;
     objectAmbientImage[pixel] = 1.0f;
     shadowImage[pixel] = float2(1.0f , 0.0f);
-    motionVector[pixel] = float2(0.0f , 0.0f);
+    motionVector[pixel] = skyMotionVector(dir , pixel);
 
     // otherwise the next frame would reuse whatever this slot held two frames ago
     ReservoirDI emptyDI;
