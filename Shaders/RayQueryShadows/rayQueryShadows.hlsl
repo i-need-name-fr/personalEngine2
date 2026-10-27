@@ -99,6 +99,8 @@ static const float SUN_ANGULAR_RADIUS = 0.00465f;
 
 static const float MAX_LIGHT_CONE_SIN = 0.05f;
 
+static const float MOTION_TOLERANCE = 8.0f;
+
 float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed){
     const float phi = 2.0f * PI * rand(seed);
     const float rand2 = rand(seed);
@@ -284,25 +286,22 @@ void main(uint3 id : SV_DispatchThreadID){
     const float totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
     float finalShadow = totalShadow;
     uint shadowFrames = 1u;
+    // the same temporal filter of the shadow as in generalHit.hlsl : the history is dropped only when the value changed AND the pixel moved ( diff * motionW ) , the response of
+    // the change is a power ( pow 2 ) , so a small noise of the samples does not reset the history
     if(validUV){
+        const float2 uv = (float2(id.xy) + 0.5f) / float2(screenSize);
+        const float2 motion = prevUV - uv;
+        // the motion is in UV ( the share of the screen ) : MOTION_TOLERANCE is in PIXELS
+        const float motionDist = length(motion * float2(screenSize));
+        const float motionW = smoothstep(0.0f , MOTION_TOLERANCE , motionDist);
         const float2 prevShadowData = prevShadowImage[prevPixel].xy;
-        const uint count = uint(prevShadowData.y);
+        const uint count = min(uint(prevShadowData.y) + 1u , MAX_SHADOW_FRAME);
         const float prevShadow = prevShadowData.x;
-
-        // if the area is not affected by shadow , we dont want to lerp it with shadow, since its not in shadow now
-        if(prevShadow != 1.0f && totalShadow != 1.0f)
-        {
-            // if its not 1.0f
-            // means that in prev frame there was a shadow in this place
-            const float difference = abs(prevShadow - totalShadow);
-            if(difference <= SHADOW_HISTORY_TOLERANCE)
-            {
-                shadowFrames = min(count + 1u , MAX_SHADOW_FRAME);
-                const float alpha = 1.0f / float(shadowFrames);
-                finalShadow = lerp(prevShadow , totalShadow , alpha);
-            }
-        }
-        // if the shadow of the previous frame is 1.0f ( or this frame has none ) there is no history to keep : shadowFrames is 1 and the shadow stays as it is
+        const float diff = abs(prevShadow - totalShadow) * motionW;
+        const float baseAlpha = 1.0f / float(count);
+        const float alpha = lerp(baseAlpha , 1.0f , pow(diff , 2.0f));
+        finalShadow = lerp(prevShadow , totalShadow , alpha);
+        shadowFrames = count;
     }
 
     shadowImage[id.xy] = float2(finalShadow , float(shadowFrames));

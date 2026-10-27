@@ -776,6 +776,23 @@ float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const f
     return evalDiffuse(info.albedo , info.N , L , info.metallic);
 }
 
+// how much of the sky the point sees : 0 ( covered , a room ) ... 1 ( open ) . the share of the rays of the cone around the up direction that left the scene . it is a WEIGHT , not a yes / no :
+// with a few rays the yes / no flickers at the border of a cover , the weight changes in steps
+float skyVisibilityAt(const float3 P , const float3 N , inout uint seed)
+{
+    const uint sampleCount = features.skyboxSampleCount;
+    // no rays : nothing says that the point is covered
+    if(sampleCount == 0u) return 1.0f;
+
+    float escaped = 0.0f;
+    [loop]
+    for(uint i = 0 ; i < sampleCount ; i++){
+        const float3 direction = sampleCone(float3(0.0f , 1.0f , 0.0f), 0.5f , seed );
+        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 100.0f);
+        if(shadow == 1.0f) escaped += 1.0f;
+    }
+    return escaped / float(sampleCount);
+}
 
 float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
     // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear * 
@@ -822,7 +839,9 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
         result =  0.01f;
     }
 
-    if(sunBuffer.intensity > 0.0f){
+    const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
+
+    if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
         float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
         // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
         const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);

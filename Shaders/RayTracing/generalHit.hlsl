@@ -466,6 +466,24 @@ float3 sampleSkybox(const float3 P ,const float3 N){
     return result;
 }
 
+// how much of the sky the point sees : 0 ( covered , a room ) ... 1 ( open ) . the share of the rays of the cone around the up direction that left the scene . it is a WEIGHT , not a yes / no :
+// with a few rays the yes / no flickers at the border of a cover , the weight changes in steps
+float skyVisibilityAt(const float3 P , const float3 N , inout uint seed)
+{
+    const uint sampleCount = features.skyboxSampleCount;
+    // no rays : nothing says that the point is covered
+    if(sampleCount == 0u) return 1.0f;
+
+    float escaped = 0.0f;
+    [loop]
+    for(uint i = 0 ; i < sampleCount ; i++){
+        const float3 direction = sampleCone(float3(0.0f , 1.0f , 0.0f), 0.5f , seed );
+        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 100.0f);
+        if(shadow == 1.0f) escaped += 1.0f;
+    }
+    return escaped / float(sampleCount);
+}
+
 namespace ReSTIRGI{
 
     float3 sampleHemisphere(const float2 Xi){
@@ -660,8 +678,8 @@ namespace ReSTIRGI{
         }else{
             result =  0.01f;
         }
-
-        if(sunBuffer.intensity > 0.0f){
+        const float skyVisibility = skyVisibilityAt(data.P , data.N, seed);
+        if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
             float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
             // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
             const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
@@ -1365,6 +1383,8 @@ bool checkDisocclusion(uint2 pixel , uint2 prevPixel){
     }
 }
 
+static const float MOTION_TOLERANCE = 8.0f;
+
 void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const uint2 pixel){
     uint2 size = DispatchRaysDimensions().xy;
     float2 uv = (float2(pixel) + 0.5) / float2(size);
@@ -1505,8 +1525,8 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     // the luminance of the indirect light is NOT used in the shadow : the formulas of the sun and of the lamps get 0 ( the real value is the blocky indirect light of the
     // probes , it put the squares of the tiles into the shadow , and its history did not clear )
     const float indirectLum = 0.0f;
-
-    if(sunBuffer.intensity > 0.0f){
+    const float skyVisibility = skyVisibilityAt(info.P , info.N , load.seed);
+    if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
         // sun
         // the direction of the sun is the direction of the LIGHT : the vector to the sun is the opposite one , and it has to be a unit vector
         const float3 L = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
@@ -1514,7 +1534,8 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         const float3 diff = sunBuffer.diffuse;
         float3 diffuse = 0.0f;
         float3 specular = 0.0f;
-        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f, 0.7f , dot(L , info.N));
+        // the weight of the sun in the shadow : the less sky the point sees , the less the sun counts there
+        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f, 0.7f , dot(L , info.N)) * skyVisibility;
         computeLight(info , L , diffuse , specular);
         // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
         if(features.RayQuerySunSampleCount > 0 && sunNdotL > 0.0f){
@@ -1592,22 +1613,24 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     const float sunShadowLifted = lerp(features.shadowMinimum , 1.0f , sunShadow);
     const float totalWeight = sunLuminance + lightLuminance;
     totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
+    const float2 motion = prevUV - uv;
+    
     uint shadowFrames = 1u;
     // the history counts only if it is the same surface : the position and the normal of the last frame ( checkDisocclusion ) , not only the value of the shadow
-    if(validUV && RC::checkDisocclusion(pixel , prevPixel)){
+    // && RC::checkDisocclusion(pixel , prevPixel)
+    if(validUV){
+        // the motion is in UV ( the share of the screen ) : MOTION_TOLERANCE is in PIXELS
+        const float motionDist = length(motion * float2(generalBuffer.screenWidth , generalBuffer.screenHeight));
+        const float motionW = smoothstep(0.0f , MOTION_TOLERANCE , motionDist);
         const float2 prevShadowData = prevShadowImage[prevPixel].xy;
         uint count = uint(prevShadowData.y);
         const float prevShadow = prevShadowData.x;
-        const float diff = abs(prevShadow - totalShadow);
-        const float k = smoothstep(0.0f , SHADOW_HISTORY_TOLERANCE , diff);
+        const float diff = abs(prevShadow - totalShadow) * motionW;
         count = min(count + 1u , MAX_SHADOW_FRAME);
         const float baseAlpha = 1.0f / float(count);
-        const float alpha = lerp(baseAlpha , 1.0f , k);
+        const float alpha = lerp(baseAlpha , 1.0f , pow(diff , 2.0f));
         totalShadow = lerp(prevShadow , totalShadow , alpha);
-        if(alpha < 0.8f)
-        {
-            shadowFrames = count;
-        }
+        shadowFrames = count;
     }
 
     const float3 albedoSafe = max(info.albedo , 0.02f);
@@ -1623,7 +1646,7 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     load.lightInfo.diffuse = diffuseOut;
     load.lightInfo.indirect = totalIndirect / albedoSafe;
     load.lightInfo.specular = totalSpecular * objectAmbient + reflectedSpecular;
-    load.pixelInfo.motionVector = prevUV - uv;
+    load.pixelInfo.motionVector = motion;
     if(!load.fromReflection) ReSTIRGIBuffer[bufferIndex(pixel)] = gi;
     if(!load.fromReflection) ReSTIRDIBuffer[bufferIndex(pixel)] = di;
 }
