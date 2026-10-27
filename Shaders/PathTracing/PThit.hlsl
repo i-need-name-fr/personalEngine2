@@ -621,7 +621,8 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed, const float rough
         result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
     }
 
-    {
+    // the light of the sky : only under the open sky ( skyVisibility > 0 )
+    if(skyVisibility > 0.0f){
         const float3 V2 = normalize(x1Pos - data.P);
         const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
         const float NdotV = max(dot(data.N , V2) , 0.0001f);
@@ -806,6 +807,14 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
     for(uint i = 0 ; i < lightCount ; i++){
         const uint lightIndex = lightIndices[i];
         const lg::LightSource light = lightBuffer[lightIndex];
+
+        {
+            float3 L = light.position - info.P;
+            const float d = length(L);
+            L = normalize(L);
+            const float shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , d);
+            if(shadow != 1.0f) continue;
+        }
 
         float3 toLight = light.position - info.P;
         const float lightDistance = length(toLight);
@@ -1103,26 +1112,38 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
     float lightLuminance = 0.0f;
 
     ReservoirDI di = ReSTIR_DI_generation(pixel , prevUV , load.seed , info , lightIndices , lightCount );
+
+    ReservoirPT pt = ReSTIRPT::generateCandidate(info , load.seed);
+
+    if(validUV && checkDisocclusion(pixel , prevPixel))
+    {
+        pt = ReSTIRPT::temporalReuse(pt , info , prevPixel , load.seed);
+    }
+
+    float3 totalIndirect = pt.radiance * pt.W *  evalDiffuse(info.albedo, info.N, pt.nextDir, info.metallic);
+    float diffuseHitDistance = pt.hD;
+
+    float indirectLum = luminance(totalIndirect / max(info.albedo , 1e-20));
+    if(!isfinite(indirectLum)) indirectLum = 0.0f;
+    indirectLum = max(indirectLum , 0.0f);
+
     const float skyVisibility = skyVisibilityAt(info.P , info.N , load.seed);
     if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
         // sun
-        // the direction of the sun is the direction of the LIGHT : the vector to the sun is the opposite one , and it has to be a unit vector
         const float3 L = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
         const float sunNdotL = saturate(dot(info.N , L));
         const float3 diff = sunBuffer.diffuse;
         float3 diffuse = 0.0f;
         float3 specular = 0.0f;
-        // the weight of the sun in the shadow : the less sky the point sees , the less the sun counts there
         sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f, 0.7f , dot(L , info.N)) * skyVisibility;
         computeLight(info , L , diffuse , specular);
-        // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
         if(features.RayQuerySunSampleCount > 0 && sunNdotL > 0.0f){
             sunShadow =0.0f;
             [loop]
             for(uint i = 0 ; i < features.RayQuerySunSampleCount ; i++){
                 const float3 dir = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
                 float rawShadow = calculateSunShadow(offsetRay(info.P , info.N , generalBuffer.playerPosition) , dir , 1000.0f , features.sunShadowFade);
-                rawShadow = (sunLuminance * rawShadow + 0.0f) / max(0.0f + sunLuminance , 1e-20);
+                rawShadow = (sunLuminance * rawShadow + indirectLum) / max(indirectLum + sunLuminance , 1e-20);
                 sunShadow += rawShadow;
             }
 
@@ -1163,7 +1184,7 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
                 [loop]
                 for(uint j = 0 ; j < features.RayQueryLightSampleCount ;j++){
                     float currentShadow = calculateShadowInSphere(load.seed , light , info.P , info.N);
-                    currentShadow = (currentLightLum * currentShadow + 0.0f) / max(0.0f + currentLightLum , 1e-20);
+                    currentShadow = (currentLightLum * currentShadow + indirectLum) / max(indirectLum + currentLightLum , 1e-20);
                     shadow += clamp(currentShadow , 0.0f , 1.0f);
                 }
                 shadow /= float(features.RayQueryLightSampleCount);
@@ -1218,35 +1239,18 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
     const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
     const float3 rayOrigin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
 
-    float diffuseHitDistance = 0.0f;
     float specularHitDistance = 0.0f;
     float3 reflectedSpecular = 0.0f;
-    float3 totalIndirect = 0.0f;
 
-    // ReSTIR PT
-
-    ReservoirPT pt = ReSTIRPT::generateCandidate(info , load.seed);
-
-    // the reservoir of the last frame is taken only from the same surface ( the position and the normal , like the history of the shadow )
-    if(validUV && checkDisocclusion(pixel , prevPixel))
-    {
-        pt = ReSTIRPT::temporalReuse(pt , info , prevPixel , load.seed);
-    }
-
-    totalIndirect = pt.radiance * pt.W *  evalDiffuse(info.albedo, info.N, pt.nextDir, info.metallic);
-
-    diffuseHitDistance = pt.hD;
     specularHitDistance = 0.0f;
 
 
     totalIndirect /= albedoSafe;
 
-    // the G buffer ( position , normal , albedo , depth , roughness , metallic , the ao , the pixel check ) is the one of the deferred render : it is not written here
     motionVector[pixel] = prevUV - uv;
     viewImage[pixel] = float4(info.V , 1.0f);
     shadowImage[pixel] = float2(totalShadow , float(shadowFrames));
 
-    // the ao of the material takes the direct light only , not the reflection and not the indirect light
     diffuseImage[pixel] = float4(diffuseOut , diffuseHitDistance);
     specularImage[pixel] = float4(totalSpecular * objectAmbient , specularHitDistance);
     indirectImage[pixel] = float4(totalIndirect , diffuseHitDistance);
@@ -1258,11 +1262,9 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
 
 // main 
 
-// the closest hit of the primary ray ( the hit group 0 ) . the secondary bounce has its own group
 [shader("closesthit")]
 void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr)
 {
-    // the state of randNoise is private to the entry point : the numbers for the directions need the pixel and the frame
     initNoise(DispatchRaysIndex().xy , generalBuffer.frameIndex);
     processPrimaryBounce(load , attr.barycentrics);
 }

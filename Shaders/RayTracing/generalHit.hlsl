@@ -678,15 +678,29 @@ namespace ReSTIRGI{
         }else{
             result =  0.01f;
         }
-        const float skyVisibility = skyVisibilityAt(data.P , data.N, seed);
-        if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
+        const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
+        if(sunBuffer.intensity > 0.0f){
             float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
             // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
             const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-            const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+            // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
+            float sunShadow = 0.0f;
+            if(skyVisibility > 0.0f){
+                sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+            }
             computeLight(data , L , sunDiffuse , sunSpecular);
             sunDiffuse /= saveAlbedo;
             result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+        }
+
+        // the light of the sky : only under the open sky ( skyVisibility > 0 )
+        if(skyVisibility > 0.0f){
+            const float3 skyV = normalize(x1Pos - data.P);
+            const float3 skyF0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
+            const float skyNdotV = max(dot(data.N , skyV) , 0.0001f);
+            const float3 skyF = F_fresnel(skyF0 , skyNdotV);
+            const float3 skyKD = (1.0f - skyF) * (1.0f - data.metallic);
+            result += sampleSkybox(data.P , data.N) * skyKD;
         }
 
         // the multi bounce : the light that this point gets itself ( the reservoir of the last frame ) , diffuse only
@@ -951,6 +965,14 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
     for(uint i = 0 ; i < lightCount ; i++){
         const uint lightIndex = lightIndices[i];
         const lg::LightSource light = lightBuffer[lightIndex];
+        // fix for checking if we even see the light
+        {
+            float3 L = light.position - info.P;
+            const float d = length(L);
+            L = normalize(L);
+            const float shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , d);
+            if(shadow != 1.0f) continue;
+        }
 
         float3 toLight = light.position - info.P;
         const float lightDistance = length(toLight);
@@ -961,7 +983,7 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
         dir = normalize(dir);
         float3 candidateDiffuse;
         float3 candidateSpecular;
-        const float shadow = calculateShadows(info.P , dir , d);
+        const float shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , dir , d);
         computeLight(info , dir , candidateDiffuse , candidateSpecular);
 
         float3 radiance = 0.0f;
@@ -1522,9 +1544,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour
     
-    // the luminance of the indirect light is NOT used in the shadow : the formulas of the sun and of the lamps get 0 ( the real value is the blocky indirect light of the
-    // probes , it put the squares of the tiles into the shadow , and its history did not clear )
-    const float indirectLum = 0.0f;
+    float indirectLum = luminance(totalIndirect / max(info.albedo , 1e-20));
+    if(!isfinite(indirectLum)) indirectLum = 0.0f;
+    indirectLum = max(indirectLum , 0.0f);
     const float skyVisibility = skyVisibilityAt(info.P , info.N , load.seed);
     if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
         // sun
@@ -1807,18 +1829,24 @@ namespace Reflection{
             specularSum += specular * energy;
         }
 
+        const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
         if(sunBuffer.intensity > 0.0f)
         {
             float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
             const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-            const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+            // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
+            float sunShadow = 0.0f;
+            if(skyVisibility > 0.0f){
+                sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+            }
             computeLight(data , L , sunDiffuse , sunSpecular);
             const float energy = saturate(dot(data.N , L)) * sunShadow;
             diffuseSum += (sunDiffuse / saveAlbedo) * sunBuffer.diffuse * energy;
             specularSum += sunSpecular * sunBuffer.diffuse * energy;
         }
 
-        {
+        // the light of the sky : only under the open sky ( skyVisibility > 0 )
+        if(skyVisibility > 0.0f){
             const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
             const float NdotV = max(dot(data.N , V) , 0.0001f);
             const float3 F = F_fresnel(F0 , NdotV);

@@ -838,28 +838,37 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
     }else{
         result =  0.01f;
     }
-
     const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
 
-    if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
+    if(sunBuffer.intensity > 0.0f){
         float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
         // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
         const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-        const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+        // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
+        float sunShadow = 0.0f;
+        if(skyVisibility > 0.0f){
+            sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
+        }
         computeLight(data , L , sunDiffuse , sunSpecular);
-        // sunDiffuse /= saveAlbedo;
         result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
     }
 
+    // the light of the sky : only under the open sky ( skyVisibility > 0 )
+    if(skyVisibility > 0.0f){
+        const float3 skyV = normalize(-WorldRayDirection());
+        const float3 skyF0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
+        const float skyNdotV = max(dot(data.N , skyV) , 0.0001f);
+        const float3 skyF = F_fresnel(skyF0 , skyNdotV);
+        const float3 skyKD = (1.0f - skyF) * (1.0f - data.metallic);
+        result += sampleSkybox(data.P , data.N) * skyKD;
+    }
+
     {
-        // we will put here instead prev cascade image
-        // (const float3 dir , const float3 P, const float3 N , out float hitDistance , const bool currentImage)/
         const bool relfective = isSpecularMode(data.roughness , data.metallic);
 
         if(!relfective){
             float pdf = 0.0f;
             float3 L = 0.0f;
-            // rand( seed ) : the state of randNoise is private to the entry point and this shader never calls initNoise
             sampleDiffuseDirection(float2(rand(seed) , rand(seed)) , data.N , L , pdf );
             if(pdf > 0.0f)
             {   
@@ -873,7 +882,6 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
         {
             float pdf = 0.0f;
             float3 L = 0.0f;
-            // rand( seed ) : the state of randNoise is private to the entry point and this shader never calls initNoise
             sampleSpecularDirection(float2(randNoise() , randNoise()) , data.N , data.V , data.roughness , L , pdf );
             if(pdf > 0.0f && dot(data.V , L) > 0.0f)
             {   
@@ -885,13 +893,9 @@ float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
         }
     }
 
-    // result *= saveAlbedo;
-
-    // NaN and Inf are not stored , one very bright hit is limited : it would be spread over the neighbours by the filters
     return sanitizeRadiance(result , RC::CACHE_MAX_RADIANCE);
 }
 
-// the pixel of the screen where a point of the world is ( -999 behind the camera ) : the lamps of the Forward+ tile of that pixel light the point
 int2 convertToScreenPixel(const float3 position){
     const float4 clipPos =mul(generalBuffer.viewProj , float4(position , 1.0f));
     const uint2 screenSize = int2(generalBuffer.screenWidth ,generalBuffer.screenHeight);
@@ -905,20 +909,13 @@ int2 convertToScreenPixel(const float3 position){
 void processPixel(inout RayPayLoad load , in float2 barycentrics){
     GeneralObjectInfo info = readData(barycentrics);
 
-    // the light of the hit point : the same as the light of a hit of ReSTIR GI ( computeLightAt ) - the sun , one lamp of the world grid ( it does not need the screen : the hit
-    // can be anywhere ) and the AMBIENT of the sky ( kD ) , which fills the shadows . without the ambient the shadows of the probes were black , and the light that the
-    // probes gave to the pixels in the shadow was zero
     load.finalColor = computeLightAt(info , load.seed);
-    // the ray hit something inside of its interval : what is behind the surface does not count
     load.alpha = 1.0f;
-    // the distance to the hit : the denoiser takes the radius of its filter from it
     load.hitDistance = RayTCurrent();
 }
 
 [shader("closesthit")]
 void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr){
-    // mode 1 : the ray that finds out if the probe is inside of an object ( RCrayGeneral.hlsl ) . from inside of a closed object the first hit is the BACK of a triangle
-    // ( from the outside it is always a front face ) : the probe is in the geometry , its light is of no use ( the rays see the objects from inside ) and the gather and the merge
     // skip it . 255 is HIT_KIND_TRIANGLE_BACK_FACE . updatePoses writes validProbe = 1 for every probe at the start of the frame , the test only takes it away
     if(load.mode == 1u){
         if(HitKind() == 255u){

@@ -556,84 +556,6 @@ float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const f
 
 // how much of the sky the point sees : 0 ( covered , a room ) ... 1 ( open ) . the share of the rays of the cone around the up direction that left the scene . it is a WEIGHT , not a yes / no :
 // with a few rays the yes / no flickers at the border of a cover , the weight changes in steps
-float skyVisibilityAt(const float3 P , const float3 N , inout uint seed)
-{
-    const uint sampleCount = features.skyboxSampleCount;
-    // no rays : nothing says that the point is covered
-    if(sampleCount == 0u) return 1.0f;
-
-    float escaped = 0.0f;
-    [loop]
-    for(uint i = 0 ; i < sampleCount ; i++){
-        const float3 direction = sampleCone(float3(0.0f , 1.0f , 0.0f), 0.5f , seed );
-        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 100.0f);
-        if(shadow == 1.0f) escaped += 1.0f;
-    }
-    return escaped / float(sampleCount);
-}
-
-// next task is to fix the sun shadows
-float3 computeLightAt(GeneralObjectInfo data, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
-    // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear * 
-    uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
-    uint2 pixel = DispatchRaysIndex().xy;
-
-    findLightIndices(data.P , lightIndices , lightCount);
-
-    
-    const float3 saveAlbedo = max(data.albedo , 1e-20);
-
-    float3 result = 0.0f ;
-    if(lightCount){
-        const uint id = (uint)(rand(seed) * lightCount);
-        lg::LightSource light = lightBuffer[lightIndices[id]];
-        float3 diffuse, specular;
-
-        const float3 V = normalize(x1Pos - data.P);
-        data.V = V;
-        float3 L = light.position - data.P;
-        L = normalize(L);
-        // the centre of the lamp , not a random point of its sphere ( the indirect light : a big sphere reached through the walls )
-        float3 lightPos = light.position;
-        float3 realL = lightPos - data.P;
-        const float dist = length(realL);
-        realL = normalize(realL);
-        
-        computeLight(data ,realL , diffuse , specular );
-
-        const float NdotL = saturate(dot(data.N , realL));  
-        float shadow = calculateShadowToCenter(light , data.P , data.N);
-        float window = lightAttenuation(light, dist);
-        diffuse /= saveAlbedo;
-        result = NdotL * light.diffuse * (diffuse) * shadow  * window * lightCount;
-    }else{
-        result =  0.01f;
-    }
-    const float skyVisibility = skyVisibilityAt(data.P , data.N , seed);
-
-    if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
-        float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
-        // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
-        const float3 L = randomInSunRadius(seed , sunBuffer , -sunBuffer.direction);
-        const float sunShadow = calculateShadows(offsetRay(data.P , data.N , generalBuffer.playerPosition) , L , 1000.0f);
-        computeLight(data , L , sunDiffuse , sunSpecular);
-        sunDiffuse /= saveAlbedo;
-        result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
-    }
-
-    {
-        const float3 V2 = normalize(x1Pos - data.P);
-        const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , data.albedo , data.metallic);
-        const float NdotV = max(dot(data.N , V2) , 0.0001f);
-        const float3 F = F_fresnel(F0 , NdotV);
-        const float3 kD = (1.0f - F) * (1.0f - data.metallic);
-        result += sampleSkybox(data.P , data.N) * kD;
-    }
-
-    result *= saveAlbedo;
-
-    return result;
-}
 
 static const float INDIRECT_FALLOFF_DISTANCE = 8.0f;
 
@@ -783,6 +705,24 @@ GeneralObjectInfo readHitData(const float2 barycentrics , out float objectAO){
     return info;
 }
 
+// how much of the sky the point sees : 0 ( covered , a room ) ... 1 ( open ) . the share of the rays of the cone around the up direction that left the scene . under the open sky ( > 0 )
+// the sun is traced , in the other case it gives nothing
+float skyVisibilityAt(const float3 P , const float3 N , inout uint seed)
+{
+    const uint sampleCount = features.skyboxSampleCount;
+    // no rays : nothing says that the point is covered
+    if(sampleCount == 0u) return 1.0f;
+
+    float escaped = 0.0f;
+    [loop]
+    for(uint i = 0 ; i < sampleCount ; i++){
+        const float3 direction = sampleCone(float3(0.0f , 1.0f , 0.0f), 0.5f , seed );
+        const float shadow = calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , direction , 10.0f);
+        if(shadow == 1.0f) escaped += 1.0f;
+    }
+    return escaped / float(sampleCount);
+}
+
 uint pickRandomNumber(inout uint seed , uint max)
 {
     return uint(rand(seed) * float(max));
@@ -806,12 +746,17 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
     uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
     findLightIndices(info.P , lightIndices , lightCount);
     const float3 safeAlbedo = max(info.albedo / PI , 1e-20);
+    const float skyVisibility = skyVisibilityAt(info.P , info.N , load.seed);
     if(sunBuffer.intensity > 0.0f)
     {
         const float3 diffuse = sunBuffer.diffuse;
         const float3 L = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
         const float NdotL = saturate(dot(info.N , L));
-        const float shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , 1000.0f);
+        // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
+        float shadow = 0.0f;
+        if(skyVisibility > 0.0f){
+            shadow = calculateShadows(offsetRay(info.P , info.N , generalBuffer.playerPosition) , L , 1000.0f);
+        }
         float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
         computeLight(info , L , sunDiffuse , sunSpecular);
         // the diffuse lobe only , like the hit of ReSTIR GI : the bounce goes in a random direction , and the narrow GGX peak of the specular ( roughness 0.1 ) gave the flashes
