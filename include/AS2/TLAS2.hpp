@@ -69,7 +69,7 @@ namespace mox{
             build.mode = canUpdate ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
             build.pGeometries = &geometry;
             build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-            build.scratchData.deviceAddress = scratch->pBuffer;
+            build.scratchData.deviceAddress = alignedScratchAddress();
 
             build.dstAccelerationStructure= AS;
             build.srcAccelerationStructure = canUpdate ? AS : VK_NULL_HANDLE;
@@ -202,12 +202,12 @@ namespace mox{
                     GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
                     info.context = context;
                     info.usage= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-                    info.size = std::max(sizes.buildScratchSize , sizes.updateScratchSize);
+                    info.size = align(std::max(sizes.buildScratchSize , sizes.updateScratchSize) , properties.value().minAccelerationStructureScratchOffsetAlignment) +properties.value().minAccelerationStructureScratchOffsetAlignment;
 
                     this->scratch = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info);
                 }
 
-                build.scratchData.deviceAddress = scratch->pBuffer;
+                build.scratchData.deviceAddress = alignedScratchAddress();
 
                 {
                     VkAccelerationStructureCreateInfoKHR info{};

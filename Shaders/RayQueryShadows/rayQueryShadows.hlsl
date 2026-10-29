@@ -114,6 +114,24 @@ float3 sampleCone(const float3 axis , const float cosAlpha , inout uint seed){
     return localDir.x * tangent + localDir.y * bitangent + localDir.z * axis;
 }
 
+// how much of the sky the point sees : 0 ( covered , a room ) ... 1 ( open ) . the share of the rays of the cone around the up direction that left the scene . it is a WEIGHT , not a yes / no :
+// with a few rays the yes / no flickers at the border of a cover , the weight changes in steps ( the same function as in generalHit.hlsl , the rays are inline queries here )
+float skyVisibilityAt(const float3 startPos , inout uint seed)
+{
+    const uint sampleCount = features.skyboxSampleCount;
+    // no rays : nothing says that the point is covered
+    if(sampleCount == 0u) return 1.0f;
+
+    float escaped = 0.0f;
+    [loop]
+    for(uint i = 0 ; i < sampleCount ; i++){
+        const float3 direction = sampleCone(float3(0.0f , 1.0f , 0.0f) , 0.5f , seed);
+        float depth;
+        if(!shadowTraceRay(direction , startPos , 100.0f , false , depth)) escaped += 1.0f;
+    }
+    return escaped / float(sampleCount);
+}
+
 // a random point on the sphere of the lamp ( light.sourceRadius ) , on the half that looks at the shaded point : the shadow ray goes there , so the penumbra
 // comes from the size of the lamp ( the same function as in generalHit.hlsl ) . L goes FROM the point TO the lamp
 float3 randomInLightRadius(inout uint seed , lg::LightSource light , const float3 L){
@@ -171,7 +189,8 @@ void main(uint3 id : SV_DispatchThreadID){
     float2 prevUV = prevPos.xy * 0.5f + 0.5f;
     prevUV.y = 1.0f - prevUV.y;
     const bool validUV = !(any(prevUV > float2(1.0f , 1.0f)) || any(prevUV < float2(0.0f , 0.0f)));
-    const uint2 prevPixel = validUV ? min(uint2(max(prevUV * float2(screenSize) - 0.5f , 0.0f)) , screenSize - 1u) : id.xy;
+    // the pixel of the last frame that the point falls into ( the same as in generalHit.hlsl ) : with - 0.5 the history was read up to a pixel off in ONE direction every frame , and the shadow floated
+    const uint2 prevPixel = validUV ? min(uint2(max(prevUV * float2(screenSize) , 0.0f)) , screenSize - 1u) : id.xy;
 
     // k : the light that fills a shadow ( the luminance of the indirect light ) . a shadow is the lack of ONE source , so how dark it is depends on what share of the
     // light of the pixel the source gives : S = ( a * v + k ) / ( a + k ) , a - the luminance of the source , v - its visibility . a weak source ( a << k ) leaves
@@ -245,12 +264,15 @@ void main(uint3 id : SV_DispatchThreadID){
     float sunShadow = 1.0f;
     float sunLuminance = 0.0f;
     const uint sunSamples = features.RayQuerySunSampleCount;
+    // the sun gate of generalHit.hlsl : the sun counts only where the point sees some sky ( skyVisibility > 0 ) , and the less sky it sees the less the sun weighs in the shadow
+    uint skySeed = id.x * 832u + id.y * 293u + generalBuffer.frameIndex * 2312u + 32452843u;
+    const float skyVisibility = (sunBuffer.intensity > 0.0f) ? skyVisibilityAt(offset , skySeed) : 0.0f;
     // a sun that is off ( intensity 0 : it sets with the zenith ) is not traced and weighs nothing
-    if(sunBuffer.intensity > 0.0f){
+    if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
         const float3 toSun = normalize(-sunBuffer.direction);
 
         // a : what the sun gives to the pixel ( the same weight as in generalHit.hlsl : the colour of the sun has its intensity already , it is not multiplied again )
-        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f , 0.7f , dot(toSun , N));
+        sunLuminance = luminance(sunBuffer.diffuse) * smoothstep(0.0f , 0.7f , dot(toSun , N)) * skyVisibility;
 
         // a surface that looks away from the sun is not lit by it whatever is in the way : no rays ( the weight of the sun is 0 there too )
         if(sunSamples > 0u && dot(toSun , N) > 0.0f){

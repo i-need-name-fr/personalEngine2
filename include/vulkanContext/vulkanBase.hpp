@@ -185,6 +185,7 @@ namespace mox{
             loadFunction(instance, getFunctionName("PFN_vkCmdSetSampleMaskEXT"), cmdSetSampleMaskEXT);
             loadFunction(instance, getFunctionName("PFN_vkCmdSetAlphaToCoverageEnableEXT"), cmdSetAlphaToCoverageEnableEXT);
             loadFunction(instance, getFunctionName("PFN_vkCmdBindShadersEXT"), cmdBindShadersEXT);
+            loadFunction(instance, getFunctionName("PFN_vkCmdDrawMeshTasksEXT"), cmdDrawMeshTasksEXT);
 
             loadFunction(instance, getFunctionName("PFN_vkGetShaderBinaryDataEXT"), getShaderBinaryDataEXT);
             loadFunction(instance, getFunctionName("PFN_vkDestroyShaderEXT"), destroyShaderEXT);
@@ -204,7 +205,7 @@ namespace mox{
 
             loadFunction(instance, getFunctionName("PFN_vkCmdBeginConditionalRenderingEXT"), cmdBeginConditionalRenderingEXT);
             loadFunction(instance, getFunctionName("PFN_vkCmdEndConditionalRenderingEXT"), cmdEndConditionalRenderingEXT);
-
+            loadFunction(instance, getFunctionName("PFN_vkCmdDrawMeshTasksEXT"), cmdDrawMeshTasksEXT);
         }
 
         void processCopy(VulkanContext&& input) noexcept{
@@ -452,6 +453,11 @@ namespace mox{
         info.pNext = nullptr;
         info.dependencyFlags = 0;
         return info;
+    }
+
+    inline uint32_t align(uint32_t size, const uint32_t T) noexcept
+    {
+        return (size + T - 1) & ~(T - 1);
     }
 }
 

@@ -119,11 +119,11 @@ namespace mox{
                     bufferInfo.usage= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
                     // the FIRST build needs buildScratchSize - min() with updateScratchSize
                     // ( which is usually smaller ) left the scratch buffer too small for it
-                    bufferInfo.size = std::max(sizes.buildScratchSize , sizes.updateScratchSize);
+                    bufferInfo.size =align(std::max(sizes.buildScratchSize , sizes.updateScratchSize) , properties.value().minAccelerationStructureScratchOffsetAlignment) +properties.value().minAccelerationStructureScratchOffsetAlignment;
                     this->scratch = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(bufferInfo);
                 }
 
-                build.scratchData.deviceAddress = scratch->pBuffer;
+                build.scratchData.deviceAddress = alignedScratchAddress();
 
                 {
                     VkAccelerationStructureCreateInfoKHR info{};

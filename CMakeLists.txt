@@ -9,6 +9,7 @@ find_package(Vulkan REQUIRED)
 find_package(glm REQUIRED)
 find_package(assimp REQUIRED)
 find_package(fastgltf REQUIRED)
+find_package(meshoptimizer REQUIRED)
 add_subdirectory(imgui)
 
 add_executable(${PROJECT_NAME} main.cpp)
@@ -22,6 +23,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     glfw
     assimp::assimp
     fastgltf::fastgltf
+    meshoptimizer::meshoptimizer
     imgui
 )
 

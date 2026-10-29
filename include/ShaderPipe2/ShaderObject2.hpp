@@ -298,7 +298,7 @@ namespace mox{
 
         std::string getCompileCommand(const std::string input , const std::string output) noexcept{
             const std::string directory = " -I ../include/ ";
-            const std::string compile = "dxc -spirv -T lib_6_7 -HV 202x -fspv-target-env=vulkan1.3 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query ";
+            const std::string compile = "dxc -spirv -T lib_6_7 -HV 202x -fspv-target-env=vulkan1.3 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -fspv-extension=SPV_EXT_mesh_shader ";
             const std::string cmd = compile  + directory + input + " -Fo " + output + " 2>&1";
             return cmd;
         }

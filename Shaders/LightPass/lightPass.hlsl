@@ -137,6 +137,51 @@ float lightAttenuation(lg::LightSource light , float lightDistance){
     return falloff * window;
 }
 
+// ---------------------------------------------------------------- is the light covered ? ( the screen space ray , the same march as SSTraceRay of indirectCalc.hlsl )
+// the shadow rays of the RT / PT / RayQuery / VSM make the shadow themselves : the screen space check works only when none of them is on , otherwise the light would be shadowed twice
+// ( PostProcess multiplies the picture by the shadow image again )
+static const uint SS_SHADOW_STEPS = 20u;
+static const float SS_SHADOW_MAX_DISTANCE = 30.0f;
+// how far behind the visible surface the ray may be and still count as a hit : the screen knows only the front of things
+static const float SS_SHADOW_THICKNESS = 2.0f;
+
+bool useScreenSpaceShadows(){
+    return features.VSM == 0u && features.RayQuery == 0u && features.RT == 0u && features.PT == 0u;
+}
+
+// 1 - the light reaches the point , 0 - something on the screen covers it . dir goes FROM the point TO the light
+float lightVisibility(const float3 P , const float3 N , const float3 dir , const float lightDistance){
+    if(!useScreenSpaceShadows()) return 1.0f;
+    // a surface that looks away from the light is not lit by it whatever is in the way : nothing to check
+    if(dot(N , dir) <= 0.0f) return 1.0f;
+
+    const uint2 screenSize = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const float3 origin = offsetRay(P , N , generalBuffer.playerPosition);
+    const float stepSize = min(lightDistance , SS_SHADOW_MAX_DISTANCE) / float(SS_SHADOW_STEPS);
+
+    [loop]
+    for(uint i = 1u ; i < SS_SHADOW_STEPS ; i++){   // step 0 is the pixel itself
+        const float3 currentP = origin + dir * stepSize * float(i);
+        const float4 clip = mul(generalBuffer.viewProj , float4(currentP , 1.0f));
+        // behind the camera : no pixel there
+        if(clip.w <= 1e-4f) break;
+        const float2 uv = (clip.xy / clip.w) * float2(0.5f , -0.5f) + 0.5f;
+        if(any(uv >= 1.0f) || any(uv < 0.0f)) break;
+        const uint2 pixel = min(uint2(uv * float2(screenSize)) , screenSize - 1u);
+
+        // the sky has no normal ( 0 ) : it covers nothing
+        const float3 pN = normalImage[pixel].xyz;
+        if(dot(pN , pN) < 0.5f) continue;
+        // the surface that looks away from the ray : the ray went behind its front side ( the screen knows only the front ) , it is not a real cover
+        if(dot(pN , dir) > 0.0f) continue;
+
+        const float3 pP = positionImage[pixel].xyz;
+        const float diff = length(currentP - generalBuffer.playerPosition) - length(pP - generalBuffer.playerPosition);
+        if(diff > 0.02f && diff < SS_SHADOW_THICKNESS) return 0.0f;
+    }
+    return 1.0f;
+}
+
 
 // ---------------------------------------------------------------- the sun disc
 static const float SUN_ANGULAR_RADIUS = 0.00465f;
@@ -219,7 +264,9 @@ void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjec
         float3 candidateSpecular;
         computeLight(info , toLight , candidateDiffuse , candidateSpecular);
 
-        const float3 radiance = light.diffuse * lightAttenuation(light , lightDistance) * max(dot(info.N , toLight) , 0.0001f);
+        // a covered lamp gives nothing ( the screen space check )
+        const float visibility = lightVisibility(info.P , info.N , toLight , lightDistance);
+        const float3 radiance = light.diffuse * lightAttenuation(light , lightDistance) * max(dot(info.N , toLight) , 0.0001f) * visibility;
         candidateDiffuse *= radiance;
         candidateSpecular *= radiance;
 
@@ -441,8 +488,10 @@ void main(uint3 id : SV_DispatchThreadID){
                 float3 radiance = light.diffuse * attenuation * max(dot(N , lightDir) , 0.0001f);
 
 
-                diffuse += lightDiffuse * radiance;
-                specular += lightSpecular * radiance;
+                // the dominant light below is chosen BEFORE the shadow , the sum has the screen space check ( a covered lamp gives nothing )
+                const float visibility = lightVisibility(P , N , lightDir , lightDistance);
+                diffuse += lightDiffuse * radiance * visibility;
+                specular += lightSpecular * radiance * visibility;
 
                 // before the shadow : the light that matters the most for this pixel
                 const float contributionLuminance = luminance((lightDiffuse + lightSpecular) * radiance);
@@ -471,8 +520,10 @@ void main(uint3 id : SV_DispatchThreadID){
             computeLight(info , L_sun , sunDiffuse , sunSpecular);
             sunDiffuse *=  NdotL * sunBuffer.diffuse;
             sunSpecular *= NdotL  * sunBuffer.diffuse;
-            diffuse += sunDiffuse;
-            specular += sunSpecular;
+            // the sun is at infinity : the ray goes as far as the screen space check allows
+            const float sunVisibility = lightVisibility(P , N , L_sun , SS_SHADOW_MAX_DISTANCE);
+            diffuse += sunDiffuse * sunVisibility;
+            specular += sunSpecular * sunVisibility;
         }
 
         // the ao map of the material takes the DIRECT light only ( the lamps and the sun ) : the ambient light and the indirect light are not here , and the SSAO / HBAO of the

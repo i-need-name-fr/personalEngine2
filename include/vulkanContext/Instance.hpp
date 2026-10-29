@@ -46,7 +46,8 @@ namespace mox{
         VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
         VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
         VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME  ,
-        VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME
+        VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME,
+        VK_EXT_MESH_SHADER_EXTENSION_NAME
     };
 
 
@@ -97,7 +98,8 @@ namespace mox{
 
     inline PFN_vkCmdBeginConditionalRenderingEXT cmdBeginConditionalRenderingEXT = nullptr;
     inline PFN_vkCmdEndConditionalRenderingEXT cmdEndConditionalRenderingEXT = nullptr;
-
+    
+    inline PFN_vkCmdDrawMeshTasksEXT cmdDrawMeshTasksEXT = nullptr;
 
 
     inline const std::string getFunctionName(const std::string PFN_function){

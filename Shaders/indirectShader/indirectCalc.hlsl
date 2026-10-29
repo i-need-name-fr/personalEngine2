@@ -53,6 +53,10 @@
 // the sun : the direction of its light and its colour
 [[vk::binding(21 , 0)]] ConstantBuffer<SunSource> sunBuffer;
 
+// set 1 : the world grid of the lamps ( the descriptor buffer of the LightManager ) . its binding 0 is the lamps again : lightBuffer above is the same buffer
+[[vk::binding(1 , 1)]] RWStructuredBuffer<lg::LightCell> lightCells;
+[[vk::binding(2 , 1)]] ConstantBuffer<lg::GridCascadeInfo> gridInfo;
+
 float calcMultiScatterFactor(float3 F0 , float roughness){
     // average of the three channels, not their sum
     const float F0_avr = (F0.x + F0.y + F0.z) / 3.0f;
@@ -69,16 +73,60 @@ void findLightIndices(uint2 currentPixel , out uint firstLight , out uint lightC
     firstLight = tileIndex * MAX_LIGHTS;
 }
 
+// ---------------------------------------------------------------- the world grid of the lamps ( the same functions as in generalHit.hlsl )
+inline float3 getGridOrigin(const float3 playerPosition) {
+    const float3 snapped = floor(playerPosition / lg::GRID_CELL_SIZE) * lg::GRID_CELL_SIZE;
+    return snapped - float3(lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE, lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE,lg::GRID_SIZE * 0.5f * lg::GRID_CELL_SIZE);
+}
+
+inline float3 translateToGridPos(const float3 position , const float3 playerPosition) {
+    return position - getGridOrigin(playerPosition);
+}
+
+inline int32_t translatePosToCellIndex(const float3 gridPos) {
+    const float3 cell = floor(gridPos / lg::GRID_CELL_SIZE);
+    const float n = lg::GRID_SIZE;
+    if(cell.x < 0.0f || cell.y < 0.0f || cell.z < 0.0f || cell.x >= n || cell.y >= n || cell.z >= n) return NON_VALID_SLOT;
+
+    const int32_t count = int(lg::GRID_SIZE);
+    return int32_t(cell.x) + count * (int32_t(cell.y) + count * int32_t(cell.z));
+}
+
+int findGridSlot(const float3 P){
+    const float3 gridPos = translateToGridPos(P , generalBuffer.playerPosition);
+    return translatePosToCellIndex(gridPos);
+}
+
+// the lamps of the cell of the world position P ( not of a pixel tile , so it works for a point that is not on the screen )
+void findLightIndices(const float3 P , out uint lightIndices[lg::MAX_LIGHT_PER_CELL] ,out uint lightCount){
+    lightCount = 0;
+    const int gridID = findGridSlot(P);
+    if(gridID == NON_VALID_SLOT) return;
+
+    const lg::LightCell cell = lightCells[gridID];
+    // the grid shader keeps counting past MAX_LIGHT_PER_CELL ( it only stops WRITING there )
+    lightCount = min(cell.totalLightCount , (uint)lg::MAX_LIGHT_PER_CELL);
+    lightIndices = cell.lightIndices;
+}
+
 
 // the farther the thing that gives the light is ( the hit distance ) , the less it matters : 1 at the surface , 0.5 at
 // INDIRECT_FALLOFF_DISTANCE , and then it falls like 1 / d^2 . SSDO and SSGI multiply what a sample brings by it
 static const float INDIRECT_FALLOFF_DISTANCE = 8.0f;
+static const float SHADOW_STEP_SIZE = 0.5f;
+
+// SSGI ray : the first step is 0.2 m and every next step is 8% longer than the last ( 64 steps reach ~ 100 m ) , the ray stops at SSGI_MAX_DISTANCE
+static const float SSGI_STEP_SIZE = 0.2f;
+static const float SSGI_STEP_GROWTH = 1.08f;
+static const float SSGI_MAX_DISTANCE = 40.0f;
+// a ray that missed and did NOT reach the sky on the screen ( it left the screen or ran out of distance ) : the sky behind it is unknown ,
+// indoors it is usually closed . the sky colour is multiplied by this ( 1 = believe the sky , 0 = black ) , tune by eye
+static const float SSGI_UNKNOWN_SKY_WEIGHT = 0.25f;
 
 float indirectDistanceWeight(float hitDistance){
     const float ratio = hitDistance / INDIRECT_FALLOFF_DISTANCE;
     return 1.0f / (1.0f + ratio * ratio);
 }
-
 
 
 float3 reconstructWorldPos(float2 uv , float depth , float4x4 invViewProj){
@@ -93,6 +141,9 @@ struct Hit{
     float2 uv;
     float distance;
     bool hit;
+    // the ray reached a pixel of the sky : nothing is in front of it on the screen , so the sky really is there .
+    // ( a miss without it : the ray left the screen or ran out of distance , and what is behind is unknown )
+    bool sky;
 };
 
 float3 sampleSkybox(const float3 N){
@@ -107,15 +158,16 @@ float3 sampleSkybox(const float3 N){
 }
 
 
-Hit SSTraceRay(float3 P , float3 dir , float3 cameraPos , float stepSize , uint maxSteps ){
+// stepGrowth > 1 : every step is longer than the last ( near the surface the ray is checked finely , far away coarsely ) , so a long ray costs ~40 steps and not 500
+Hit SSTraceRay(float3 P , float3 N , float3 dir , float3 cameraPos , float stepSize , const float dist , const float stepGrowth = 1.0f){
 
     Hit info;
     info.hit = false;
+    info.sky = false;
     info.uv = float2(0.0f , 0.0f);
     info.distance = 0.0f;
 
     uint width , height;
-
     prevHDRImage.GetDimensions(width, height);
     uint2 screenSize = uint2(width,  height);
 
@@ -123,10 +175,18 @@ Hit SSTraceRay(float3 P , float3 dir , float3 cameraPos , float stepSize , uint 
     // a ray that is far behind a surface is really somewhere else ( it passed behind a pole , through a gap )
     const float thickness = 2.0f;
 
-    [unroll]
+    const uint maxSteps = (stepGrowth > 1.0f) ? 64u : uint(floor(dist / stepSize));
+
+    float t = 0.0f;
+    float step = stepSize;
+
+    [loop]
     for(uint i = 1 ; i < maxSteps ; i++){   // step 0 is the pixel itself
 
-        float3 currentP = P + dir * stepSize * (float)i;
+        t += step;
+        step *= stepGrowth;
+        if(t > dist) break;
+        float3 currentP = P + dir * t;
         float4 clip = mul(generalBuffer.viewProj , float4(currentP , 1.0f));
         // behind the camera : no pixel there
         if(clip.w <= 1e-4f) break;
@@ -138,7 +198,15 @@ Hit SSTraceRay(float3 P , float3 dir , float3 cameraPos , float stepSize , uint 
 
         // the sky : its position is 0 , it looked like a surface at the other side of the world and every ray that reached it was a "hit"
         // with the colour of the sky
-        if(dot(normalImage[pPixel].xyz , normalImage[pPixel].xyz) < 0.5f) continue;
+        const float3 pN = normalImage[pPixel].xyz;
+        if(dot(pN , pN) < 0.5f){
+            // the ray is over the sky : only believe it for rays that go up , a ray that goes down and sees "sky" is just passing a gap
+            if(dir.y > 0.0f){ info.sky = true; break; }
+            continue;
+        }
+        // the surface that looks away from the ray : the ray went behind its front side ( the screen knows only the front ) , it is not a real hit .
+        // ( the normals are NOT compared with N : a wall and a floor are perpendicular , and that is where the bounce matters )
+        if(dot(pN , dir) > 0.0f) continue;
 
         float3 pP = positionImage[pPixel].xyz;
 
@@ -159,6 +227,13 @@ Hit SSTraceRay(float3 P , float3 dir , float3 cameraPos , float stepSize , uint 
 
     return info;
 }
+
+bool computeShadow(const float3 P , const float3 N , const float3 dir , const float distance)
+{
+    Hit shadow = SSTraceRay(offsetRay(P , N , generalBuffer.playerPosition),  N , dir , generalBuffer.playerPosition, SHADOW_STEP_SIZE , distance);
+    return shadow.hit;
+}
+
 
 
 void computeLight(GeneralObjectInfo info , float3 L , out float3 diffuse , out float3 specular){
@@ -291,139 +366,209 @@ void sampleSpecularDirection(const float2 Xi , const float3 N , const float3 V ,
     pdf = pdfVNDF(float3(0.0f , 0.0f , 1.0f) , Vlocal , Llocal , roughness);
 }
 
+bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f || roughness < 0.4f); }
 
-float3 computeSSGI(uint2 currentPixel , out float visibility){
+GeneralObjectInfo readGBuffer(const uint2 pixel, const float3 P)
+{
+    GeneralObjectInfo info;
 
-    // random : 8 rays per pixel , the directions come from a seed of the pixel and the frame
-    // ( the no random version used the points of a Hammersley set , see the commented line in the loop )
-    const uint SAMPLES = 2u;
-    const float3 P = positionImage[currentPixel].xyz;
-    const float3 N = normalImage[currentPixel].xyz;
-    const float3 cameraPos = generalBuffer.playerPosition;
-    const float3 V = normalize(generalBuffer.playerPosition - P);
-    const float roughness = roughnessImage[currentPixel].x;
-    const float metallic = metallicImage[currentPixel].x;
-    uint width , height;
-    prevHDRImage.GetDimensions(width, height);
-    const uint2 screenSize = uint2(width,  height);
-    uint seed = 8345u * currentPixel.x * 24u * currentPixel.y + generalBuffer.frameIndex * 2398u;
-    // so now instead of simply taking the prev HDR image result , we will be doing smth new
-    float hitDistance = 0.0f;
-    float3 result = 0.0f;
+    info.N = normalImage[pixel].xyz;
+    info.P = positionImage[pixel].xyz;
+    info.roughness = roughnessImage[pixel].x;
+    info.metallic = metallicImage[pixel].x;
+    info.albedo = albedoImage[pixel].xyz;
+    info.V = normalize(P - info.P);
+
+    return info;
+}
+
+float3 computeLightAt(GeneralObjectInfo data, inout uint seed){
+    // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear * 
+    uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
+    uint2 pixel = DispatchRaysIndex().xy;
+
+    findLightIndices(data.P , lightIndices , lightCount);
+
     
+    const float3 saveAlbedo = max(data.albedo , 1e-20);
 
-    {
-        // first we send the direction
-        const float3 H = GGX_halfVector(seed , N , roughness);
-        const float3 dir = normalize(reflect(-V , H));
-        const float3 offset = P + N * 1e-6f;
-        Hit data = SSTraceRay(offset , dir , generalBuffer.playerPosition ,0.1f , 32 );
-        if(data.hit){
+    float3 result = 0.0f ;
+    if(lightCount){
+        const uint id = (uint)(rand(seed) * lightCount);
+        lg::LightSource light = lightBuffer[lightIndices[id]];
+        float3 diffuse, specular;
 
+        const float3 V = data.V;
+        data.V = V;
+        float3 L = light.position - data.P;
+        L = normalize(L);
+        // the centre of the lamp , not a random point of its sphere ( the indirect light : a big sphere reached through the walls )
+        float3 lightPos = light.position;
+        float3 realL = lightPos - data.P;
+        const float dist = length(realL);
+        realL = normalize(realL);
+        
+        computeLight(data ,realL , diffuse , specular );
 
-            // here if we hit now the magic starts
-            // first we need to find the position where did we hit
-            const uint2 id = uint2(data.uv * float2(screenSize) - 0.5f);
-            const float3 samplePos = positionImage[id].xyz;
-            hitDistance = length(P - samplePos);
-            // now we find the light indices and count 
-
-            uint lightCount , lightOffset;
-            findLightIndices(id , lightOffset , lightCount);
-
-            GeneralObjectInfo info = (GeneralObjectInfo)0;
-            info.P = samplePos;
-            info.metallic = metallicImage[id.xy];
-            info.N = normalImage[id.xy].xyz;
-            info.V = normalize(generalBuffer.playerPosition - samplePos);
-            info.roughness = roughnessImage[id];
-            info.albedo = albedoImage[id].xyz;
-            
-            if(lightCount > 0){
-
-                const uint lightID = (uint)(rand(seed) * lightCount) + lightOffset;
-                if(lightID != 9999){
-                    lg::LightSource light = lightBuffer[tileLightIndices[lightID]];
-                    
-                    float3 L = light.position - samplePos;
-                    const float d = length(L);
-                    L = normalize(L);
-
-                    const float att = 1.0f / ( 1.0f + light.Linear * d + d * d * light.Quadratic);
-                    float3 diffuse , specular;
-                    computeLight(info , L , diffuse , specular);
-                    diffuse /= max(info.albedo , 1e-20f);
-
-                    result += (diffuse) * light.diffuse * att * saturate(dot(L , normalImage[id].xyz))  * lightCount;
-                }
-            }
-
-            // now we calculate the sun effection to the
-            {
-                float3 L = -sunBuffer.direction;
-                float3 diffuse , specular;
-                computeLight(info , L , diffuse , specular);
-                diffuse /= max(info.albedo , 1e-20f);
-
-                const float3 fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
-                result += (diffuse) * sunBuffer.diffuse * saturate(dot(L , N)) * fcos;
-            }
-
-        }else{
-            const float3 F0 = lerp(float3(0.04 , 0.04 , 0.04) , albedoImage[currentPixel].xyz , metallic);
-            const float3 V = normalize(generalBuffer.playerPosition - positionImage[currentPixel].xyz);
-            const float NdotV = max(dot(normalImage[currentPixel].xyz , V) , 0.0001f);
-            const float3 F = F_fresnel(F0 , NdotV);
-            const float3 kD = (1.0f - F) * (1.0f - metallic);
-            result =  sampleSkybox(normalImage[currentPixel].xyz) * kD;
-            hitDistance = 999ul;
-        }
+        const float NdotL = saturate(dot(data.N , realL));  
+        float shadow = (computeShadow(data.P , data.N , L , dist) ? 0.0f : 1.0f);
+        diffuse /= saveAlbedo;
+        result = NdotL * light.diffuse * (diffuse) * shadow  * lightCount;
+    }else{
+        result =  0.01f;
     }
-    visibility = 0.0f;
-    diffuseImage[currentPixel].a = hitDistance;
-    specularImage[currentPixel].a = hitDistance;
-    indirectImage[currentPixel].a = hitDistance;
+    if(sunBuffer.intensity > 0.0f){
+        float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
+        // now we also have to check if the shadow actually hits it , since if not, there is no point at computing the light , since its also the calcualtion
+        const float3 L = -sunBuffer.direction;
+        // under the open sky the shadow of the sun is traced , in the other case the sun gives nothing ( 0 )
+        float sunShadow = (computeShadow(data.P , data.N , L , 100.0f) ? 0.0f : 1.0f);
+        computeLight(data , L , sunDiffuse , sunSpecular);
+        sunDiffuse /= saveAlbedo;
+        result += (sunDiffuse) *  clamp(dot(data.N , L),  0.0f , 1.0f) * sunBuffer.diffuse  * sunShadow;
+    }
 
-    float3 reflectedDir = reflect(-V , N);
-    viewImage[currentPixel] = float4( P + reflectedDir * hitDistance , 1.0f);
+    result *= saveAlbedo;
+
     return result;
 }
 
+// the light that leaves the hit of a screen space ray : it is read from the picture of the LAST frame ( prevHDRImage ) , not computed again . the picture has the direct light ,
+// the bounces and the reflections of the hit already . the hit is moved to the last frame with prevViewProj ( it could have moved on the screen ) ;
+// the place of this frame is used when the hit was outside of the last picture
+float3 readHitRadiance(const uint2 hitPixel , const float2 hitUV)
+{
+    const uint2 size = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
 
-float3 computeSSR(uint seed , uint2 currentPixel){
-
-    float3 result = float3(0.0f , 0.0f , 0.0f);
-    const float3 P = positionImage[currentPixel].xyz;
-    const float3 N = normalImage[currentPixel].xyz;
-    const float3 cameraPos = generalBuffer.playerPosition;
-    const float3 V = normalize(cameraPos - P);
-    // i dont want it to have to much noise
-    const float3 dir = normalize(reflect(-V , N));
-    Hit info = SSTraceRay(P , dir , cameraPos , 0.5f , 16);
-
-    if(info.hit){
-        uint width , height;
-
-        prevHDRImage.GetDimensions(width, height);
-        uint2 screenSize = uint2(width,  height);
-        uint2 pPixel = uint2(info.uv * float2(screenSize) - 0.5f);
-        result = prevHDRImage[pPixel].xyz;
-
-    }else{
-        result = skybox.SampleLevel(typicalSampler , dir , 0).xyz;
+    float2 prevUV = hitUV;
+    const float4 clip = mul(generalBuffer.prevViewProj , float4(positionImage[hitPixel].xyz , 1.0f));
+    if(clip.w > 1e-4f){
+        const float2 reprojected = (clip.xy / clip.w) * float2(0.5f , -0.5f) + 0.5f;
+        if(all(reprojected >= 0.0f) && all(reprojected < 1.0f)) prevUV = reprojected;
     }
 
-    // what is reflected is the picture of the last frame , which already holds the reflections of the frame before : without a cap a bright
-    // spot feeds itself ( a mirror gives back all of it every frame )
-    result = min(result , float3(16.0f , 16.0f , 16.0f));
+    const uint2 prevPixel = min(uint2(prevUV * float2(size)) , size - 1u);
+    float3 radiance = prevHDRImage[prevPixel].xyz;
+    // one NaN / Inf in the picture goes through the denoiser into the history
+    if(any(isnan(radiance)) || any(isinf(radiance))) radiance = 0.0f;
+    return radiance;
+}
 
-    diffuseImage[currentPixel].a = info.distance;
-    specularImage[currentPixel].a = info.distance;
-    indirectImage[currentPixel].a = info.distance;
+void computeGI(const uint2 pixel , GeneralObjectInfo info, inout uint seed , out float3 result , out float distance)
+{
 
-    viewImage[currentPixel] = float4( P + dir * info.distance, 1.0f);
+    distance = 0.0f;
+    result = 0.0f;
 
-    return result;
+    const uint2 size = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const bool needsSpec = isSpecularMode(info.roughness, info.metallic);
+    float3 L =0.0f; float pdf = 0.0f;
+
+    if(!needsSpec)
+    {
+        // float3 P , float3 N , float3 dir , float3 cameraPos , float stepSize , const float dist 
+        sampleDiffuseDirection(float2(randNoise() , randNoise()), info.N , L , pdf);
+        if(pdf > 0.0f)
+        {
+            Hit data = SSTraceRay(offsetRay(info.P , info.N , generalBuffer.playerPosition) , info.N , L , generalBuffer.playerPosition , SSGI_STEP_SIZE , SSGI_MAX_DISTANCE , SSGI_STEP_GROWTH);
+            if(data.hit)
+            {
+
+                const uint2 pPixel = min(uint2(data.uv * float2(size)) , size - 1u);
+                const float3 fcos = evalDiffuse(info.albedo, info.N , L , info.metallic);
+                const GeneralObjectInfo hitData = readGBuffer(pPixel , info.P);
+                result = computeLightAt(hitData , seed) * fcos / pdf;
+                result /= max(info.albedo  , 1e-20);
+                distance = data.distance;
+            }
+            else
+            {
+
+                const float3 skyV = L;
+                const float3 skyF0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
+                const float skyNdotV = max(dot(info.N , skyV) , 0.0001f);
+                const float3 skyF = F_fresnel(skyF0 , skyNdotV);
+                const float3 skyKD = (1.0f - skyF) * (1.0f - info.metallic);
+                distance = 990.0f;
+                result = skybox.SampleLevel(typicalSampler , L , 0).xyz * skyKD * (data.sky ? 1.0f : SSGI_UNKNOWN_SKY_WEIGHT);
+            }
+        }
+
+    }
+    else
+    {
+
+        sampleSpecularDirection(float2(randNoise() , randNoise()), info.N , info.V , info.roughness , L , pdf);
+        if(pdf > 0.0f)
+        {
+            Hit data = SSTraceRay(offsetRay(info.P , info.N , generalBuffer.playerPosition) , info.N , L , generalBuffer.playerPosition , SSGI_STEP_SIZE , SSGI_MAX_DISTANCE , SSGI_STEP_GROWTH);
+            if(data.hit)
+            {
+
+                const uint2 pPixel = min(uint2(data.uv * float2(size)) , size - 1u);
+                const float3 F0 = lerp(0.04f , info.albedo , info.metallic);
+                const float3 fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
+                const GeneralObjectInfo hitData = readGBuffer(pPixel , info.P);
+                result = computeLightAt(hitData , seed) * fcos / pdf;
+                distance = data.distance;
+            }
+            else
+            {
+
+                const float3 skyV = L;
+                const float3 skyF0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
+                const float skyNdotV = max(dot(info.N , skyV) , 0.0001f);
+                const float3 skyF = F_fresnel(skyF0 , skyNdotV);
+                const float3 skyKD = (1.0f - skyF) * (1.0f - info.metallic);
+                distance = 990.0f;
+                result = skybox.SampleLevel(typicalSampler , L , 0).xyz * skyKD * (data.sky ? 1.0f : SSGI_UNKNOWN_SKY_WEIGHT);
+            }
+        }
+
+    }
+}
+
+
+
+float3 SSTraceRayReflection(const GeneralObjectInfo info , const float3 direction , inout uint seed , out float hitDistance){
+    const uint2 size = uint2(generalBuffer.screenWidth , generalBuffer.screenHeight);
+    const float3 origin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
+
+    const Hit data = SSTraceRay(origin , info.N , direction , generalBuffer.playerPosition , SSGI_STEP_SIZE , SSGI_MAX_DISTANCE , SSGI_STEP_GROWTH);
+    if(!data.hit){
+        // a miss is the sky ( generalMiss.hlsl ) : a mirror gives it back as it is , the Fresnel is in fcos of the caller
+        hitDistance = 990.0f;
+        return skybox.SampleLevel(typicalSampler , direction , 0).xyz;
+    }
+
+    // the old uv * size - 0.5 wrapped to a huge uint on the first pixel row / column
+    const uint2 hitPixel = min(uint2(data.uv * float2(size)) , size - 1u);
+    // V of the hit is the direction back to the surface that the ray comes from , like -WorldRayDirection() in Reflection::readHitData
+    const GeneralObjectInfo hitData = readGBuffer(hitPixel , info.P);
+
+    hitDistance = data.distance;
+    return computeLightAt(hitData , seed);
+}
+
+// the screen space reflection of a pixel : the same block as "if(needSpecular && !load.fromReflection)" of processPixel in generalHit.hlsl
+void computeSSR(const GeneralObjectInfo info , inout uint seed , out float3 result , out float distance){
+    result = 0.0f;
+    distance = 0.0f;
+
+    float3 L = 0.0f;
+    float pdf = 0.0f;
+    sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
+    if(pdf <= 0.0f) return;
+
+    const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
+    const float3 fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
+
+    const float3 radiance = SSTraceRayReflection(info , L , seed , distance);
+    float3 reflectedColor = radiance * fcos / pdf;
+    // the lobe of a metal is narrow : fcos and pdf are both huge there , and one NaN / Inf goes through the denoiser into the history ( the whole specular goes black )
+    if(any(isnan(reflectedColor)) || any(isinf(reflectedColor))) reflectedColor = 0.0f;
+
+    result = reflectedColor;
 }
 
 [shader("compute")]
@@ -436,53 +581,39 @@ void main(uint3 id : SV_DispatchThreadID){
     uint2 currentPixel = id.xy;
     if(any(currentPixel >= screenSize)) return;
     if(pixelCheck[id.xy] != COLOR_PIXEL){
-        // we dont have to set hit distance , since the denoisers filter the skybox and non skybox pixels 
-        // so the only requirement is to return , since it wont filter the indirect image too 
+        // we dont have to set hit distance , since the denoisers filter the skybox and non skybox pixels
+        // so the only requirement is to return , since it wont filter the indirect image too
         // NOTE : however maybe we need to set at least float3(0.0f) , since denoisers need history
         indirectImage[id.xy] = 0.0f;
+        // the sky has no position in the G buffer : the direction of its pixel comes from the camera matrix ( the point at the middle depth lies on the ray of the pixel ,
+        // in front of the camera, for either direction of the depth ) , and V looks BACK to the camera like everywhere else
+        const float2 skyUV = (float2(id.xy) + 0.5f) / float2(screenSize);
+        const float3 skyDir = normalize(reconstructWorldPos(skyUV , 0.5f , generalBuffer.invViewProj) - generalBuffer.playerPosition);
+        viewImage[id.xy] = float4(-skyDir , 1.0f);
         return;
     }
-    // the sky : the G-buffer is cleared to 0 there , and diffuseImage holds the colour of the sky itself ( PostProcess copies it to the
-    // picture ) . the indirect light is added into diffuseImage now , and for the albedo 0 of the sky it is divided by 0.02 :
-    // the whole sky went white
-    if(dot(normalImage[id.xy].xyz , normalImage[id.xy].xyz) < 0.5f) return;
+    float3 reflectedColor = 0.0f;
+    float3 indirectLight = 0.0f;
+    float sd = 0.0f;
+    float dd = 0.0f;
 
-    uint seed = initSeed(id.xy , generalBuffer.frameIndex);
-    // the numbers of the directions of SSGI ( randNoise ) : the pixel and the frame
     initNoise(id.xy , generalBuffer.frameIndex);
+    GeneralObjectInfo info = readGBuffer(id.xy , generalBuffer.playerPosition);
+    const bool spec = isSpecularMode(info.roughness ,info.metallic);
 
-    float3 reflectedColor = float3(0.0f , 0.0f,  0.0f);
-    float3 indirectLight = reflectedColor; 
+    // the direction from the surface to the camera : ReLAX_temporal moves the point by it ( worldPos - V * hitDistance ) to find the virtual position of a reflection
+    viewImage[id.xy] = float4(info.V , 1.0f);
 
-    const float roughness = roughnessImage[id.xy];
-    bool totalReflection = roughness ==0.0f;
+    uint seed = id.x * 3984u + id.y * 8324u + generalBuffer.frameIndex * 348u;
 
-    // the part of the sky that the pixel sees : the rays that escape bring the ambient light , the ones that hit something bring that
-    // something's light ( and not the sky ) . a mirror pixel does not cast rays , it sees all of it
-    float skyVisibility = 1.0f;
-
-    if(features.indirectMode == SSGI_REQUIRED && !totalReflection){
-
-        indirectLight = computeSSGI(id.xy , skyVisibility);
+    if(spec)
+    {
+        computeSSR(info , seed , reflectedColor ,sd);
     }
 
-    if(features.indirectMode == SSR_REQUIRED){
-
-        reflectedColor = computeSSR(seed , id.xy);
-
-        // the reflection is specular light : the multiple scattering factor of the lobe ( F0 and roughness of the pixel ) , like in LightPass
-        const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , albedoImage[id.xy].xyz , metallicImage[id.xy]);
-        reflectedColor *= calcMultiScatterFactor(F0 , roughness);
-
-    }
-
-    const float3 result = lerp(reflectedColor , indirectLight , roughness);
-
-    // the ambient light of the sky ( the irradiance cube , the same as in LightPass ) times what the pixel sees of the sky . in the
-    // demodulated form : LightPass ambient = irradiance * kD * albedo , and the albedo comes back in PostProcess
-    float3 skyLight = float3(0.0f , 0.0f , 0.0f);
-
-    // no weight of the indirect light for now ( indirectWeight is not applied : the clean colour )
-    // the debug picture of the indirect light shows all of it : the bounces , the reflections and the sky light
-    indirectImage[id.xy] = float4(result + skyLight * albedoImage[id.xy].xyz , 1.0f);
+    computeGI(id.xy , info , seed , indirectLight , dd);
+    specularImage[id.xy].xyz += reflectedColor;
+    specularImage[id.xy].a = sd;
+    diffuseImage[id.xy].a = dd;
+    indirectImage[id.xy] = float4(indirectLight , dd);
 }

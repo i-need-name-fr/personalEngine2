@@ -4,6 +4,7 @@
 #include "../Image2/TextureManager2.hpp"
 #include "../Buffer2/GeneralBuffer.hpp"
 #include "../AS2/BLAS2.hpp"
+#include <meshoptimizer.h>
 
 namespace mox{
 
@@ -26,10 +27,23 @@ namespace mox{
         inline static pGeneralBuffer2<BufferType::Device , true> LUT_buffer{nullptr};
         inline static pGeneralBuffer2<BufferType::Device , true> MeshBuffer{nullptr};
 
+        inline static pGeneralBuffer2<BufferType::Device , false> meshletBuffer{nullptr};
+        inline static pGeneralBuffer2<BufferType::Device , false> meshletVertexBuffer{nullptr};
+        inline static pGeneralBuffer2<BufferType::Device , false> meshletIndexBuffer{nullptr};
+        inline static pGeneralBuffer2<BufferType::Device , false> meshletBoundBuffer{nullptr};
+        inline static pGeneralBuffer2<BufferType::Device , false> geometryBuffer{nullptr};
+
         inline static uint32_t totalCmdCount =0;
 
         inline static std::vector<Vertex> totalVertices{};
         inline static std::vector<uint32_t> totalIndices{};
+
+        inline static std::vector<uint32_t> totalMeshletVertices{};
+        inline static std::vector<uint32_t> totalMeshletIndices{};
+        inline static std::vector<ms::Meshlet> meshlets{};
+        inline static std::vector<ms::MeshletBound> meshletBounds{};
+        inline static std::vector<ms::GeometryData> totalGeometry{};
+
         inline static std::vector<glm::mat4> instances{};
         inline static std::vector<LUT> LUTs{};
         inline static std::vector<MeshData> totalMeshesData{};
@@ -100,6 +114,53 @@ namespace mox{
                     info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 
                     MeshBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , true>>(info);
+                }
+
+                // meshlets
+                {
+                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    info.context = context;
+                    info.size = sizeof(ms::Meshlet) * meshlets.size();
+                    info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+                    meshletBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , translateToSpan(meshlets));
+                }
+                // meshlets vertices
+                {
+                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    info.context = context;
+                    info.size = sizeof(std::uint32_t) * totalMeshletVertices.size();
+                    info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+                    meshletVertexBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , translateToSpan(totalMeshletVertices));
+                }
+                // meshlet indices
+                {
+                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    info.context = context;
+                    info.size = sizeof(std::uint32_t) * totalMeshletIndices.size();
+                    info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+                    meshletIndexBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , translateToSpan(totalMeshletIndices));
+                }
+                // meshlet bounds
+                {
+                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    info.context = context;
+                    info.size = sizeof(ms::MeshletBound) * meshletBounds.size();
+                    info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+                    meshletBoundBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , translateToSpan(meshletBounds));
+                }
+
+                // geometry
+                {
+                    GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
+                    info.context = context;
+                    info.size = sizeof(ms::GeometryData) * totalGeometry.size();
+                    info.usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+                    geometryBuffer = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , translateToSpan(totalGeometry));
                 }
 
                 // instance
@@ -197,6 +258,12 @@ namespace mox{
             instanceLayoutBuffer = nullptr;
             LUT_buffer = nullptr;
             MeshBuffer = nullptr;
+            // the buffers of the meshlets : they are static too , and they have to go before the allocator does
+            meshletBuffer = nullptr;
+            meshletVertexBuffer = nullptr;
+            meshletIndexBuffer = nullptr;
+            meshletBoundBuffer = nullptr;
+            geometryBuffer = nullptr;
             context = nullptr;
             manager = nullptr;
         }
@@ -370,6 +437,7 @@ namespace mox{
                 data.boxMin = boxMin;
                 data.boxRadius = radius;
                 data.instanceIndex = instanceID;
+                data.geometryIndex = geometryIndex;
                 totalMeshesData.push_back(data);
             }
 
@@ -714,12 +782,67 @@ namespace mox{
             }
             totalMeshes++;
             // the lock is already held by the constructor
+
+            {
+                // creating the geometry
+                const auto bound = meshopt_buildMeshletsBound(input.inputIndices.size() , ms::MAX_BOUND_VERTEX_COUNT , ms::MAX_BOUND_TRIANGLE_COUNT);
+                ms::GeometryData geometry{};
+                geometry.firstMeshletIndex = totalMeshletIndices.size();
+                geometry.firstMeshletVertex = totalMeshletVertices.size();
+                geometry.meshletOffset = meshlets.size();
+                geometryIndex = totalGeometry.size();
+
+
+                std::vector<meshopt_Meshlet> mFromLib(bound);
+                std::vector<uint32_t> mV(bound * ms::MAX_BOUND_VERTEX_COUNT);
+                std::vector<uint8_t> iV(bound * ms::MAX_BOUND_TRIANGLE_COUNT * 3);
+                const auto realSize = meshopt_buildMeshlets(mFromLib.data() , mV.data() , iV.data()
+                                    , input.inputIndices.data() , input.inputIndices.size() , 
+                                    &input.inputVertices[0].position.x , input.inputVertices.size() , sizeof(Vertex) ,
+                                    ms::MAX_BOUND_VERTEX_COUNT , ms::MAX_BOUND_TRIANGLE_COUNT , 0.5f) ;
+                mFromLib.resize(realSize);
+                // the geometry was pushed with the worst case ( bound ) : the real number of the meshlets is known only here
+                geometry.meshletCount = realSize;
+
+                const auto last = mFromLib[realSize - 1];
+                mV.resize(last.vertex_count + last.vertex_offset);
+                iV.resize(last.triangle_offset + ((last.triangle_count * 3 + 3) & ~3));
+                std::vector<ms::Meshlet> m(realSize);
+                for(uint32_t i = 0; i < realSize ; i++)
+                {
+                    m[i].firstIndex = mFromLib[i].triangle_offset + geometry.firstMeshletIndex;
+                    m[i].firstVertex = mFromLib[i].vertex_offset + geometry.firstMeshletVertex;
+                    m[i].vertexCount = mFromLib[i].vertex_count;
+                    m[i].indexCount = mFromLib[i].triangle_count;
+                }
+
+
+                std::vector<ms::MeshletBound> mBound(realSize);
+                for(uint32_t i = 0 ; i < realSize ; i++)
+                {
+                    auto& mesh = mFromLib[i];
+
+                    const auto b = meshopt_computeMeshletBounds(&mV[mesh.vertex_offset] , &iV[mesh.triangle_offset] , mesh.triangle_count , &input.inputVertices[0].position.x ,input.inputVertices.size() , sizeof(Vertex) );
+                    ms::MeshletBound mB{};
+                    mB.sphere = glm::vec4(b.center[0] , b.center[1] , b.center[2] , b.radius);
+                    mB.cone = glm::vec4(b.cone_axis[0] , b.cone_axis[1] , b.cone_axis[2] , b.cone_cutoff);
+                    meshletBounds.push_back((mB));
+                }
+
+                // the arrays of this mesh go to the END of the common ones . the offsets inside them stay LOCAL to the mesh ( GeometryData has the bases , they were taken above )
+                meshlets.insert(meshlets.end() , m.begin() , m.end());
+                totalMeshletVertices.insert(totalMeshletVertices.end() , mV.begin() , mV.end());
+                totalMeshletIndices.insert(totalMeshletIndices.end() , iV.begin() , iV.end());
+                totalGeometry.push_back(geometry);
+            }
+
             addMatrixLocked(glm::mat4(1.0f));
             return {};  
         }
 
         uint32_t LUT_index;
         uint32_t BLAS_index;
+        uint32_t geometryIndex;
 
         glm::vec3 localBoxMin;
         glm::vec3 localBoxMax;
@@ -783,6 +906,11 @@ namespace mox{
                 MeshBuffer = nullptr;
                 context = nullptr;
                 manager = nullptr;
+                meshletBuffer = nullptr;
+                meshletVertexBuffer = nullptr;
+                meshletIndexBuffer = nullptr;
+                meshletBoundBuffer = nullptr;
+                geometryBuffer = nullptr;
             }
         }
     };

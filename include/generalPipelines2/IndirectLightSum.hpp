@@ -4,6 +4,7 @@
 #include "../GraphRender2/GraphRender2.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../Sampler/Sampler.hpp"
+#include "../LightManager/LightManager.hpp"
 
 namespace mox{
 
@@ -20,6 +21,8 @@ namespace mox{
         struct CreateInfo{
             VulkanContext* context;
             std::string path;
+            // the layout and the descriptor buffer of the set 1 ( the world grid of the lamps ) : the manager has to live longer than the pass
+            LightManager* lights{};
         };
 
         explicit IndirectLightSum(const CreateInfo &info){
@@ -31,6 +34,11 @@ namespace mox{
 
             if(info.path.empty()){
                 engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create IndirectLightSum , since the path to the shader is empty"});
+                THROW_MESSAGE;
+            }
+
+            if(!info.lights){
+                engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create IndirectLightSum , since the light manager is nullptr"});
                 THROW_MESSAGE;
             }
 
@@ -113,18 +121,25 @@ namespace mox{
 
             cmdBindShadersEXT(cmd , 1 , stages , shaders);
 
+            // set 0 : the descriptor buffer of this pass , set 1 : the world grid of the lamps
             {
-                VkDescriptorBufferBindingInfoEXT info{};
-                info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
-                info.address = pipe->buffers[currentImage]->pBuffer;
-                info.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
-                info.pNext = nullptr;
+                std::array<VkDescriptorBufferBindingInfoEXT , 2> info{};
 
-                cmdBindDescriptorBuffersEXT(cmd , 1,  &info);
+                info[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info[0].address = pipe->buffers[currentImage]->pBuffer;
+                info[0].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                info[0].pNext = nullptr;
 
-                uint32_t sets[1] = {0};
-                VkDeviceSize offset[] = {0};
-                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 1 , sets , offset);
+                info[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info[1].address = inputData.lights->dbuffer->pBuffer;
+                info[1].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                info[1].pNext = nullptr;
+
+                cmdBindDescriptorBuffersEXT(cmd , 2 , info.data());
+
+                const uint32_t sets[2] = {0 , 1};
+                const VkDeviceSize offsets[2] = {0 , 0};
+                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 2 , sets , offsets);
             }
 
             vkCmdDispatch(cmd , x , y , 1);
@@ -183,7 +198,7 @@ namespace mox{
             // the LUT of the multiple scattering : only read
             imageBar[13] = image("multiScatter")->translateImage(read , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 7> bufBar;
+            std::array<VkBufferMemoryBarrier2 , 9> bufBar;
 
             bufBar[0] = buffer("generalBuffer")->translateBuffer(uniformRead , stage);
             bufBar[1] = buffer("generalFeatures")->translateBuffer(uniformRead , stage);
@@ -194,6 +209,10 @@ namespace mox{
             bufBar[4] = buffer("lightCountPerTile")->translateBuffer(read , stage);
             bufBar[5] = buffer("forwardInfo")->translateBuffer(uniformRead , stage);
             bufBar[6] = buffer("sunBuffer")->translateBuffer(uniformRead , stage);
+
+            // the world grid of the lamps : written by LightManager::updateGrid ( the compute shader ) , the buffers belong to the manager , only read here
+            bufBar[7] = inputData.lights->lightCellBuffer->translateBuffer(read , stage);
+            bufBar[8] = inputData.lights->lightCascadeBuffer->translateBuffer(uniformRead , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -302,7 +321,7 @@ namespace mox{
 
                 {
                     PipelineLayout::CreateInfo info{};
-                    info.layouts = {pipe->descriptorLayouts[0].get()};
+                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.lights->layout.get()};
                     info.context = context;
                     info.ranges = {};
 
@@ -359,7 +378,7 @@ namespace mox{
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
                     info.nextStage = 0;
                     info.filePath = inputData.path;
-                    info.layouts = {pipe->descriptorLayouts[0].get()};
+                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.lights->layout.get()};
                     info.pushes = {};
 
                     pipe->addShader(info);

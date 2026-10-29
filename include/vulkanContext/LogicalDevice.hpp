@@ -31,9 +31,22 @@ namespace mox{
             // One struct , not four. VkPhysicalDeviceVulkan12Features subsumes descriptor
             // indexing , timeline semaphores and buffer device address , and the spec
             // forbids mixing it with the individual structs it replaces.
+
+            VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT helperIn{};
+            helperIn.shaderDemoteToHelperInvocation = VK_TRUE;
+            helperIn.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT;
+
+            VkPhysicalDeviceMeshShaderFeaturesEXT meshShading{};
+            meshShading.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+            meshShading.meshShader= VK_TRUE;
+            meshShading.taskShader=  VK_TRUE;
+            meshShading.multiviewMeshShader = VK_FALSE;
+            meshShading.primitiveFragmentShadingRateMeshShader = VK_TRUE;
+            meshShading.pNext = &helperIn;
+
             VkPhysicalDeviceConditionalRenderingFeaturesEXT conditional{};
             conditional.conditionalRendering = VK_TRUE;
-            conditional.pNext = nullptr;
+            conditional.pNext = &meshShading;
             conditional.sType= VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT;
 
             VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR images{};

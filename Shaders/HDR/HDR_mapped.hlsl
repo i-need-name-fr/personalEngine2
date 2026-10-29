@@ -113,15 +113,6 @@ void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
         finalImage[id.xy] = float4( normal, 1.0f);
         pixelCheck[id.xy] = UNDEFINED_PIXEL;
         return;
-    }else if(features.currentMode == DEPTH_MODE){
-
-        float depth = depthImage[id.xy].x;
-        depth = 1.0f - depth;
-        depth = smoothstep(features.maxDepth , 0.0001f , depth);
-        
-        finalImage[id.xy] = float4(depth , depth , depth , 1.0f);
-        pixelCheck[id.xy] = UNDEFINED_PIXEL;
-        return;
     }else if(features.currentMode == METALLIC_MODE){
         const float metallic = metallicImage[id.xy].x;
         finalImage[id.xy] = float4( metallic , metallic , metallic , 1.0f);

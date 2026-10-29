@@ -12,6 +12,7 @@
 #include "include/Image2/MultiViewImage2.hpp"
 
 #include "include/generalPipelines2/deferredRender.hpp"
+#include "include/generalPipelines2/meshDeferredRender.hpp"
 #include "include/generalPipelines2/TransmissionLUT.hpp"
 #include "include/generalPipelines2/MultiScatterLUT.hpp"
 #include "include/generalPipelines2/MultiScatter.hpp"
@@ -128,6 +129,7 @@ namespace mox{
             ao = nullptr;
             forward = nullptr;
             render = nullptr;
+            meshRender = nullptr;
             atmosphere = nullptr;
             meshes.clear();
             models.clear();
@@ -227,6 +229,18 @@ namespace mox{
                 }
 
                 {
+                    // the same G buffer through the meshlets ( task shader culls them , mesh shader makes the triangles ) : it is used instead of the pass above when USE_MESH_SHADING is true
+                    MeshDeferredRender::CreateInfo info{};
+                    info.context = context.get();
+                    info.task = getShaderPath("../Shaders/DeferredRender/taskShader");
+                    info.mesh = getShaderPath("../Shaders/DeferredRender/meshShader");
+                    info.fragment = getShaderPath("../Shaders/DeferredRender/fragmentShader");
+                    info.manager = manager.get();
+
+                    meshRender = std::make_shared<MeshDeferredRender>(info);
+                }
+
+                {
                     ForwardPlus::CreateInfo info{};
                     info.context = context.get();
                     info.path = getShaderPath("../Shaders/ForwardPlus/forward");
@@ -281,6 +295,7 @@ namespace mox{
                     IndirectLightSum::CreateInfo info{};
                     info.context = context.get();
                     info.path = getShaderPath("../Shaders/indirectShader/indirectCalc");
+                    info.lights = light_m.get();
 
                     indirect = std::make_shared<IndirectLightSum>(info);
                 }
@@ -396,9 +411,12 @@ namespace mox{
                     return graph->addGraphPass2(pass , RasterizationPath);
                 };
 
+                // the pass that writes the G buffer : the meshlets ( mesh shading ) or the indirect draw of the vertex shader
+                GraphPass2* gBufferPass = USE_MESH_SHADING ? static_cast<GraphPass2*>(meshRender.get()) : static_cast<GraphPass2*>(render.get());
+
                 GraphPass2* order[] = {
                     atmosphere.get() ,   // the sky : the sky view LUT and the cube
-                    render.get() ,       // the g buffer
+                    gBufferPass ,        // the g buffer
                     forward.get() ,      // the lamps of every tile
                     ao.get() ,           // the occlusion
                     shadows.get() ,      // the shadows of the lamps and of the sun
@@ -416,7 +434,7 @@ namespace mox{
 
                 GraphPass2* orderRT[] = {
                     atmosphere.get() ,   // the sky : the sky view LUT and the cube
-                    render.get() ,       // the g buffer
+                    gBufferPass ,        // the g buffer
                     forward.get() ,      // the lamps of every tile
                     rc.get() ,           // Radiance Cascade : the probes on the surfaces , their rays , the merge of the cascades
                     rt.get(),
@@ -434,7 +452,7 @@ namespace mox{
                 // the same passes as the ray tracing , but without Radiance Cascade ( the path tracer has its own bounces )
                 GraphPass2* orderPT[] = {
                     atmosphere.get() ,   // the sky : the sky view LUT and the cube
-                    render.get() ,       // the g buffer ( the raster has the mip levels of the textures : the primary hit of the path tracer reads it )
+                    gBufferPass ,        // the g buffer ( the raster has the mip levels of the textures : the primary hit of the path tracer reads it )
                     forward.get() ,      // the lamps of every tile
                     pt.get() ,           // the path tracer : the light and the bounces of the pixels of the g buffer , the sky
                     ao.get() ,           // the occlusion
@@ -998,6 +1016,7 @@ namespace mox{
 
             float zenith = glm::degrees(std::acos(std::clamp(sky.sunCosZenith , -1.0f , 1.0f)));   // 0 .. 180 : 0 - overhead , 90 - horizon , more - under it
             float azimuth = glm::degrees(std::atan2(sky.sunSinAzimuth , sky.sunCosAzimuth));       // -180 .. 180
+            static float powIntensity = 1.0f;
             if(azimuth < 0.0f) azimuth += 360.0f;                                                   // 0 .. 360 , 0 is +X
 
             static glm::vec3 diffuse = {1.0f , 1.0f , 1.0f};
@@ -1008,7 +1027,6 @@ namespace mox{
                 color[1] = diffuse.y;
                 color[2] = diffuse.z;
             }
-
             bool changed = false;
 
             gui::Text("Zenith : the vertical orientation of the sun");
@@ -1024,14 +1042,15 @@ namespace mox{
             gui::Separator();
             diffuse = {color[0] , color[1] , color[2]};
             // the size of the sun for the shadow : the half angle of the cone , radians ( the real sun is 0.00465 ) . the bigger , the softer the penumbra
-            gui::SliderFloat("Sun source radius" , &sun.sourceRadius , 0.0f , 0.1f , "%.4f");
-
+            changed |= gui::SliderFloat("Sun source radius" , &sun.sourceRadius , 0.0f , 0.1f , "%.4f");
+            gui::Separator();
+            changed |= gui::SliderFloat("Intensity" , &powIntensity , 0.0f, 10.0f);
             if(changed){
                 const float theta = glm::radians(zenith);
                 const float phi = glm::radians(azimuth);
 
                 const glm::vec3 toSun(std::sin(theta) * std::cos(phi) , std::cos(theta) , std::sin(theta) * std::sin(phi));
-                intensity = glm::cos(glm::radians(glm::clamp(zenith , 0.0f  ,90.0f))) * 2.0f;
+                intensity = glm::cos(glm::radians(glm::clamp(zenith , 0.0f  ,90.0f))) * powIntensity;
                 sun.direction = -toSun;                 // the light travels away from the sun
                 sun.intensity = intensity;
                 sun.diffuse = glm::vec3(color[0] , color[1] , color[2]) * intensity;
@@ -1244,7 +1263,10 @@ namespace mox{
         pRCProbeManager RCManager;
 
         pAtmosphereScattering atmosphere{};
+        // true : the G buffer is drawn through the meshlets ( MeshDeferredRender ) , false : the old indirect draw ( DeferredRender )
+        inline static constexpr bool USE_MESH_SHADING = true;
         pDeferredRender render{};
+        pMeshDeferredRender meshRender{};
         pForwardPlus forward{};
         pAmbientOcclusion ao{};
         pRayQueryShadows shadows{};

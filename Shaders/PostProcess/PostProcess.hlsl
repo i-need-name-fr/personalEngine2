@@ -174,6 +174,12 @@ void main(uint3 id : SV_DispatchThreadID){
         return;
     }
 
+    if(features.currentMode == DEPTH_MODE)
+    {
+        HDRImage[id.xy] = float4(direct , 1.0f);
+        return;
+    }
+
     if(features.volumentricFog){
         result = applyFog(result , linearDepth , worldDir , uv);
     }

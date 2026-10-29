@@ -633,8 +633,9 @@ namespace ReSTIRGI{
         return sanitizeRadiance(bounce , RC::FEEDBACK_MAX_RADIANCE);
     }
 
-    float3 computeLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
-        // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear * 
+    // the DIFFUSE light of the hit ( the specular of the lamps and of the sun is not here : a metal has no diffuse , so it is 0 for it , the reflection ray below gives its colour )
+    float3 computeDiffuseLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
+        // in order to literally minimaze the atmosphere effect , we actually need to lower the chances of it to appear *
         if(!info.didHit){
             return 0.0f;
         }
@@ -708,6 +709,51 @@ namespace ReSTIRGI{
 
         result *= saveAlbedo;
 
+        return result;
+    }
+
+    // the SPECULAR lobe of the hit : one reflection ray . what it reaches is lit by the diffuse light only ( computeDiffuseLightAt ) : a reflection of a reflection is not followed , it would
+    // be a recursion . reflected = radiance * f * cos / pdf , the Fresnel is inside f : a metal gets its whole colour here , a plastic only its 4 percent
+    float3 computeReflectedLightAt(HitRayPayLoad info , inout uint seed , const float3 x1Pos){
+        const float3 V = normalize(x1Pos - info.worldPos);
+        const float roughness = max(info.roughness , 0.1f);
+        const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
+
+        float3 L ; float pdf;
+        sampleSpecularDirection(float2(randNoise() , randNoise()) , info.normal , V , roughness , L , pdf);
+        if(pdf <= 0.0f) return 0.0f;
+        const float3 fcos = evalBRDF(info.normal , V , L , roughness , F0);
+
+        RayDesc ray;
+        ray.Origin = offsetRay(info.worldPos , info.normal , generalBuffer.playerPosition);
+        ray.Direction = L;
+        ray.TMax = 1000.0f;
+        ray.TMin = 0.0001f;
+
+        HitRayPayLoad rLoad = (HitRayPayLoad)0;
+        TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , RT_HITGROUP_HITINFO , 0 , RT_MISS_HITINFO , ray , rLoad);
+
+        float3 radiance;
+        if(rLoad.didHit){
+            radiance = computeDiffuseLightAt(rLoad , seed , info.roughness , info.metallic , info.worldPos);
+        }else{
+            // the sky in the direction of the reflection ( the same scale by the sun as in sampleSkybox )
+            radiance = skybox.SampleLevel(samp , L , 0).xyz * sunBuffer.intensity;
+        }
+
+        const float3 reflected = radiance * fcos / pdf;
+        // the lobe of a metal is narrow : fcos and pdf are both huge there , NaN / Inf must not reach the reservoir
+        if(any(isnan(reflected)) || any(isinf(reflected))) return 0.0f;
+        return sanitizeRadiance(reflected , RC::FEEDBACK_MAX_RADIANCE);
+    }
+
+    // the light of the hit that a GI ray reached : the diffuse lobe + ( for a glossy or a metallic surface , the same gate as in processPixel ) the specular lobe by the reflection ray .
+    // they are SUMMED : the diffuse lobe has (1 - F)(1 - metallic) in it and the specular one has F , so the energy is right for every material . a metal : diffuse 0 , only the reflection
+    float3 computeLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
+        if(!info.didHit) return 0.0f;
+        float3 result = computeDiffuseLightAt(info , seed , roughness , xMetallic , x1Pos);
+        const bool needSpecular = (info.roughness < 0.5f || info.metallic >= 0.7f);
+        if(needSpecular) result += computeReflectedLightAt(info , seed , x1Pos);
         return result;
     }
 
@@ -1407,6 +1453,17 @@ bool checkDisocclusion(uint2 pixel , uint2 prevPixel){
 
 static const float MOTION_TOLERANCE = 8.0f;
 
+static const float RC_SAMPLE_TOLERANCE = 1.2f;
+static const float RC_EMPTY_HISTORY_LUMINANCE = 1e-3f;
+
+float3 limitBrightSample(const float3 sampleColor , const float historyLum)
+{
+    if(historyLum < RC_EMPTY_HISTORY_LUMINANCE) return sampleColor;
+    const float sampleLum = luminance(sampleColor);
+    const float ceiling = historyLum * RC_SAMPLE_TOLERANCE;
+    return sampleColor * min(1.0f , ceiling / max(sampleLum , 1e-20f));
+}
+
 void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const uint2 pixel){
     uint2 size = DispatchRaysDimensions().xy;
     float2 uv = (float2(pixel) + 0.5) / float2(size);
@@ -1440,6 +1497,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
 
     float diffuseHitDistance = 0.0f;
     float specularHitDistance = 0.0f;
+    const float2 motion = prevUV - uv;
+    const float motionDist = length(motion * float2(generalBuffer.screenWidth , generalBuffer.screenHeight));
+    const float motionW = smoothstep(0.0f , MOTION_TOLERANCE , motionDist);
 
     // the ao map of the material takes the DIRECT light only ( the sun and the lamps ) : not the indirect light , not the ambient one and not the reflection ray
     // the strength is the same slider as the one of the SSAO / HBAO ( features.AO_intens ) : the same pow as in PostProcess
@@ -1500,12 +1560,14 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 if(validUV)
                 {
                     const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
+                    rcResult = limitBrightSample(rcResult , luminance(prevRC));
                     const float currentLum = luminance(rcResult);
                     const float prevLum = luminance(prevRC);
                     // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
-                    const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
+                    const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f)+ motionW;   
+                    const float baseAlpha = 1.0f / float(RC::MAX_RC_HISTORY);
                     const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
-                    const float alpha = lerp(0.7f , 1.0f , k);
+                    const float alpha = lerp(baseAlpha , 1.0f , k);
                     rcResult = lerp(prevRC , rcResult , alpha);
                 }
 
@@ -1528,12 +1590,14 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 if(validUV)
                 {
                     const float3 prevRC = RC::temporalReuse(pixel , validUV , prevPixel , info, L);
+                    rcResult = limitBrightSample(rcResult , luminance(prevRC));
                     const float currentLum = luminance(rcResult);
                     const float prevLum = luminance(prevRC);
                     // the divider has a floor : two dark values ( 0 / 0 ) would be NaN , and NaN goes through the lerp into the picture and the denoiser
-                    const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f);   
+                    const float diff = abs(prevLum - currentLum) / max(max(currentLum , prevLum) , 1e-4f) + motionW;   
+                    const float baseAlpha = 1.0f / float(RC::MAX_RC_HISTORY);
                     const float k = smoothstep(0.0f , RC::MAX_RADIANCE_TOLERANCE , diff);
-                    const float alpha = lerp(0.7f , 1.0f , k);
+                    const float alpha = lerp(baseAlpha , 1.0f , k);
                     rcResult = lerp(prevRC , rcResult , alpha);
                 }
 
@@ -1635,15 +1699,12 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     const float sunShadowLifted = lerp(features.shadowMinimum , 1.0f , sunShadow);
     const float totalWeight = sunLuminance + lightLuminance;
     totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
-    const float2 motion = prevUV - uv;
     
     uint shadowFrames = 1u;
     // the history counts only if it is the same surface : the position and the normal of the last frame ( checkDisocclusion ) , not only the value of the shadow
     // && RC::checkDisocclusion(pixel , prevPixel)
     if(validUV){
         // the motion is in UV ( the share of the screen ) : MOTION_TOLERANCE is in PIXELS
-        const float motionDist = length(motion * float2(generalBuffer.screenWidth , generalBuffer.screenHeight));
-        const float motionW = smoothstep(0.0f , MOTION_TOLERANCE , motionDist);
         const float2 prevShadowData = prevShadowImage[prevPixel].xy;
         uint count = uint(prevShadowData.y);
         const float prevShadow = prevShadowData.x;

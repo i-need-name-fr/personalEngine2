@@ -126,13 +126,14 @@ struct MeshData{
     alignas(16) glm::vec3 boxMax;
 
     alignas(16) glm::vec3 boxCenter;
+
     float boxRadius;
-    
 
     uint32_t firstVertex;
     uint32_t firstIndex;
     uint32_t indexCount;
     uint32_t instanceIndex;
+    uint32_t geometryIndex;
 
 #else
 
@@ -140,15 +141,19 @@ struct MeshData{
     float3 boxMax;
 
     float3 boxCenter;
+
     float boxRadius;
-    
 
     uint firstVertex;
     uint firstIndex;
     uint indexCount;
     uint instanceIndex;
+    uint geometryIndex;
 
 #endif
+
+    float padding0;
+    float padding1;
 };
 
 struct LUT{
@@ -908,6 +913,70 @@ namespace lg{
     };
 }
 
+namespace ms
+{
+    // general data for meshlets
+
+#ifdef __cplusplus
+    inline static constexpr uint32_t MAX_BOUND_TRIANGLE_COUNT = 124ul;
+    inline static constexpr uint32_t MAX_BOUND_VERTEX_COUNT = 64ul;
+#else
+    static const uint MAX_BOUND_TRIANGLE_COUNT = 124ul;
+    static const uint MAX_BOUND_VERTEX_COUNT = 64ul;
+#endif
+
+    struct GeometryData
+    {
+#ifdef __cplusplus
+        uint32_t firstMeshletIndex;
+        uint32_t firstMeshletVertex;
+        uint32_t meshletCount;
+        uint32_t meshletOffset;
+
+#else
+        uint firstMeshletIndex;
+        uint firstMeshletVertex;
+        uint meshletCount;
+        uint meshletOffset;
+
+#endif
+        float padding0;
+        float padding1;
+        float padding2;
+        float padding3;
+    };
+
+    struct Meshlet
+    {
+#ifdef __cplusplus
+        uint32_t firstVertex;
+        uint32_t firstIndex;
+        uint32_t vertexCount;
+        uint32_t indexCount;
+#else
+        uint firstVertex;
+        uint firstIndex;
+        uint vertexCount;
+        uint indexCount;
+#endif
+
+    };
+
+    struct MeshletBound
+    {
+#ifdef __cplusplus
+        // xyz - center , w = radius
+        alignas(16) glm::vec4 sphere;
+        // xyz - axis , w = cutoff
+        alignas(16) glm::vec4 cone;
+#else
+        float4 sphere;
+        float4 cone;
+#endif  
+
+    };
+}
+
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;
 #endif
@@ -1113,6 +1182,51 @@ float3x3 normalMatrix3x3(float3x3 m){
     const float invDet = 1.0f / (abs(det) > 1e-8f ? det : 1e-8f);
 
     return float3x3(c0 , c1 , c2) * invDet;
+}
+
+// the general inverse of a 4x4 matrix ( HLSL has none ) : the cofactors from the 2x2 minors of the first two rows ( b00 .. b05 ) and of the last two rows ( b06 .. b11 ) ,
+// divided by the determinant . the indices are the same ones as in m , so it does not matter how the matrix is stored . a singular matrix does not divide by 0 .
+// for an instance matrix ( no perspective ) a cheaper way is normalMatrix3x3 : the point goes through mul( p - translation , normalMatrix3x3( (float3x3)m ) )
+float4x4 inverse(float4x4 m){
+    const float a00 = m[0][0] , a01 = m[0][1] , a02 = m[0][2] , a03 = m[0][3];
+    const float a10 = m[1][0] , a11 = m[1][1] , a12 = m[1][2] , a13 = m[1][3];
+    const float a20 = m[2][0] , a21 = m[2][1] , a22 = m[2][2] , a23 = m[2][3];
+    const float a30 = m[3][0] , a31 = m[3][1] , a32 = m[3][2] , a33 = m[3][3];
+
+    const float b00 = a00 * a11 - a01 * a10;
+    const float b01 = a00 * a12 - a02 * a10;
+    const float b02 = a00 * a13 - a03 * a10;
+    const float b03 = a01 * a12 - a02 * a11;
+    const float b04 = a01 * a13 - a03 * a11;
+    const float b05 = a02 * a13 - a03 * a12;
+    const float b06 = a20 * a31 - a21 * a30;
+    const float b07 = a20 * a32 - a22 * a30;
+    const float b08 = a20 * a33 - a23 * a30;
+    const float b09 = a21 * a32 - a22 * a31;
+    const float b10 = a21 * a33 - a23 * a31;
+    const float b11 = a22 * a33 - a23 * a32;
+
+    const float det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+    const float invDet = 1.0f / (abs(det) > 1e-12f ? det : 1e-12f);
+
+    float4x4 r;
+    r[0][0] = ( a11 * b11 - a12 * b10 + a13 * b09) * invDet;
+    r[0][1] = (-a01 * b11 + a02 * b10 - a03 * b09) * invDet;
+    r[0][2] = ( a31 * b05 - a32 * b04 + a33 * b03) * invDet;
+    r[0][3] = (-a21 * b05 + a22 * b04 - a23 * b03) * invDet;
+    r[1][0] = (-a10 * b11 + a12 * b08 - a13 * b07) * invDet;
+    r[1][1] = ( a00 * b11 - a02 * b08 + a03 * b07) * invDet;
+    r[1][2] = (-a30 * b05 + a32 * b02 - a33 * b01) * invDet;
+    r[1][3] = ( a20 * b05 - a22 * b02 + a23 * b01) * invDet;
+    r[2][0] = ( a10 * b10 - a11 * b08 + a13 * b06) * invDet;
+    r[2][1] = (-a00 * b10 + a01 * b08 - a03 * b06) * invDet;
+    r[2][2] = ( a30 * b04 - a31 * b02 + a33 * b00) * invDet;
+    r[2][3] = (-a20 * b04 + a21 * b02 - a23 * b00) * invDet;
+    r[3][0] = (-a10 * b09 + a11 * b07 - a12 * b06) * invDet;
+    r[3][1] = ( a00 * b09 - a01 * b07 + a02 * b06) * invDet;
+    r[3][2] = (-a30 * b03 + a31 * b01 - a32 * b00) * invDet;
+    r[3][3] = ( a20 * b03 - a21 * b01 + a22 * b00) * invDet;
+    return r;
 }
 
 void buildONB(float3 N , out float3 tangent , out float3 bitangent){
