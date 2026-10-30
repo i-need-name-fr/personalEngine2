@@ -1,16 +1,5 @@
-#include "../../include/ShaderStructures/ShaderStructure.h"
-
-// ONE descriptor set for the whole mesh pass ( task + mesh + fragment ) : 0 .. 4 are the same as in the old deferred render ( the fragment shader reads 0 and 4 ) , 5 .. 10 are the meshlets
-[[vk::binding(0 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
-[[vk::binding(1 , 0)]] RWStructuredBuffer<InstanceData> instanceLayoutBuffer;
-[[vk::binding(2 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
-[[vk::binding(3 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
-[[vk::binding(4 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
-[[vk::binding(5 , 0)]] RWStructuredBuffer<ms::GeometryData> geometryBuffer;
-[[vk::binding(6 , 0)]] RWStructuredBuffer<ms::Meshlet> meshletBuffer;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<uint> meshletVertices;
-[[vk::binding(9 , 0)]] RWStructuredBuffer<uint> meshletIndices;
-[[vk::binding(10 , 0)]] RWStructuredBuffer<Vertex> vertices;
+// the descriptor sets ( the same in task , mesh and fragment )
+#include "meshPassBindings.hlsli"
 
 struct VsOutput{
     float4 clipPos  : SV_Position;

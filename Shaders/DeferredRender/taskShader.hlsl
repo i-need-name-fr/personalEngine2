@@ -1,15 +1,5 @@
-#include "../../include/ShaderStructures/ShaderStructure.h"
-
-// ONE descriptor set for the whole mesh pass ( task + mesh + fragment ) : 0 .. 4 are the same as in the old deferred render ( the fragment shader reads 0 and 4 ) , 5 .. 10 are the meshlets
-[[vk::binding(0 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
-[[vk::binding(1 , 0)]] RWStructuredBuffer<InstanceData> instanceLayoutBuffer;
-[[vk::binding(2 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
-[[vk::binding(3 , 0)]] RWStructuredBuffer<float4x4> instanceBuffer;
-[[vk::binding(5 , 0)]] RWStructuredBuffer<ms::GeometryData> geometryBuffer;
-[[vk::binding(6 , 0)]] RWStructuredBuffer<ms::Meshlet> meshletBuffer;
-[[vk::binding(7 , 0)]] RWStructuredBuffer<ms::MeshletBound> boundBuffer;
-[[vk::binding(8 , 0)]] RWStructuredBuffer<uint> meshletVertices;
-[[vk::binding(9 , 0)]] RWStructuredBuffer<uint> meshletIndices;
+// the descriptor sets ( the same in task , mesh and fragment )
+#include "meshPassBindings.hlsli"
 
 static const uint TASK_GROUP_SIZE = 32;
 
@@ -18,6 +8,98 @@ struct Payload
     uint layoutIndex;
     uint meshletID[TASK_GROUP_SIZE];
 };
+
+void GetAABBCorners(float3 boxMin, float3 boxMax , inout float3 corners[8]) {
+
+    corners[0] = float3(boxMin.x, boxMin.y, boxMin.z);
+    corners[1] = float3(boxMax.x, boxMin.y, boxMin.z);
+    corners[2] = float3(boxMin.x, boxMax.y, boxMin.z);
+    corners[3] = float3(boxMax.x, boxMax.y, boxMin.z);
+    corners[4] = float3(boxMin.x, boxMin.y, boxMax.z);
+    corners[5] = float3(boxMax.x, boxMin.y, boxMax.z);
+    corners[6] = float3(boxMin.x, boxMax.y, boxMax.z);
+    corners[7] = float3(boxMax.x, boxMax.y, boxMax.z);
+
+}
+
+uint computeMipLevel(float2 screenMin , float2 screenMax , uint2 baseSize , uint maxMip ){
+    float2 sizeInPixels = (screenMax - screenMin) * float2(baseSize);
+    float maxDimensions = max(sizeInPixels.x ,sizeInPixels.y );
+
+    if(maxDimensions < 1.0f) return 0;
+
+    const uint mip = uint(ceil(log2(maxDimensions)));
+    return min(mip , maxMip);
+}
+
+uint maxMips(uint width , uint height){
+    return (uint)(floor(log2(max(width , height))));
+}
+
+bool ProjectAABBToScreen(float3 boxMax , float3 boxMin , float4x4 vp , out float2 screenMin , out float2 screenMax , out float objectClosestDepth){
+    objectClosestDepth = 1e9;
+    screenMin = float2(1e9 , 1e9);
+    screenMax = float2(-1e9 , -1e9);
+
+    float3 corners[8];
+    GetAABBCorners(boxMin  ,boxMax , corners);
+
+    for(uint i = 0 ; i < 8 ; i++){
+
+        const float4 clipPos = mul(vp , float4(corners[i] , 1.0f));
+
+        if(clipPos.w <= 0.0001f) return false;
+
+        float3 ndc = clipPos.xyz / clipPos.w;
+
+        ndc.y = -ndc.y;
+
+        float2 screenPos = ndc.xy * 0.5f + 0.5f;
+
+        screenMin = min(screenPos , screenMin);
+        screenMax = max(screenPos , screenMax);
+        objectClosestDepth = min(objectClosestDepth , ndc.z);
+    }
+
+    screenMax = saturate(screenMax);
+    screenMin = saturate(screenMin);
+
+    return true;
+}
+
+
+static const int MAX_OCCLUSION_TEXELS = 4;
+static const float OCCLUSION_BIAS = 1e-6f;
+
+bool needsToBeOccluded(MeshData object){
+
+    float2 screenMax , screenMin;
+    float objectClosestDepth;
+
+    if(!ProjectAABBToScreen(object.boxMax , object.boxMin , generalBuffer.prevViewProj , screenMin , screenMax , objectClosestDepth)) return false;
+
+    uint width , height , levels;
+    prevDepth.GetDimensions(0 , width , height , levels);
+
+    const uint mip = computeMipLevel(screenMin , screenMax , uint2(width , height) , levels - 1);
+
+    const int2 mipSize = int2(max(1u , width >> mip) , max(1u , height >> mip));
+    const int2 lo = clamp(int2(floor(screenMin * float2(mipSize))) , int2(0 , 0) , mipSize - 1);
+    const int2 hi = clamp(int2(floor(screenMax * float2(mipSize))) , int2(0 , 0) , mipSize - 1);
+
+    if(any((hi - lo) >= MAX_OCCLUSION_TEXELS)) return false;
+
+    float occDepth = 0.0f;
+    for(int y = lo.y ; y <= hi.y ; y++)
+    {
+        for(int x = lo.x ; x <= hi.x ; x++)
+        {
+            occDepth = max(occDepth , prevDepth.Load(int3(x , y , mip)).x);
+        }
+    }
+
+    return objectClosestDepth > occDepth + OCCLUSION_BIAS;
+}
 
 groupshared Payload sPayload;
 
@@ -37,7 +119,7 @@ void main(uint3 groupID : SV_GroupID , uint threadIndex : SV_GroupIndex)
         const ms::GeometryData geom = geometryBuffer[mesh.geometryIndex];
         const uint localIndex = groupID.x * TASK_GROUP_SIZE + threadIndex;
 
-        if(localIndex < geom.meshletCount)
+        if(localIndex < geom.meshletCount && !needsToBeOccluded(mesh))
         {
             meshletID = geom.meshletOffset + localIndex;
 

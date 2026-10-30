@@ -5,6 +5,7 @@
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
 #include "../Image2/TextureManager2.hpp"
 #include "../Object2/Mesh2.hpp"
+#include "../Image2/MultiViewImage2.hpp"
 
 namespace mox{
 
@@ -31,6 +32,8 @@ namespace mox{
             TextureManager2* manager;
 
             std::string task , mesh , fragment;
+            // the two compute shaders of the hi Z : the z buffer -> the mip 0 , and the mip m -> the mip m + 1 ( the max of 2 x 2 texels )
+            std::string copyDepth , generateMips;
         };
 
         // one task group checks this many meshlets of ONE instance ( it has to be the same as TASK_GROUP_SIZE in taskShader.hlsl and meshShader.hlsl )
@@ -130,7 +133,7 @@ namespace mox{
 
             // the g buffer is written through the color attachments of the dynamic rendering : the load op clears them ,
             // so the old contents are not needed , and the images stay in GENERAL ( the next passes read them as storage images )
-            std::array<VkImageMemoryBarrier2 , 8> barriers{};
+            std::array<VkImageMemoryBarrier2 , 9> barriers{};
             barriers[0] = image("albedoImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[1] = image("positionImage" , currentImage)->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[2] = image("normalImage" , currentImage)->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
@@ -139,6 +142,7 @@ namespace mox{
             barriers[5] = image("metallicImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[6] = image("pixelCheck")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
             barriers[7] = image("objectAmbientImage")->translateImage(VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT , VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+            barriers[8] = hiZ->translateWholeImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
             // the general buffer is read by the task shader , the mesh shader and the fragment shader ( no vertex stage here )
             VkBufferMemoryBarrier2 generalBufferBarrier{};
             generalBufferBarrier = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT | VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
@@ -162,7 +166,6 @@ namespace mox{
         [[nodiscard]] [[gnu::hot]]  ErrorDataOutput<void> executePass(VkCommandBuffer& cmd) noexcept override final{
             if(!completedInit) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to executePass , since the pipeline wasnt created [MeshDeferredRender]"});
 
-            // the vertex stage is bound as VK_NULL_HANDLE : a draw with a mesh shader must not have the vertex , tessellation and geometry stages ( the old pass may have left the vertex shader bound )
             VkShaderEXT shaders[4] = {VK_NULL_HANDLE , pipe->shaders[0]->shader , pipe->shaders[1]->shader , pipe->shaders[2]->shader};
             VkShaderStageFlagBits stages[4] = {VK_SHADER_STAGE_VERTEX_BIT , VK_SHADER_STAGE_TASK_BIT_EXT , VK_SHADER_STAGE_MESH_BIT_EXT , VK_SHADER_STAGE_FRAGMENT_BIT};
             const uint8_t currentImage = context->sc->frameIndex %2;
@@ -175,9 +178,6 @@ namespace mox{
             viewport.maxDepth = 1.0f;
             viewport.x = 0.0f;
             viewport.width = static_cast<float>(inputData.context->sc->extent.width);
-            // The ONE Y flip for Vulkan clip space lives here , as a negative height.
-            // Doing it in the projection instead would break every shader that
-            // rebuilds a ray through invViewProj.
             viewport.y = static_cast<float>(inputData.context->sc->extent.height);
             viewport.height = -static_cast<float>(inputData.context->sc->extent.height);
 
@@ -193,7 +193,6 @@ namespace mox{
             vkCmdSetViewportWithCount(cmd, 1, &viewport);
             vkCmdSetScissorWithCount(cmd, 1, &scissor);
 
-            // no vertex input , no primitive topology , no index buffer : the mesh shader reads the vertices itself and makes the triangles
 
             vkCmdSetRasterizerDiscardEnable(cmd , VK_FALSE);
             vkCmdSetDepthBiasEnable(cmd , VK_FALSE);
@@ -204,7 +203,6 @@ namespace mox{
             cmdSetSampleMaskEXT(cmd , VK_SAMPLE_COUNT_1_BIT , &sampleMask);
             cmdSetAlphaToCoverageEnableEXT(cmd , VK_FALSE);
 
-            // the eight color attachments : no blending , everything is written
             {
                 const VkBool32 blend[8] = {VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE , VK_FALSE};
                 const VkColorComponentFlags all = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -214,12 +212,10 @@ namespace mox{
                 cmdSetColorWriteMaskEXT(cmd , 0 , 8 , mask);
             }
 
-            // the shading rate of the primitive replaces the pipeline one ( the mesh shader does not write one : 1 x 1 )
             const VkExtent2D shadingRate = {1 , 1};
             const VkFragmentShadingRateCombinerOpKHR combiners[2] = {VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR , VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR};
             cmdSetFragmentShadingRateKHR(cmd , &shadingRate , combiners);
 
-            // descriptor buffers : set 0 has EVERY buffer of the pass ( see processInit ) , set 1 is the textures
             {
                 std::array<VkDescriptorBufferBindingInfoEXT, 2> info;
                 info[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
@@ -315,14 +311,127 @@ namespace mox{
             VkShaderEXT none[4] = {VK_NULL_HANDLE , VK_NULL_HANDLE , VK_NULL_HANDLE , VK_NULL_HANDLE};
             cmdBindShadersEXT(cmd , 4 , stages , none);
 
+            // the hi Z of THIS frame ( the task shader of the next frame reads it )
+            recordHiZ(cmd);
+
             return {};
         }
 
         pRenderImage2 depthBuffer{nullptr};
-
+        pMultiViewImage2<6 , ViewPerType::Mip> hiZ{nullptr};
     private:
 
         pShaderPipeType pipe{nullptr};
+
+        pShaderPipeType hizPipe{nullptr};
+        pPipelineLayout mipLayout{nullptr};
+
+        void recordHiZ(VkCommandBuffer& cmd) noexcept{
+            const VkExtent2D extent = context->sc->extent;
+            const uint32_t mipCount = static_cast<uint32_t>(hiZ->views.size());
+            const VkShaderStageFlagBits computeStage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+            // 1 : the z buffer -> the mip 0
+            {
+                std::array<VkImageMemoryBarrier2 , 2> barriers{};
+                barriers[0] = depthBuffer->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+                barriers[1] = hiZ->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT , 1 , 0);
+
+                VkDependencyInfo dep{};
+                dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+                dep.pImageMemoryBarriers = barriers.data();
+                vkCmdPipelineBarrier2(cmd , &dep);
+
+                VkDescriptorImageInfo depthInfo{};
+                depthInfo.sampler = nullptr;
+                depthInfo.imageView = depthBuffer->view;
+                depthInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+                VkDescriptorImageInfo mipInfo{};
+                mipInfo.sampler = nullptr;
+                mipInfo.imageView = hiZ->views[0];
+                mipInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+                std::array<VkWriteDescriptorSet , 2> writes{};
+                for(auto& write : writes){
+                    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    write.pNext = nullptr;
+                    write.dstSet = nullptr;
+                    write.dstArrayElement = 0;
+                    write.descriptorCount = 1;
+                    write.pBufferInfo = nullptr;
+                    write.pTexelBufferView = nullptr;
+                }
+                writes[0].dstBinding = 0;
+                writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                writes[0].pImageInfo = &depthInfo;
+                writes[1].dstBinding = 1;
+                writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                writes[1].pImageInfo = &mipInfo;
+
+                VkShaderEXT shader = hizPipe->shaders[0]->shader;
+                cmdBindShadersEXT(cmd , 1 , &computeStage , &shader);
+                cmdPushDescriptorSetKHR(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , hizPipe->layout->layout , 0 , static_cast<uint32_t>(writes.size()) , writes.data());
+
+                vkCmdDispatch(cmd , (extent.width + 7) / 8 , (extent.height + 7) / 8 , 1);
+            }
+
+            // 2 : the mip m -> the mip m + 1 , one dispatch for every level ( the next one reads what this one wrote )
+            {
+                VkShaderEXT shader = hizPipe->shaders[1]->shader;
+                cmdBindShadersEXT(cmd , 1 , &computeStage , &shader);
+
+                for(uint32_t level = 1 ; level < mipCount ; level++){
+                    std::array<VkImageMemoryBarrier2 , 2> barriers{};
+                    barriers[0] = hiZ->translateImage(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT , 1 , level - 1);
+                    barriers[1] = hiZ->translateImage(VK_ACCESS_2_SHADER_WRITE_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT , 1 , level);
+
+                    VkDependencyInfo dep{};
+                    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                    dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+                    dep.pImageMemoryBarriers = barriers.data();
+                    vkCmdPipelineBarrier2(cmd , &dep);
+
+                    VkDescriptorImageInfo srcInfo{};
+                    srcInfo.sampler = nullptr;
+                    srcInfo.imageView = hiZ->views[level - 1];
+                    srcInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+                    VkDescriptorImageInfo dstInfo{};
+                    dstInfo.sampler = nullptr;
+                    dstInfo.imageView = hiZ->views[level];
+                    dstInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+                    std::array<VkWriteDescriptorSet , 2> writes{};
+                    for(auto& write : writes){
+                        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        write.pNext = nullptr;
+                        write.dstSet = nullptr;
+                        write.dstArrayElement = 0;
+                        write.descriptorCount = 1;
+                        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                        write.pBufferInfo = nullptr;
+                        write.pTexelBufferView = nullptr;
+                    }
+                    writes[0].dstBinding = 0;
+                    writes[0].pImageInfo = &srcInfo;
+                    writes[1].dstBinding = 1;
+                    writes[1].pImageInfo = &dstInfo;
+
+                    cmdPushDescriptorSetKHR(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , mipLayout->layout , 0 , static_cast<uint32_t>(writes.size()) , writes.data());
+
+                    // the size of the mip : the dispatch is by the destination ( the shader leaves the threads that are out of it )
+                    const uint32_t width = std::max(1u , extent.width >> level);
+                    const uint32_t height = std::max(1u , extent.height >> level);
+                    vkCmdDispatch(cmd , (width + 7) / 8 , (height + 7) / 8 , 1);
+                }
+            }
+
+            // nothing stays bound
+            VkShaderEXT none = VK_NULL_HANDLE;
+            cmdBindShadersEXT(cmd , 1 , &computeStage , &none);
+        }
 
         VulkanContext* context{nullptr};
         TextureManager2* manager{nullptr};
@@ -340,6 +449,9 @@ namespace mox{
             manager = std::exchange(input.manager , nullptr);
 
             depthBuffer = std::move(input.depthBuffer);
+            hiZ = std::move(input.hiZ);
+            hizPipe = std::move(input.hizPipe);
+            mipLayout = std::move(input.mipLayout);
             completedInit = input.completedInit;
             inputData = input.inputData;
         }
@@ -351,6 +463,9 @@ namespace mox{
             manager = nullptr;
             depthBuffer = nullptr;
             completedInit = false;
+            hiZ = nullptr;
+            hizPipe = nullptr;
+            mipLayout = nullptr;
             inputData = {};
         }
 
@@ -358,10 +473,28 @@ namespace mox{
             try{
                 pipe = std::make_shared<ShaderPipeType>(context);
 
-                // ONE descriptor set for the whole pass : 0 .. 4 are the same as in DeferredRender ( the fragment shader is the same one ) , 5 .. 10 are the meshlets .
-                // the numbers have to be the same as [[vk::binding(N , 0)]] in taskShader.hlsl and meshShader.hlsl
                 {
-                    std::vector<DescriptorLayoutData> data(11);
+                    MultiViewImage2<6 , ViewPerType::Mip>::CreateInfo info{};
+                    info.context = input.context;
+                    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    info.imageFormat = VK_FORMAT_R32_SFLOAT;
+                    // aspect was never set ( 0 is not a valid aspect mask of a view )
+                    info.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+                    info.extent = input.context->sc->extent;
+                    // STORAGE : the compute passes write the mips , SAMPLED : the task shader reads fullView ( binding 11 )
+                    info.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                    info.imageType = VK_IMAGE_TYPE_2D;
+
+                    info.clear.float32[0] = 1.0f;
+                    info.clear.float32[1] = 1.0f;
+                    info.clear.float32[2] = 1.0f;
+                    info.clear.float32[3] = 1.0f;
+
+                    hiZ = std::make_shared<MultiViewImage2<6 , ViewPerType::Mip>>(info);
+                }
+
+                {
+                    std::vector<DescriptorLayoutData> data(12);
                     data[0]  = {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ,.count = 1};   // general buffer
                     data[1]  = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // instance layout
                     data[2]  = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // mesh data
@@ -373,6 +506,7 @@ namespace mox{
                     data[8]  = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // meshlet vertices
                     data[9]  = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // meshlet indices
                     data[10] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ,.count = 1};   // the vertices of all the meshes
+                    data[11] = {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ,.count = 1};
 
                     DescriptorLayout::CreateInfo info{};
                     info.context = context;
@@ -396,7 +530,7 @@ namespace mox{
 
                 // the buffers do not depend on the frame , one descriptor buffer is enough ( Mesh2::End() has to be done : the buffers must exist )
                 {
-                    std::vector<DescriptorData2> data(11);
+                    std::vector<DescriptorData2> data(12);
                     data[0]  = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 0 , 0);
                     data[1]  = DescriptorData2::createData(Mesh2::instanceLayoutBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0);
                     data[2]  = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0);
@@ -408,7 +542,8 @@ namespace mox{
                     data[8]  = DescriptorData2::createData(Mesh2::meshletVertexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 8 , 0);
                     data[9]  = DescriptorData2::createData(Mesh2::meshletIndexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 9 , 0);
                     data[10] = DescriptorData2::createData(Mesh2::vertexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 10 , 0);
-
+                    data[11] = DescriptorData2::createData(hiZ->fullView , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 11 , 0);
+                     
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;
                     info.data = data;
@@ -468,9 +603,89 @@ namespace mox{
                     info.layerCount = 1;
                     info.mipMapCount = 1;
                     info.extent = input.context->sc->extent;
-                    info.imageUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+                    // SAMPLED : the compute pass reads it ( translateToGeneralImage.hlsl )
+                    info.imageUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
                     depthBuffer = std::make_shared<RenderImage2>(info);
+                }
+
+                // the compute passes of the hi Z : push descriptor sets ( VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT ) , so no descriptor buffers for them
+                {
+                    hizPipe = std::make_shared<ShaderPipeType>(context);
+
+                    // copyDepth : 0 = the z buffer ( sampled ) , 1 = the mip 0 of the hi Z ( storage )
+                    {
+                        std::vector<DescriptorLayoutData> data(2);
+                        data[0] = {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ,.count = 1};
+                        data[1] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
+
+                        DescriptorLayout::CreateInfo info{};
+                        info.context = context;
+                        info.data = data;
+                        info.pNext = nullptr;
+                        info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT;
+                        info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                        hizPipe->addDescriptorLayout(info);
+                    }
+
+                    // generateMips : 0 = the mip m ( read ) , 1 = the mip m + 1 ( write ) , both storage
+                    {
+                        std::vector<DescriptorLayoutData> data(2);
+                        data[0] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
+                        data[1] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,.count = 1};
+
+                        DescriptorLayout::CreateInfo info{};
+                        info.context = context;
+                        info.data = data;
+                        info.pNext = nullptr;
+                        info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT;
+                        info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+
+                        hizPipe->addDescriptorLayout(info);
+                    }
+
+                    {
+                        PipelineLayout::CreateInfo info{};
+                        info.layouts = {hizPipe->descriptorLayouts[0].get()};
+                        info.context = input.context;
+                        info.ranges = {};
+
+                        hizPipe->layout = std::make_shared<PipelineLayout>(info);
+                    }
+
+                    {
+                        PipelineLayout::CreateInfo info{};
+                        info.layouts = {hizPipe->descriptorLayouts[1].get()};
+                        info.context = input.context;
+                        info.ranges = {};
+
+                        mipLayout = std::make_shared<PipelineLayout>(info);
+                    }
+
+                    {
+                        ShaderObjectType::CreateInfo info{};
+                        info.context = context;
+                        info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
+                        info.nextStage = 0;
+                        info.filePath = input.copyDepth;
+                        info.layouts = {hizPipe->descriptorLayouts[0].get()};
+                        info.pushes = {};
+
+                        hizPipe->addShader(info);
+                    }
+
+                    {
+                        ShaderObjectType::CreateInfo info{};
+                        info.context = context;
+                        info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;
+                        info.nextStage = 0;
+                        info.filePath = input.generateMips;
+                        info.layouts = {hizPipe->descriptorLayouts[1].get()};
+                        info.pushes = {};
+
+                        hizPipe->addShader(info);
+                    }
                 }
             }
             catch(std::exception& e){

@@ -7,15 +7,8 @@ struct VsOutput{
     [[vk::location(6)]] nointerpolation uint LUTindex     : TEXCOORD6;
 };
 
-#include "../../include/ShaderStructures/ShaderStructure.h"
-
-// set 0 of the deferred render : only buffers , the g buffer is not here any more , it is written through the color attachments
-[[vk::binding(0 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
-[[vk::binding(4 , 0)]] StructuredBuffer<LUT> LUT_Buffer;
-
-[[vk::binding(0 , 1)]] StructuredBuffer<uint> virtualTextureIndex;
-[[vk::binding(1 , 1)]] SamplerState samp;
-[[vk::binding(2 , 1)]] Texture2D allTextures[];
+// the descriptor sets ( the same in task , mesh and fragment ) : the g buffer is not here , it is written through the color attachments
+#include "meshPassBindings.hlsli"
 
 // the order of the SV_Target is the order of the color attachments in DeferredRender::executePass
 struct PsOutput{

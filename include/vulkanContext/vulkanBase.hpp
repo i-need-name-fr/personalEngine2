@@ -42,6 +42,8 @@ namespace mox{
 
     using QueueRecordTypeFunction = std::function<ErrorDataOutput<void>(VkCommandBuffer& , const uint32_t)>;
 
+    inline static uint32_t SCREEN_MIP_COUNT = 0;
+
     class VulkanContext final{
     private:
 
@@ -163,6 +165,8 @@ namespace mox{
                 }
             }
             catch(std::exception& e){throw;}
+
+            SCREEN_MIP_COUNT = (uint32_t)(std::floor((float)std::log2(std::max(sc->extent.width , sc->extent.height)))) + 1ul;
 
             return {};
         }
@@ -367,6 +371,7 @@ namespace mox{
         PhysicalDevice = 0x05,
         Swapchain = 0x06
     };
+
 
     inline static constexpr uint32_t VkReqTypeInstance = static_cast<uint32_t>(VulkanRequirements::Instance);
     inline static constexpr uint32_t VkReqTypeQueues = static_cast<uint32_t>(VulkanRequirements::Queues);

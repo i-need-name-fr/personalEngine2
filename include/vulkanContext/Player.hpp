@@ -70,6 +70,8 @@ namespace mox{
         const float maxSpeed = 25.0f;
         const float minSpeed = 5.0f;
 
+        uint8_t fixedPosition = false;
+
         uint32_t currentMode = 0;
         // default , albedo , normal , depth , metallic , roughness , indirect light , filtered AO , filtered shadow ( DEFAULT_MODE .. SHADOW_MODE ) , the R key cycles through all of them
         const uint32_t totalModes = TOTAL_VIEW_MODES;
@@ -202,6 +204,7 @@ namespace mox{
             Player* user = reinterpret_cast<Player*>(glfwGetWindowUserPointer(window));
             if(key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) glfwSetWindowShouldClose(window , true);
             if(key == GLFW_KEY_R && action == GLFW_PRESS) user->currentMode = (user->currentMode + 1) % user->totalModes;
+            if(key == GLFW_KEY_F && action == GLFW_PRESS) user->fixedPosition = !user->fixedPosition;
         }
 
         uint8_t holdedMouse = false;

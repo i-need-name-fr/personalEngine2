@@ -235,6 +235,9 @@ namespace mox{
                     info.task = getShaderPath("../Shaders/DeferredRender/taskShader");
                     info.mesh = getShaderPath("../Shaders/DeferredRender/meshShader");
                     info.fragment = getShaderPath("../Shaders/DeferredRender/fragmentShader");
+                    // the hi Z : the z buffer -> the mip 0 , then the max of 2 x 2 for every next mip
+                    info.copyDepth = getShaderPath("../Shaders/HiZShaders/translateToGeneralImage");
+                    info.generateMips = getShaderPath("../Shaders/HiZShaders/generateMips");
                     info.manager = manager.get();
 
                     meshRender = std::make_shared<MeshDeferredRender>(info);
@@ -577,6 +580,7 @@ namespace mox{
                 info.asyncMultiThreadQueueCount =4;
                 info.multithreadQueueCount = 1;
                 context = std::make_shared<VulkanContext>(info);
+                context->user->fixedPosition = false;
                 renderImages = std::make_shared<FrameTargets>(context.get());
                 buffers = std::make_shared<SourceBuffers>(context.get());
                 {
@@ -852,14 +856,20 @@ namespace mox{
             SunSource& sun = sunSettings;
             const float aspect = static_cast<float>(context->sc->extent.width) / static_cast<float>(context->sc->extent.height);
 
+            if(!context->user->fixedPosition)
+            {
+                userPos = context->user->position; 
+                userDir = context->user->direction;
+            }
+
             glm::mat4 proj = glm::perspective(glm::radians(70.0f) , aspect , 0.001f , 200.0f);
             glm::mat4 view = glm::lookAt(context->user->position , context->user->position + context->user->direction , glm::vec3(0.0f , 1.0f , 0.0f));
             features.currentMode = context->user->currentMode;
             data.inverseView = glm::inverse(view);
             data.inverseProj = glm::inverse(proj);
             data.viewProj = proj * view;
-            data.playerDirection = context->user->direction;
-            data.playerPosition = context->user->position;
+            data.playerDirection = userDir;
+            data.playerPosition = userPos;
             data.playerNear = 0.001f;
             data.playerFar = 200.0f;
             data.dt = dt;
@@ -1289,7 +1299,8 @@ namespace mox{
 
         std::vector<pMesh2> meshes{};
         std::vector<pModel3> models{};
-
+        glm::vec3 userPos{};
+        glm::vec3 userDir{};
         glm::mat4 prevVP{1.0f};
         bool firstIteration{true};
         QueueRecordTypeFunction recordFunction{};
