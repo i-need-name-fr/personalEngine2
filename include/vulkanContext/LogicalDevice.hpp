@@ -141,6 +141,8 @@ namespace mox{
             features.drawIndirectFirstInstance = VK_TRUE;
             // the cull shader fills one draw per mesh into the indirect buffer ( drawCount > 1 )
             features.multiDrawIndirect = VK_TRUE;
+            // vkCmdSetDepthBias with a clamp that is not 0 ( the G buffer pass ) is legal only with it
+            features.depthBiasClamp = VK_TRUE;
 
             VkDeviceCreateInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

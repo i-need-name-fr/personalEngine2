@@ -19,6 +19,9 @@
 
 static const float RC_PLANE_SIGMA_PER_PIXEL = 0.003f;
 static const float RC_DIRECTION_POWER = 16.0f;
+// the weight of a probe by the NORMAL ( dot of the normals ^ 16 ) never goes under this : in a corner every probe around the point lies on the OTHER wall ( dot = 0 ) ,
+// the weight was 0 for all of them and the corner got black . the plane and the visibility checks stay , they are what keeps the light from the other side of a wall out
+static const float RC_MIN_NORMAL_WEIGHT = 0.05f;
 static const float MAX_RC_RADIANCE_LIMIT = 0.7f;
 
 // the SPATIAL REUSE of the probes : 1 - the 2 x 2 probes and the 2 x 2 texels are mixed ( the bilinear ) with the weights of the geometry , of the direction and of the radiance .
@@ -97,8 +100,6 @@ void main(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    // the samples of the previous cascade are unpacked one by one : the colour is the weighted mean , the hits are counted by their weights ( the coverage ) ,
-    // the distance is the mean of the distances of the hits ( if there are not any : of the misses )
     float3 behindColor = 0.0f;
     float weightSum = 0.0f;
     float hitWeight = 0.0f;
@@ -120,7 +121,7 @@ void main(uint3 id : SV_DispatchThreadID)
             const RC::ProbeInfo pProbe = RCProbeBuffer[probeIndex];
             const float2 probeDistance = abs(float2(probeX , probeY) - prevProbeFrac);
             float probeWeight = saturate(1.0f - probeDistance.x / float(PROBE_SAMPLE_COUNT)) * saturate(1.0f - probeDistance.y / float(PROBE_SAMPLE_COUNT));
-            const float nW = pow(saturate(dot(probe.normal , pProbe.normal)) , 16.0f);
+            const float nW = max(pow(saturate(dot(probe.normal , pProbe.normal)) , 16.0f) , RC_MIN_NORMAL_WEIGHT);
             const float d = abs(dot(probe.position - pProbe.position , pProbe.normal));
             // the size of a tile of the probes of the previous cascade in the world ( not the distance times the pixels : that is 1000 times bigger and the weight is 1 everywhere )
             const float k = max(pProbe.cameraDistance * float(prevCas_.PROBE_RESOLUTION) * RC_PLANE_SIGMA_PER_PIXEL , 1e-4f);
@@ -174,12 +175,8 @@ void main(uint3 id : SV_DispatchThreadID)
         }
     }
 
-    // no probe of the previous cascade gave anything ( the edge of the screen , the probes in objects or on the sky ) : there is nothing to take , so the sample keeps what
-    // it has . a ray that missed has the colour of the sky in rgb ( RCmiss ) , so the ambient is not lost , it is only not taken from the previous cascade
     if(weightSum <= 0.0f) return;
 
-    // a ray that missed takes what is behind it : the colour ( the sky of a miss is not counted twice : our own colour does not count , the ray did not stop )
-    // and the hit : it is a hit if the half of the weight is , the distance is the mean of the matching samples
     const bool behindHit = hitWeight * 2.0f >= weightSum;
     const float missWeight = max(weightSum - hitWeight , 1e-6f);
     const float behindDistance = behindHit ? (hitDistanceSum / max(hitWeight , 1e-6f)) : (missDistanceSum / missWeight);

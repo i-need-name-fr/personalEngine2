@@ -542,15 +542,13 @@ namespace mox{
             fogSettings.fogBaseHeight = FLOOR_Y;
             fogSettings.color = fogTint * fogGlow;
 
-            // the sun : 40 degrees above the horizon , the azimuth 215 degrees . the light travels away from the sun
             {
                 const float elevation = glm::radians(40.0f);
                 const float azimuth = glm::radians(215.0f);
                 const glm::vec3 toSun(std::cos(elevation) * std::cos(azimuth) , std::sin(elevation) , std::cos(elevation) * std::sin(azimuth));
 
                 sunSettings = SunSource{};
-                // the size of the sun for the shadow ( the half angle of the cone , radians ) : the real sun is 0.00465 , a bigger one makes a softer penumbra
-                sunSettings.sourceRadius = 0.00465f;
+                sunSettings.sourceRadius = 1.0f;
                 sunSettings.direction = -toSun;
                 sunSettings.intensity = 4.0f;
                 sunSettings.diffuse = glm::vec3(1.0f , 0.95f , 0.85f) * sunSettings.intensity;
@@ -563,7 +561,6 @@ namespace mox{
                 skySettings.sunSinAzimuth = toSun.z / horizontal;
             }
 
-            // Forward+ : the tiles of the screen and the number of the lights . the pass takes forwardData when it is created , and updateData sends it to the buffer
             forwardData = ForwardPlusInfo{};
             forwardData.TILE_SIZE = 16;
             forwardData.TILE_PER_ROW = (context->sc->extent.width + forwardData.TILE_SIZE - 1) / forwardData.TILE_SIZE;
@@ -674,7 +671,6 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createModels() noexcept{
             try{
 
-                // stone 1
                 {
                     // the fort from glTF : the node transforms are baked into the vertices , the textures are found next to the .gltf
                     Model3::CreateInfo info{};
@@ -688,6 +684,18 @@ namespace mox{
                     model = glm::scale(model , glm::vec3(2.0f));
                     models[0]->setMatrix(model , 0);
                 }
+
+                {
+                    Model3::CreateInfo info{};
+                    info.color = glm::vec3(0.0f);
+                    info.path = "../models/Exterior_1k/BistroExterior.gltf";
+                    info.metallic = 0.0f;
+                    info.roughness = 1.0f;
+                    models.push_back(std::make_shared<Model3>(info));
+                    glm::mat4 model(1.0f);
+                    model = glm::translate(model , glm::vec3(100.0f ,10.0f, 0.0f));
+                    models[1]->setMatrix(model , 0);
+                }
             }
             catch(std::exception &e){
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create models"});
@@ -698,7 +706,7 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createLights() noexcept{
             // 3 lights
             {
-                std::vector<lg::LightSource> lights(3);
+                std::vector<lg::LightSource> lights(11);
 
                 std::mt19937 rng{std::random_device{}()};
                 const auto rnd = [&rng](const float low , const float high){
@@ -707,7 +715,7 @@ namespace mox{
                 };
 
                 // the first two : violet , not too bright , a random strength and reach
-                for(uint32_t i = 0 ; i < 3 ; i++){
+                for(uint32_t i = 0 ; i < 11 ; i++){
                     const float intensity = rnd(4.0f , 10.0f);
                     lights[i].diffuse = glm::vec3(rnd(0.1f , 1.0f) , rnd(0.0f , 1.0f) , rnd(0.1f , 1.0f)) * intensity;
                     lights[i].radius = rnd(15.0f , 30.0f);
@@ -723,6 +731,15 @@ namespace mox{
                 lights[1].position = glm::vec3(-13.5f , 20.4f , -7.2f);
                 lights[2].position = glm::vec3(15.5f , 12.6f , 7.2);
                 // the names : the lamps are found by them , not by the index in a vector . the grid and the buffers are written by light_m->updateGrid every frame
+                lights[3].position = glm::vec3(71.1f , 18.9f , -23.2);
+                lights[4].position = glm::vec3(81.9f , 16.1f , 3.6);
+                lights[5].position = glm::vec3(102.0f , 18.4f , -18.0);
+                lights[6].position  = glm::vec3(104.5f, 16.3f, -39.3f);
+                lights[7].position  = glm::vec3(127.1f, 17.8f, -55.9f);
+                lights[8].position  = glm::vec3(112.4f, 17.6f,  13.6f);
+                lights[9].position  = glm::vec3(153.2f, 18.3f,  38.5f);
+                lights[10].position = glm::vec3(188.3f, 25.1f,  47.0f);
+
                 for(uint32_t i = 0 ; i < lights.size() ; i++){
                     light_m->addLight(lights[i] , std::format("light_{}" , i));
                 }
@@ -862,7 +879,7 @@ namespace mox{
                 userDir = context->user->direction;
             }
 
-            glm::mat4 proj = glm::perspective(glm::radians(70.0f) , aspect , 0.001f , 200.0f);
+            glm::mat4 proj = glm::perspective(glm::radians(70.0f) , aspect , 0.1f , 200.0f);
             glm::mat4 view = glm::lookAt(context->user->position , context->user->position + context->user->direction , glm::vec3(0.0f , 1.0f , 0.0f));
             features.currentMode = context->user->currentMode;
             data.inverseView = glm::inverse(view);
@@ -870,16 +887,22 @@ namespace mox{
             data.viewProj = proj * view;
             data.playerDirection = userDir;
             data.playerPosition = userPos;
-            data.playerNear = 0.001f;
+            data.playerNear = 0.1f;
             data.playerFar = 200.0f;
             data.dt = dt;
             data.frameIndex = context->sc->frameIndex;
             data.screenWidth = context->sc->extent.width;
             data.screenHeight = context->sc->extent.height;
             data.viewOnly = view;
+            data.cullView = glm::lookAt(userPos , userPos + userDir , glm::vec3(0.0f , 1.0f , 0.0f));
             data.projOnly = proj;
             data.invViewProj = glm::inverse(data.viewProj);
             data.lightCount = lightCount;
+            if(firstIteration) hizVP = data.viewProj;
+            else if(hizBuiltLastFrame) hizVP = prevVP;
+            hizBuiltLastFrame = !context->user->fixedPosition;
+            data.hizViewProj = hizVP;
+
             if(firstIteration){
                 data.prevViewProj = data.viewProj;
             }else{
@@ -888,12 +911,9 @@ namespace mox{
 
             prevVP = data.viewProj;
 
-            // the height of the camera over the ground is the only field of the sky data that the application owns , it is made every frame ( the sun header can be closed )
             skyData.cameraHeight = std::max(context->user->position.y - FLOOR_Y , 0.5f);
 
             drawImGui(data , features , fogData , skyData , sun);
-
-            // the Forward+ has no buffer of the features : it takes the fade of the shadows from its own info ( after the ImGui , it may change the slider )
             forwardData.lightShadowFade = features.lightShadowFade;
 
             buffers->generalBuffer->updateBufferCmd(cmd ,data , VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT );
@@ -1302,6 +1322,8 @@ namespace mox{
         glm::vec3 userPos{};
         glm::vec3 userDir{};
         glm::mat4 prevVP{1.0f};
+        glm::mat4 hizVP{1.0f};
+        bool hizBuiltLastFrame{false};
         bool firstIteration{true};
         QueueRecordTypeFunction recordFunction{};
         const float fogGridSize = 64.0f;

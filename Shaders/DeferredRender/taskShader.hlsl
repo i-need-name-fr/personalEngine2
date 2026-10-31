@@ -68,6 +68,7 @@ bool ProjectAABBToScreen(float3 boxMax , float3 boxMin , float4x4 vp , out float
 }
 
 
+
 static const int MAX_OCCLUSION_TEXELS = 4;
 static const float OCCLUSION_BIAS = 1e-6f;
 
@@ -76,7 +77,7 @@ bool needsToBeOccluded(MeshData object){
     float2 screenMax , screenMin;
     float objectClosestDepth;
 
-    if(!ProjectAABBToScreen(object.boxMax , object.boxMin , generalBuffer.prevViewProj , screenMin , screenMax , objectClosestDepth)) return false;
+    if(!ProjectAABBToScreen(object.boxMax , object.boxMin , generalBuffer.hizViewProj , screenMin , screenMax , objectClosestDepth)) return false;
 
     uint width , height , levels;
     prevDepth.GetDimensions(0 , width , height , levels);
@@ -101,6 +102,94 @@ bool needsToBeOccluded(MeshData object){
     return objectClosestDepth > occDepth + OCCLUSION_BIAS;
 }
 
+bool needsToBeOccluded(const float4 sphere){
+
+    float2 screenMax , screenMin;
+    float objectClosestDepth;
+
+    const float3 boxMax = sphere.xyz + sphere.w;
+    const float3 boxMin = sphere.xyz - sphere.w;
+
+    if(!ProjectAABBToScreen(boxMax , boxMin , generalBuffer.hizViewProj , screenMin , screenMax , objectClosestDepth)) return false;
+
+    uint width , height , levels;
+    prevDepth.GetDimensions(0 , width , height , levels);
+
+    const uint mip = computeMipLevel(screenMin , screenMax , uint2(width , height) , levels - 1);
+
+    const int2 mipSize = int2(max(1u , width >> mip) , max(1u , height >> mip));
+    const int2 lo = clamp(int2(floor(screenMin * float2(mipSize))) , int2(0 , 0) , mipSize - 1);
+    const int2 hi = clamp(int2(floor(screenMax * float2(mipSize))) , int2(0 , 0) , mipSize - 1);
+
+    if(any((hi - lo) >= MAX_OCCLUSION_TEXELS)) return false;
+
+    float occDepth = 0.0f;
+    for(int y = lo.y ; y <= hi.y ; y++)
+    {
+        for(int x = lo.x ; x <= hi.x ; x++)
+        {
+            occDepth = max(occDepth , prevDepth.Load(int3(x , y , mip)).x);
+        }
+    }
+
+    return objectClosestDepth > occDepth + OCCLUSION_BIAS;
+}
+
+float3 ScreenToViewDirection(float2 ndc , float4x4 invProj){
+    float4 viewSpacePos = mul(invProj , float4(ndc , 1.0f , 1.0f));
+    viewSpacePos /= viewSpacePos.w;
+    return normalize(viewSpacePos.xyz);
+}
+
+float4 computePlane(float3 p0 , float3 p1 , float3 p2){
+    float3 v1 = p1 - p0;
+    float3 v2 = p2 - p0;
+    float3 normal = normalize(cross(v1 , v2));
+    float d = -dot(normal , p0);
+    return float4(normal ,d);
+}
+
+struct TileFrustum{
+    float4 planes[4];
+};
+
+TileFrustum buildTileFrustum(float4x4 invProj){
+    float2 tileMinNDC = float2(-1.0f , -1.0f);
+    float2 tileMaxNDC = float2(1.0f , 1.0f);
+
+    float3 corners[4];
+    corners[0] = ScreenToViewDirection(float2(tileMinNDC.x, tileMinNDC.y), invProj);
+    corners[1] = ScreenToViewDirection(float2(tileMaxNDC.x, tileMinNDC.y), invProj);
+    corners[2] = ScreenToViewDirection(float2(tileMaxNDC.x, tileMaxNDC.y), invProj);
+    corners[3] = ScreenToViewDirection(float2(tileMinNDC.x, tileMaxNDC.y), invProj);
+
+    TileFrustum frustum;
+    // каждая плоскость строится через ДВА соседних угла и начало координат (позиция камеры в view space = 0,0,0)
+    frustum.planes[0] = computePlane(float3(0,0,0), corners[0], corners[3]);   // левая грань
+    frustum.planes[1] = computePlane(float3(0,0,0), corners[2], corners[1]);   // правая грань
+    frustum.planes[2] = computePlane(float3(0,0,0), corners[1], corners[0]);   // нижняя грань ( corners[0..1] - нижний край тайла )
+    frustum.planes[3] = computePlane(float3(0,0,0), corners[3], corners[2]);   // верхняя грань ( corners[2..3] - верхний край тайла )
+    return frustum;
+}
+
+
+bool inFrustum(const float3 P , const float r)
+{
+    // cullView : the view of the culling camera ( frozen by F ) , viewOnly is the real one
+    const float3 viewPos = mul(generalBuffer.cullView , float4(P , 1.0f)).xyz;
+    static TileFrustum frustum = buildTileFrustum(generalBuffer.inverseProj);
+
+    [unroll]
+    for(uint i = 0 ; i < 4 ; i++)
+    {
+        float distance = dot(frustum.planes[i].xyz, viewPos) + frustum.planes[i].w;
+        if (distance < -r)
+            return false;
+    }
+
+    return true;
+}
+
 groupshared Payload sPayload;
 
 [shader("amplification")]
@@ -118,12 +207,15 @@ void main(uint3 groupID : SV_GroupID , uint threadIndex : SV_GroupIndex)
         const MeshData mesh = meshBuffer[layout.meshDataIndex];
         const ms::GeometryData geom = geometryBuffer[mesh.geometryIndex];
         const uint localIndex = groupID.x * TASK_GROUP_SIZE + threadIndex;
+        const float4x4 model = instanceBuffer[mesh.instanceIndex];
 
-        if(localIndex < geom.meshletCount && !needsToBeOccluded(mesh))
+        const float3 boxCenter = mesh.boxCenter;
+        const float boxRad = mesh.boxRadius;
+
+        if(localIndex < geom.meshletCount && !needsToBeOccluded(mesh) && inFrustum(boxCenter , boxRad))
         {
             meshletID = geom.meshletOffset + localIndex;
 
-            const float4x4 model = instanceBuffer[mesh.instanceIndex];
             const ms::MeshletBound bound = boundBuffer[meshletID];
 
             const float3 center = mul(model , float4(bound.sphere.xyz , 1.0f)).xyz;
@@ -136,8 +228,10 @@ void main(uint3 groupID : SV_GroupID , uint threadIndex : SV_GroupIndex)
 
             const float3 toMeshlet = center - generalBuffer.playerPosition;
             const bool backFacing = dot(toMeshlet , axis) >= cutoff * length(toMeshlet) + radius;
-
-            visible = !backFacing;
+            if(inFrustum(center , radius) && !needsToBeOccluded(float4(center , radius))) 
+            {
+                visible = !backFacing;
+            }
         }
     }
 

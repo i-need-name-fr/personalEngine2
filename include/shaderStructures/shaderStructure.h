@@ -256,6 +256,14 @@ struct GeneralInfo{
 
     uint32_t ReBLUR;
     uint32_t ReLAX;
+
+    // the view matrix of the CULLING ( the task shader ) : the same as viewOnly while the camera moves , but it stays where it was when the position is fixed ( F ) ,
+    // so the frustum culling can be seen from outside . viewOnly is NOT frozen : the SSAO and the light grid need the real one . appended at the END ( alignas 16 : the
+    // float4x4 of the shader starts on a 16 byte boundary ) , so the shaders that do not read it stay valid
+    alignas(16) glm::mat4 cullView;
+    // the viewProj that the HiZ ( the task shader occlusion ) was BUILT with : it is the previous frame one while the pyramid is rebuilt every frame , and it stays
+    // when the pyramid is not rebuilt ( F ) , so the projection of the box and the depth in it are always of the same camera
+    alignas(16) glm::mat4 hizViewProj;
 #else
 
     float4x4 inverseProj;
@@ -291,6 +299,9 @@ struct GeneralInfo{
 
     uint ReBLUR;
     uint ReLAX;
+
+    float4x4 cullView;
+    float4x4 hizViewProj;
 #endif
 };
 

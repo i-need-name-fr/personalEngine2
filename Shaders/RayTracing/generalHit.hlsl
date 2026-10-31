@@ -712,49 +712,11 @@ namespace ReSTIRGI{
         return result;
     }
 
-    // the SPECULAR lobe of the hit : one reflection ray . what it reaches is lit by the diffuse light only ( computeDiffuseLightAt ) : a reflection of a reflection is not followed , it would
-    // be a recursion . reflected = radiance * f * cos / pdf , the Fresnel is inside f : a metal gets its whole colour here , a plastic only its 4 percent
-    float3 computeReflectedLightAt(HitRayPayLoad info , inout uint seed , const float3 x1Pos){
-        const float3 V = normalize(x1Pos - info.worldPos);
-        const float roughness = max(info.roughness , 0.1f);
-        const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
-
-        float3 L ; float pdf;
-        sampleSpecularDirection(float2(randNoise() , randNoise()) , info.normal , V , roughness , L , pdf);
-        if(pdf <= 0.0f) return 0.0f;
-        const float3 fcos = evalBRDF(info.normal , V , L , roughness , F0);
-
-        RayDesc ray;
-        ray.Origin = offsetRay(info.worldPos , info.normal , generalBuffer.playerPosition);
-        ray.Direction = L;
-        ray.TMax = 1000.0f;
-        ray.TMin = 0.0001f;
-
-        HitRayPayLoad rLoad = (HitRayPayLoad)0;
-        TraceRay(TLAS , RAY_FLAG_NONE , 0xFF , RT_HITGROUP_HITINFO , 0 , RT_MISS_HITINFO , ray , rLoad);
-
-        float3 radiance;
-        if(rLoad.didHit){
-            radiance = computeDiffuseLightAt(rLoad , seed , info.roughness , info.metallic , info.worldPos);
-        }else{
-            // the sky in the direction of the reflection ( the same scale by the sun as in sampleSkybox )
-            radiance = skybox.SampleLevel(samp , L , 0).xyz * sunBuffer.intensity;
-        }
-
-        const float3 reflected = radiance * fcos / pdf;
-        // the lobe of a metal is narrow : fcos and pdf are both huge there , NaN / Inf must not reach the reservoir
-        if(any(isnan(reflected)) || any(isinf(reflected))) return 0.0f;
-        return sanitizeRadiance(reflected , RC::FEEDBACK_MAX_RADIANCE);
-    }
-
-    // the light of the hit that a GI ray reached : the diffuse lobe + ( for a glossy or a metallic surface , the same gate as in processPixel ) the specular lobe by the reflection ray .
-    // they are SUMMED : the diffuse lobe has (1 - F)(1 - metallic) in it and the specular one has F , so the energy is right for every material . a metal : diffuse 0 , only the reflection
+    // the light of the hit that a GI ray reached : the DIFFUSE lobe only . there is NO reflection ray here ( it was a second TraceRay for every glossy or metallic hit of every GI ray :
+    // too expensive ) , so a metal that is seen by a GI ray gives no light back ( diffuse 0 ) , the pixels of a metal itself are lit by the reflection pass of processPixel
     float3 computeLightAt(HitRayPayLoad info, inout uint seed, const float roughness , const float xMetallic, const float3 x1Pos){
         if(!info.didHit) return 0.0f;
-        float3 result = computeDiffuseLightAt(info , seed , roughness , xMetallic , x1Pos);
-        const bool needSpecular = (info.roughness < 0.5f || info.metallic >= 0.7f);
-        if(needSpecular) result += computeReflectedLightAt(info , seed , x1Pos);
-        return result;
+        return computeDiffuseLightAt(info , seed , roughness , xMetallic , x1Pos);
     }
 
     ReservoirGI generateReservoirGI(GeneralObjectInfo info , const uint2 pixel ,inout uint seed){
@@ -1178,6 +1140,9 @@ float3 traceRayReflection(const float3 direction , const float3 position , out f
 
 static const float RC_PLANE_SIGMA_PER_PIXEL = 0.003f;
 static const float RC_DIRECTION_POWER = 16.0f;
+// the weight of a probe by the NORMAL ( dot of the normals ^ 16 ) never goes under this : in a corner every probe around the point lies on the OTHER wall ( dot = 0 ) ,
+// the weight was 0 for all of them and the corner got black . the plane and the visibility checks stay , they are what keeps the light from the other side of a wall out
+static const float RC_MIN_NORMAL_WEIGHT = 0.05f;
 static const float RC_CONFIDENCE_FULL = 0.5f;
 static const float MAX_RC_RADIANCE_LIMIT = 0.7f;
 
@@ -1203,11 +1168,6 @@ float rcTexelWeight1D(const float distance , const float radius)
 // Cascade radiance
 namespace RC
 {
-    // the place of the world point P in the GRID OF THE PROBES of the cascade 0 , as a float : the probes are attached to the tiles of the SCREEN ( not to the world ) , so the
-    // point is projected to the screen first . the probe i stands in the middle of its tile , so its centre is at the integer i in these units :
-    //   floor( probePos )  - the probe on the left / top of the point , the next one is + 1 , and  probePos - floor( probePos )  is the weight of the next one ( the bilinear )
-    // returns false if there is no probe for the point : it is behind the camera , or outside of the screen ( the probes of the screen know nothing about it )
-    // it does not look at the depth : a point hidden behind something else gets the place of the pixel in front of it , the caller compares the depth / the normal if it matters
     bool findProbePosition(const float3 P , out float2 probePos , const bool current)
     {
         probePos = float2(0.0f , 0.0f);
@@ -1226,8 +1186,6 @@ namespace RC
         return true;
     }
 
-    // the probe of the cascade 0 that is the NEAREST to P : the coordinate ( the column and the row of the tile ) , not an index . int2( -1 , -1 ) if there is no probe
-    // the nearest one is the tile that the point falls into , which is the rounding of probePos
     int2 findProbe(const float3 P, const bool current)
     {
         float2 probePos;
@@ -1307,12 +1265,9 @@ namespace RC
                 if(RCProbeBuffer[probeIndex].validProbe == 0u) continue;
                 const RC::ProbeInfo probe = RCProbeBuffer[probeIndex];
                 const float2 probeDistance = abs(float2(probeX , probeY) - probeFrac);
-                // the bilinear weight of the probe : the weight that it has when the geometry does not matter
                 const float baseWeight = saturate(1.0f - probeDistance.x / float(PROBE_SAMPLE_COUNT)) * saturate(1.0f - probeDistance.y / float(PROBE_SAMPLE_COUNT));
                 if(baseWeight <= 0.0f) continue;
-                const float nW = pow(saturate(dot(N , probe.normal)) , 16.0f);
-                // the distance to the plane of the probe : the weight FALLS with it ( a probe of the neighbour wall is far from this plane ) . the scale is the size of a tile
-                // of the probes in the world
+                const float nW = max(pow(saturate(dot(N , probe.normal)) , 16.0f) , RC_MIN_NORMAL_WEIGHT);
                 const float d = abs(dot(P - probe.position , probe.normal));
                 const float planeSigma = max(probe.cameraDistance * float(c.PROBE_RESOLUTION) * RC_PLANE_SIGMA_PER_PIXEL , 1e-4f);
                 const float planeWeight = exp(-d / planeSigma);

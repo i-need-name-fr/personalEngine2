@@ -39,6 +39,13 @@ namespace mox{
         // one task group checks this many meshlets of ONE instance ( it has to be the same as TASK_GROUP_SIZE in taskShader.hlsl and meshShader.hlsl )
         inline static constexpr uint32_t TASK_GROUP_SIZE = 32;
 
+        // the depth bias of the G buffer draw ( vkCmdSetDepthBias ) : the depth of EVERY triangle is moved by  constant * r + slope * m , but not more than clamp ( in the units of the depth ) .
+        // r is the smallest step of the depth of the triangle , m is how fast the depth changes over a pixel ( a triangle seen at a grazing angle has a big m , the clamp keeps its bias small ) .
+        // clamp 0 = no limit . NOTE : the bias is the same for the triangles that lie in one plane , so it does not separate them : for that the near plane has to be farther ( Core2 : perspective )
+        inline static constexpr float DEPTH_BIAS_CONSTANT = 1.0f;
+        inline static constexpr float DEPTH_BIAS_CLAMP = 1.0e-5f;
+        inline static constexpr float DEPTH_BIAS_SLOPE = 1.0f;
+
         MeshDeferredRender(const CreateInfo &info){
             if(!info.manager){
                 engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create Mesh Deferred Render , since the Texture manager2 is nullptr"});
@@ -195,7 +202,9 @@ namespace mox{
 
 
             vkCmdSetRasterizerDiscardEnable(cmd , VK_FALSE);
-            vkCmdSetDepthBiasEnable(cmd , VK_FALSE);
+            vkCmdSetDepthBiasEnable(cmd , VK_TRUE);
+            // a clamp that is not 0 needs the depthBiasClamp feature of the device ( LogicalDevice )
+            vkCmdSetDepthBias(cmd , DEPTH_BIAS_CONSTANT , DEPTH_BIAS_CLAMP , DEPTH_BIAS_SLOPE);
             vkCmdSetStencilTestEnable(cmd , VK_FALSE);
             cmdSetPolygonModeEXT(cmd , VK_POLYGON_MODE_FILL);
             cmdSetRasterizationSamplesEXT(cmd , VK_SAMPLE_COUNT_1_BIT);
@@ -312,7 +321,7 @@ namespace mox{
             cmdBindShadersEXT(cmd , 4 , stages , none);
 
             // the hi Z of THIS frame ( the task shader of the next frame reads it )
-            recordHiZ(cmd);
+            if(!context->user->fixedPosition) recordHiZ(cmd);
 
             return {};
         }

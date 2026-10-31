@@ -40,6 +40,9 @@
 static const float RC_PLANE_SIGMA_PER_PIXEL = 0.003f;
 static const float RC_DIRECTION_POWER = 16.0f;
 static const float RC_CONFIDENCE_FULL = 0.5f;
+// the weight of a probe by the NORMAL ( dot of the normals ^ 16 ) never goes under this : in a corner every probe around the point lies on the OTHER wall ( dot = 0 ) ,
+// the weight was 0 for all of them and the corner got black . the plane and the visibility checks stay , they are what keeps the light from the other side of a wall out
+static const float RC_MIN_NORMAL_WEIGHT = 0.05f;
 static const float MAX_RC_RADIANCE_LIMIT = 0.7f;
 
 // the SPATIAL REUSE of the probes : 1 - the 2 x 2 probes and the 2 x 2 texels are mixed ( the bilinear ) with the weights of the geometry , of the direction and of the radiance .
@@ -557,7 +560,7 @@ namespace RC
                 // the bilinear weight of the probe : the weight that it has when the geometry does not matter
                 const float baseWeight = saturate(1.0f - probeDistance.x / float(PROBE_SAMPLE_COUNT)) * saturate(1.0f - probeDistance.y / float(PROBE_SAMPLE_COUNT));
                 if(baseWeight <= 0.0f) continue;
-                const float nW = pow(saturate(dot(N , probe.normal)) , 16.0f);
+                const float nW = max(pow(saturate(dot(N , probe.normal)) , 16.0f) , RC_MIN_NORMAL_WEIGHT);
                 // the distance to the plane of the probe : the weight FALLS with it ( a probe of the neighbour wall is far from this plane ) . the scale is the size of a tile
                 // of the probes in the world
                 const float d = abs(dot(P - probe.position , probe.normal));

@@ -3,6 +3,7 @@
 //
 // it needs these names to be declared before the include : instanceLayout , meshBuffer , vertices , indices , LUT_Buffer , virtualTextureIndex , allTextures and a sampler that is
 // named by ALPHA_TEST_SAMPLER ( #define ALPHA_TEST_SAMPLER typicalSampler )
+#ifndef __cplusplus
 bool passesAlphaTest(const uint instanceID , const uint primitive , const float2 barycentrics){
     const InstanceData instance = instanceLayout[instanceID];
     const LUT lut = LUT_Buffer[instance.LUT_index];
@@ -22,3 +23,4 @@ bool passesAlphaTest(const uint instanceID , const uint primitive , const float2
     const float alpha = allTextures[id].SampleLevel(ALPHA_TEST_SAMPLER , uv , 0).a;
     return alpha >= lut.alphaCutoff;
 }
+#endif
