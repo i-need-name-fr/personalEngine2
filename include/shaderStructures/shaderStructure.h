@@ -370,33 +370,6 @@ struct VSM_params{
 };
 
 
-struct ReservoirDI{
-#ifdef __cplusplus
-    uint32_t M;
-    uint32_t chosenIndex;
-    float W;
-    float weightSum;
-    // the light of ALL the candidates ( the lamps of the tile ) , simply summed : diffuse and specular are denoised by different denoisers , so they are two
-    alignas(16) glm::vec4 diffuseColor;
-    alignas(16) glm::vec4 specularColor;
-#else
-    uint M;
-    uint chosenIndex;
-    float W;
-    float weightSum;
-    float4 diffuseColor;
-    float4 specularColor;
-
-    void update(uint lightIndex, float w, float randomValue){
-        weightSum += w;
-        M += 1u;
-       
-        if(weightSum > 0.0f && randomValue * weightSum < w){
-            chosenIndex = lightIndex;
-        }
-    }
-#endif
-};
 
 struct ReservoirGI{
 #ifdef __cplusplus
@@ -585,8 +558,8 @@ struct GeneralFeatures{
 
     uint32_t RayQuerySunSampleCount;
 
-    // ReSTIR DI of the LightPass : 1 - the best lamp of the tile is chosen ( the shadows go to it ) , 0 - all the lamps of the tile are added up .
-    // it is the last one : the fields before it keep their offsets
+    // not used any more ( ReSTIR DI is gone , the lamps are summed one by one ) : the field stays so that the fields after it keep their offsets in the shaders that are not
+    // recompiled , and tempCore.hpp still sets it
     uint32_t ReSTIR;
 
     // how far beyond its radius the shadow of a lamp still counts , in the radii of the lamp : the shadow fades out between lightRadius and

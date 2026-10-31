@@ -35,7 +35,6 @@ namespace mox{
         pGeneralBuffer2<BufferType::Device , false> tileLightIndices{nullptr};
         pGeneralBuffer2<BufferType::Device , false> lightCountPerTile{nullptr};
 
-        pGeneralBuffer2<BufferType::Device , false> ReSTIRDIBuffer[2] {nullptr , nullptr};
         pGeneralBuffer2<BufferType::Device , false> ReSTIRGIBuffer[2] {nullptr , nullptr};
         // the reservoirs of ReSTIR PT ( ReservoirPT , one per pixel ) : ping pong like the others , this frame writes its own and reads the other
         pGeneralBuffer2<BufferType::Device , false> ReSTIRPTBuffer[2] {nullptr , nullptr};
@@ -55,8 +54,6 @@ namespace mox{
             luminanceHistory = nullptr;
             fogData = nullptr;
             skyBuffer = nullptr;
-            ReSTIRDIBuffer[0] = nullptr;
-            ReSTIRDIBuffer[1] = nullptr;
             ReSTIRGIBuffer[0] = nullptr;
             ReSTIRGIBuffer[1] = nullptr;
             ReSTIRPTBuffer[0] = nullptr;
@@ -117,19 +114,9 @@ namespace mox{
                 for(auto& id : {0 , 1}){
                     GeneralBuffer2<BufferType::Device , false>::CreateInfo info{};
                     info.context = context;
-                    info.size = sizeof(ReservoirDI) * context->sc->extent.width * context->sc->extent.height;
                     info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-                    ReservoirDI di{};
-                    di.chosenIndex = 9999;
-                    
-                    di.M = 0;
-                    di.W = 0.0f;
-                    di.weightSum = 0.0f;
-                    std::vector<ReservoirDI> data(context->sc->extent.width * context->sc->extent.height , di );
-                    // the reservoirs START EMPTY ( M = 0 , W = 0 ) : the data was made above but never given to the buffer , and a device buffer is not zeroed by itself .
-                    // the garbage of the memory ( huge or NaN W ) was read by the temporal reuse of the pixel and , worse , by the spatial reuse of its neighbours , who
-                    // copied it and kept it for ever
-                    ReSTIRDIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , static_cast<void*>(data.data()));
+                    // the reservoirs START EMPTY ( M = 0 , W = 0 ) : a device buffer is not zeroed by itself , and the garbage of the memory ( huge or NaN W ) would be read
+                    // by the temporal reuse of the pixel and by the spatial reuse of its neighbours , who copy it and keep it for ever
                     info.size = sizeof(ReservoirGI) * context->sc->extent.width * context->sc->extent.height;
                     const std::vector<ReservoirGI> emptyGI(static_cast<size_t>(context->sc->extent.width) * context->sc->extent.height , ReservoirGI{});
                     ReSTIRGIBuffer[id] = std::make_shared<GeneralBuffer2<BufferType::Device , false>>(info , const_cast<void*>(static_cast<const void*>(emptyGI.data())));

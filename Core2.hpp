@@ -509,8 +509,8 @@ namespace mox{
             featureSettings.indirectMode = SSGI_REQUIRED;
             featureSettings.VSM = 0;
             featureSettings.RayQuery = 1;
-            featureSettings.RayQueryLightSampleCount = 4;
-            featureSettings.RayQuerySunSampleCount = 4;
+            featureSettings.RayQueryLightSampleCount = 1;
+            featureSettings.RayQuerySunSampleCount = 1;
             featureSettings.shadowThickness = 1.0f;
             featureSettings.temporalShadowK = 0.85f;
             featureSettings.light_sun_Proportion = 0.5f;
@@ -519,16 +519,15 @@ namespace mox{
             featureSettings.currentMode = DEFAULT_MODE;
             featureSettings.randomValues = 1;
             featureSettings.volumentricFog = 0;
-            featureSettings.ReSTIR = 1;
             featureSettings.IndirectShare = 0.5f;
             featureSettings.maxDepth = 50.0f;
             featureSettings.ReSTIRGI = true;
             featureSettings.ReSTIRGI_temporal = true;
             featureSettings.ReSTIRGI_spatial = true;
             featureSettings.lightShadowFade = 0.5f;
-            featureSettings.skyboxSampleCount = 2u;
-            featureSettings.sunShadowFade = 30.0f;
-            featureSettings.shadowMinimum = 0.2f;
+            featureSettings.skyboxSampleCount = 4u;
+            featureSettings.sunShadowFade = 200.0f;
+            featureSettings.shadowMinimum = 0.0f;
 
             fogSettings = FogVolume{};
             fogSettings.center = glm::vec3(0.0f);
@@ -548,7 +547,7 @@ namespace mox{
                 const glm::vec3 toSun(std::cos(elevation) * std::cos(azimuth) , std::sin(elevation) , std::cos(elevation) * std::sin(azimuth));
 
                 sunSettings = SunSource{};
-                sunSettings.sourceRadius = 1.0f;
+                sunSettings.sourceRadius = 0.1f;
                 sunSettings.direction = -toSun;
                 sunSettings.intensity = 4.0f;
                 sunSettings.diffuse = glm::vec3(1.0f , 0.95f , 0.85f) * sunSettings.intensity;
@@ -706,7 +705,7 @@ namespace mox{
         [[nodiscard]] ErrorDataOutput<void> createLights() noexcept{
             // 3 lights
             {
-                std::vector<lg::LightSource> lights(11);
+                std::vector<lg::LightSource> lights(lightCount);
 
                 std::mt19937 rng{std::random_device{}()};
                 const auto rnd = [&rng](const float low , const float high){
@@ -715,14 +714,14 @@ namespace mox{
                 };
 
                 // the first two : violet , not too bright , a random strength and reach
-                for(uint32_t i = 0 ; i < 11 ; i++){
+                for(uint32_t i = 0 ; i < lightCount ; i++){
                     const float intensity = rnd(4.0f , 10.0f);
                     lights[i].diffuse = glm::vec3(rnd(0.1f , 1.0f) , rnd(0.0f , 1.0f) , rnd(0.1f , 1.0f)) * intensity;
                     lights[i].radius = rnd(15.0f , 30.0f);
                     lights[i].Linear = rnd(0.05f , 0.012f);
                     lights[i].Quadratic = rnd(0.02f , 0.004f);
                     // the size of the lamp itself ( meters ) : the penumbra of its shadow
-                    lights[i].sourceRadius = rnd(1.0f , 5.0f);
+                    lights[i].sourceRadius = rnd(1.0f , 2.0f);
                 }
 
 
@@ -1083,7 +1082,7 @@ namespace mox{
                 intensity = glm::cos(glm::radians(glm::clamp(zenith , 0.0f  ,90.0f))) * powIntensity;
                 sun.direction = -toSun;                 // the light travels away from the sun
                 sun.intensity = intensity;
-                sun.diffuse = glm::vec3(color[0] , color[1] , color[2]) * intensity;
+                sun.diffuse = glm::vec3(color[0] , color[1] , color[2]) * sun.intensity;
 
                 sky.sunCosZenith = std::cos(theta);     // the same as toSun.y
                 sky.sunCosAzimuth = std::cos(phi);
@@ -1221,19 +1220,9 @@ namespace mox{
             gui::EndDisabled();
             gui::Separator();
 
-            gui::BeginDisabled(info.PT);
-            {
-                if(gui::Button(info.ReSTIR ? "ReSTIR DI : ON" : "ReSTIR DI : OFF")){
-                    info.ReSTIR = !info.ReSTIR;
-                }
-            }
-            gui::EndDisabled();
-            gui::Separator();
-
             gui::BeginDisabled(!info.RT);
             if(gui::CollapsingHeader("GI"))
             {
-                // ReSTIR DI : the best lamp of the tile , or the sum of all the lamps ( the exact one )
                 {
                     if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
                         info.ReSTIRGI = !info.ReSTIRGI;
@@ -1331,7 +1320,8 @@ namespace mox{
         float dt = 0.0f;
         uint32_t requiredMode = RasterizationRequired;
 
-        static constexpr uint32_t lightCount = 4;
+        // how many lamps there are : Forward+ visits only the first lightCount ( forwardData.totalLights ) , so a lamp past it is not in any tile list ( it was 4 while createLights made 11 )
+        static constexpr uint32_t lightCount = 11;
 
         GeneralInfo generalSettings{};
         GeneralFeatures featureSettings{};

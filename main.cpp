@@ -7,15 +7,6 @@
 #define SPIRV_COMPILATION_REQUIRED
 
 #include <iostream>
-#include "include/Buffer2/GeneralBuffer.hpp"
-#include "include/Image2/ViewPerLayer.hpp"
-#include "include/Image2/ViewPerMip.hpp"
-#include "include/Image2/FrameTargets.hpp"
-
-#include "include/AS2/TLAS2.hpp"
-#include "include/Object2/cube.hpp"
-
-#include "include/Image2/MultiViewImage2.hpp"
 #include "Core2.hpp"
 
 using namespace mox;

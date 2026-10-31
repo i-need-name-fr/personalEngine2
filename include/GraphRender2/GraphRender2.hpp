@@ -109,16 +109,6 @@ namespace mox{
             }
 
             {
-                const auto result = processInputParameter(data->ReSTIRDIBuffer[0].get() , "ReSTIRDIBuffer_0");
-                if(!result.has_value()) return result;
-            }
-
-            {
-                const auto result = processInputParameter(data->ReSTIRDIBuffer[1].get() , "ReSTIRDIBuffer_1");
-                if(!result.has_value()) return result;
-            }
-
-            {
                 const auto result = processInputParameter(data->ReSTIRGIBuffer[0].get() , "ReSTIRGIBuffer_0");
                 if(!result.has_value()) return result;
             }

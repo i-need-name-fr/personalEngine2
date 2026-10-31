@@ -161,8 +161,6 @@ namespace mox{
             buffer("forwardInfo");
             buffer("skyBuffer");
             buffer("sunBuffer");
-            buffer("ReSTIRDIBuffer_0");
-            buffer("ReSTIRDIBuffer_1");
             buffer("ReSTIRGIBuffer_0");
             buffer("ReSTIRGIBuffer_1");
             buffer("tileLightIndices");
@@ -374,6 +372,9 @@ namespace mox{
                     for(uint32_t i = 1 ; i <= 5 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
                     for(uint32_t i = 6 ; i <= 15 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    // 12 and 13 were the reservoirs of ReSTIR DI : reserved ( no descriptors ) , the other bindings keep their numbers
+                    data[12] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0};
+                    data[13] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0};
 
                     data[16] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
                     data[17] = {VK_DESCRIPTOR_TYPE_SAMPLER , 1};
@@ -432,9 +433,7 @@ namespace mox{
                     data[10] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 10 , 0);
                     data[11] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 11 , 0);
 
-                    // the reservoirs : this frame writes the one with its own parity and reads the other
-                    data[12] = DescriptorData2::createData(buffer("ReSTIRDIBuffer" , id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 12 , 0);
-                    data[13] = DescriptorData2::createData(buffer("ReSTIRDIBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
+                    // the reservoirs of GI : this frame writes the one with its own parity and reads the other
                     data[14] = DescriptorData2::createData(buffer("ReSTIRGIBuffer" , id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 14 , 0);
                     data[15] = DescriptorData2::createData(buffer("ReSTIRGIBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 15 , 0);
 
@@ -466,6 +465,9 @@ namespace mox{
                     data[38] = DescriptorData2::createData(image("depthImage" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 38 , 0);
 
                     data[39] = DescriptorData2::createData(image("objectAmbientImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 39 , 0);
+
+                    // the bindings 12 and 13 were the reservoirs of ReSTIR DI : nothing is written there and the shaders do not declare them any more
+                    data.erase(data.begin() + 12 , data.begin() + 14);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

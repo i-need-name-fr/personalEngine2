@@ -14,8 +14,6 @@
 [[vk::binding(10 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
 [[vk::binding(11 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
 
-[[vk::binding(12 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
-[[vk::binding(13 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDIBuffer;
 [[vk::binding(14 , 0)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;
 [[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
 
@@ -178,13 +176,5 @@ void main(inout RayPayLoad load){
     motionVector[pixel] = skyMotionVector(dir , pixel);
 
     // otherwise the next frame would reuse whatever this slot held two frames ago
-    ReservoirDI emptyDI;
-    emptyDI.M = 0u;
-    emptyDI.chosenIndex = 9999u;
-    emptyDI.W = 0.0f;
-    emptyDI.weightSum = 0.0f;
-    emptyDI.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-    emptyDI.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-    ReSTIRDIBuffer[bufferIndex(pixel)] = emptyDI;
     ReSTIRGIBuffer[bufferIndex(pixel)] = (ReservoirGI)0;
 }

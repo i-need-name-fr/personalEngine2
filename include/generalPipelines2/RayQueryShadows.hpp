@@ -44,7 +44,7 @@ namespace mox{
 
         std::vector<GraphParameterInfo> acquireRequirements() noexcept override final{
 
-            std::vector<GraphParameterInfo> reqs(18);
+            std::vector<GraphParameterInfo> reqs(16);
 
             reqs[0].type = moxGraphTypeBuffer;
             reqs[0].name = "generalBuffer";
@@ -56,62 +56,55 @@ namespace mox{
             reqs[2].type = moxGraphTypeBuffer;
             reqs[2].name = "sunBuffer";
 
-            // the reservoirs of ReSTIR DI : one per frame ( the shader reads the one that was written in this frame )
             reqs[3].type = moxGraphTypeBuffer;
-            reqs[3].name = "ReSTIRDIBuffer_0";
+            reqs[3].name = "lightBuffer";
 
-            reqs[4].type = moxGraphTypeBuffer;
-            reqs[4].name = "ReSTIRDIBuffer_1";
+            reqs[4].type = moxGraphTypeImage;
+            reqs[4].name = "shadowImage_0";
+            reqs[4].imageSpecification.type = ImageType::RenderImage2;
 
-            reqs[5].type = moxGraphTypeBuffer;
-            reqs[5].name = "lightBuffer";
+            reqs[5].type = moxGraphTypeImage;
+            reqs[5].name = "shadowImage_1";
+            reqs[5].imageSpecification.type = ImageType::RenderImage2;
 
             reqs[6].type = moxGraphTypeImage;
-            reqs[6].name = "shadowImage_0";
+            reqs[6].name = "positionImage_0";
             reqs[6].imageSpecification.type = ImageType::RenderImage2;
 
             reqs[7].type = moxGraphTypeImage;
-            reqs[7].name = "shadowImage_1";
+            reqs[7].name = "positionImage_1";
             reqs[7].imageSpecification.type = ImageType::RenderImage2;
 
             reqs[8].type = moxGraphTypeImage;
-            reqs[8].name = "positionImage_0";
+            reqs[8].name = "normalImage_0";
             reqs[8].imageSpecification.type = ImageType::RenderImage2;
 
             reqs[9].type = moxGraphTypeImage;
-            reqs[9].name = "positionImage_1";
+            reqs[9].name = "normalImage_1";
             reqs[9].imageSpecification.type = ImageType::RenderImage2;
 
             reqs[10].type = moxGraphTypeImage;
-            reqs[10].name = "normalImage_0";
+            reqs[10].name = "pixelCheck";
             reqs[10].imageSpecification.type = ImageType::RenderImage2;
 
-            reqs[11].type = moxGraphTypeImage;
-            reqs[11].name = "normalImage_1";
-            reqs[11].imageSpecification.type = ImageType::RenderImage2;
-
-            reqs[12].type = moxGraphTypeImage;
-            reqs[12].name = "pixelCheck";
-            reqs[12].imageSpecification.type = ImageType::RenderImage2;
-
             // the lamps of the tiles ( Forward+ ) : the shadow is made from all the lamps of the tile of the pixel
+            reqs[11].type = moxGraphTypeBuffer;
+            reqs[11].name = "tileLightIndices";
+
+            reqs[12].type = moxGraphTypeBuffer;
+            reqs[12].name = "lightCountPerTile";
+
             reqs[13].type = moxGraphTypeBuffer;
-            reqs[13].name = "tileLightIndices";
-
-            reqs[14].type = moxGraphTypeBuffer;
-            reqs[14].name = "lightCountPerTile";
-
-            reqs[15].type = moxGraphTypeBuffer;
-            reqs[15].name = "forwardInfo";
+            reqs[13].name = "forwardInfo";
 
             // the indirect light of the last frame : its luminance fills the shadows ( the pass runs before the indirect pass of this frame )
-            reqs[16].type = moxGraphTypeImage;
-            reqs[16].name = "indirectImage_0";
-            reqs[16].imageSpecification.type = ImageType::RenderImage2;
+            reqs[14].type = moxGraphTypeImage;
+            reqs[14].name = "indirectImage_0";
+            reqs[14].imageSpecification.type = ImageType::RenderImage2;
 
-            reqs[17].type = moxGraphTypeImage;
-            reqs[17].name = "indirectImage_1";
-            reqs[17].imageSpecification.type = ImageType::RenderImage2;
+            reqs[15].type = moxGraphTypeImage;
+            reqs[15].name = "indirectImage_1";
+            reqs[15].imageSpecification.type = ImageType::RenderImage2;
 
             return reqs;
         }
@@ -192,26 +185,25 @@ namespace mox{
             // the indirect light of the last frame
             images[5] = image("indirectImage" , !currentImage)->translateImage(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
-            std::array<VkBufferMemoryBarrier2 , 13> buffers;
+            std::array<VkBufferMemoryBarrier2 , 12> buffers;
 
             buffers[0] = buffer("generalBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[1] = features->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             buffers[2] = buffer("sunBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
-            buffers[3] = buffer("ReSTIRDIBuffer" , currentImage)->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
-            buffers[4] = buffer("lightBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[3] = buffer("lightBuffer")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             // the instances and the materials : the shader looks at the candidates of the ray
-            buffers[5] = Mesh2::instanceLayoutBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
-            buffers[6] = Mesh2::LUT_buffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[4] = Mesh2::instanceLayoutBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[5] = Mesh2::LUT_buffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             // the lists of the lamps of the tiles : written by the ForwardPlus
-            buffers[7] = buffer("tileLightIndices")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
-            buffers[8] = buffer("lightCountPerTile")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
-            buffers[9] = buffer("forwardInfo")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[6] = buffer("tileLightIndices")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[7] = buffer("lightCountPerTile")->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[8] = buffer("forwardInfo")->translateBuffer(VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
             // the geometry of the candidates : the UV for the alpha test
-            buffers[10] = Mesh2::vertexBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
-            buffers[11] = Mesh2::indicesBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
-            buffers[12] = Mesh2::MeshBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[9] = Mesh2::vertexBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[10] = Mesh2::indicesBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+            buffers[11] = Mesh2::MeshBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT_KHR , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
 
-            auto dep = TypicalDependency<13 , 6>(images.data() , buffers.data());
+            auto dep = TypicalDependency<12 , 6>(images.data() , buffers.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -236,7 +228,8 @@ namespace mox{
                     data[1] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[2] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
-                    data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    // 3 was the reservoirs of ReSTIR DI : reserved ( no descriptor ) , the other bindings keep their numbers
+                    data[3] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0};
                     data[4] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
 
                     data[5] = {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR , 1};
@@ -290,7 +283,6 @@ namespace mox{
                         data[1] = DescriptorData2::createData(features , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1 , 0);
                         data[2] = DescriptorData2::createData(buffer("sunBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 2 , 0);
 
-                        data[3] = DescriptorData2::createData(buffer("ReSTIRDIBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 3 , 0);
                         data[4] = DescriptorData2::createData(buffer("lightBuffer") , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 4 , 0);
 
                         data[5] = DescriptorData2::createData(inputData.as  , 5 , 0);
@@ -314,6 +306,9 @@ namespace mox{
                         data[17] = DescriptorData2::createData(Mesh2::vertexBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 17 , 0);
                         data[18] = DescriptorData2::createData(Mesh2::indicesBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 18 , 0);
                         data[19] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 19 , 0);
+
+                        // the binding 3 is reserved ( it was ReSTIR DI ) : nothing is written there
+                        data.erase(data.begin() + 3);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

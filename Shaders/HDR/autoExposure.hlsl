@@ -4,7 +4,7 @@
 
 float luminance(float3 color) { return dot(color, float3(0.2126, 0.7152, 0.0722)); }
 
-static float minLogLum = -8.0f;
+static float minLogLum = -10.0f;
 static float logLumRange = 12.0f;
 
 uint ColorToHistoryLuminance(float3 color){

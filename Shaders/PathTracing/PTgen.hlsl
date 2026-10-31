@@ -14,8 +14,6 @@
 [[vk::binding(10 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
 [[vk::binding(11 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
 
-[[vk::binding(12 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
-[[vk::binding(13 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDIBuffer;
 [[vk::binding(14 , 0)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;
 [[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
 

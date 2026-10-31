@@ -4,7 +4,6 @@
 [[vk::binding(1 , 0)]] ConstantBuffer<GeneralFeatures> features;
 [[vk::binding(2 , 0)]] ConstantBuffer<SunSource> sunBuffer;
 
-[[vk::binding(3 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
 [[vk::binding(4 , 0)]] RWStructuredBuffer<lg::LightSource> lightBuffer;
 
 [[vk::binding(5 , 0)]] RaytracingAccelerationStructure TLAS;
@@ -279,8 +278,8 @@ void main(uint3 id : SV_DispatchThreadID){
             // the size of the sun for the shadow ( the angle of the cone , radians ) is sunBuffer.sourceRadius : bigger - a softer penumbra
             const float sunCosAlpha = cos(sunBuffer.sourceRadius);
             const float3 sunOrigin = pos + toSun * 0.01f;
-            // the shadow of the sun is weaker with the distance from the pixel to the blocker : gone at sunShadowFade meters ( 0 - no fade )
-            const float fadeDistance = features.sunShadowFade;
+            // the shadow of the sun is weaker with the distance from the pixel to the blocker : gone at 200 meters
+            const float fadeDistance = 200.0f;
 
             float visible = 0.0f;
             [loop]
@@ -302,10 +301,8 @@ void main(uint3 id : SV_DispatchThreadID){
 
     // the mean of the two shadows by what each of the sources gives to the pixel ( the energy that is left is exactly sun * sunShadow + lamps * lightShadow ) .
     // when none of them gives anything there is nothing to weigh : no shadow ( 1 ) , not 0 / 0
-    // the shadow of the SUN is not darker than shadowMinimum ( the sky fills it ) , the shadow of a lamp can be 0 : a lamp that a wall covers gives nothing behind it
-    const float sunShadowLifted = lerp(features.shadowMinimum , 1.0f , sunShadow);
     const float totalWeight = sunLuminance + lightLuminance;
-    const float totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadowLifted + lightLuminance * lightShadow) / totalWeight : 1.0f;
+    const float totalShadow = (totalWeight > 1e-6f) ? (sunLuminance * sunShadow + lightLuminance * lightShadow) / totalWeight : 1.0f;
     float finalShadow = totalShadow;
     uint shadowFrames = 1u;
     // the same temporal filter of the shadow as in generalHit.hlsl : the history is dropped only when the value changed AND the pixel moved ( diff * motionW ) , the response of

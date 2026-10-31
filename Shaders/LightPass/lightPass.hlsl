@@ -41,13 +41,6 @@
 [[vk::image_format("rg16f")]]
 [[vk::binding(14 , 0)]] RWTexture2D<float2> motionVector;
 
-// we wont change it since , it requires to write in it
-// ping-pong : this frame only WRITES ReSTIRDI_buffer (own pixel) and only READS prevReSTIRDI_buffer
-// (temporal + spatial reuse) - reading neighbours from the buffer being written raced with the
-// other invocations of this same dispatch
-[[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDI_buffer;
-[[vk::binding(16 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDI_buffer;
-
 [[vk::binding(17 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
 [[vk::binding(18 , 0)]] ConstantBuffer<GeneralFeatures> features;
 
@@ -64,11 +57,6 @@
 // the ao map of the material : 1 where there is no map
 [[vk::image_format("r32f")]]
 [[vk::binding(26 , 0)]] RWTexture2D<float> objectAmbientImage;
-
-uint bufferIndex(uint2 pixel){
-    const uint2 clamped = min(pixel , uint2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
-    return clamped.x + clamped.y * generalBuffer.screenWidth;
-}
 
 float3 ComputePixelRayDirection(uint2 pixelCoord, uint2 screenSize, float4x4 invViewProj , float3 playerPosition)
 {
@@ -215,171 +203,21 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
     return skyColor + disc * coverage;
 }
 
-// ReSTIR DI is switched by features.ReSTIR ( ImGui ) : there is nothing to recompile
-
-float targetPdf_DI(uint lightIndex , GeneralObjectInfo info){
-    const lg::LightSource candidate = lightBuffer[lightIndex];
-    float3 L = candidate.position - info.P;
-    const float d = length(L);
-    L /= max(d , 1e-4f);
-
-    const float attenuation = lightAttenuation(candidate , d);
-    float3 diffuse;
-    float3 specular;
-
-    computeLight(info , L , diffuse ,specular);
-    const float3 brdfValue = (diffuse + specular) * max(dot(info.N , L) , 0.0001f);
-    return luminance(candidate.diffuse * brdfValue * attenuation);
+float3 randomInLightRadius(inout uint seed  , lg::LightSource light , const float3 L){
+    const float u = rand(seed) , v = rand(seed);
+    const float z = 1.0f - 2 * u;
+    const float phi = 2.0f * PI * v;
+    const float r = sqrt(saturate(1.0f - z * z));
+    const float x = cos(phi) * r;
+    const float y = sin(phi) * r;
+    const float R = light.sourceRadius;
+    float3 offset = R * float3(x ,y ,z);
+    // L goes FROM the point TO the lamp , the visible half of the sphere is the one that looks back at the point : the offsets that look the way of L ( dot > 0 )
+    // are on the far side of the lamp , they are turned over ( it was dot < 0 : the far half was chosen )
+    const float facing = dot(offset , L);
+    if(facing > 0.0f) offset = -offset;
+    return light.position + offset;
 }
-
-void finalizeReservoir_DI(inout ReservoirDI r , GeneralObjectInfo info){
-    // an undefined light has no p_hat : lightBuffer must not be read with this index
-    if(r.chosenIndex == 9999u){
-        r.W = 0.0f;
-        return;
-    }
-    const float p_hat = targetPdf_DI(r.chosenIndex , info);
-    r.W = (p_hat > 1e-6f && r.M > 0u) ? r.weightSum / (float(r.M) * p_hat) : 0.0f;
-}
-
-void generateReservoir_DI(inout ReservoirDI res , inout uint seed , GeneralObjectInfo info, uint lightIndicesCount , uint lightOffset){
-    res.W = 0.0f;
-    res.M = 0;
-    res.weightSum = 0.0f;
-    res.chosenIndex = 9999u;   // undefined : no light is chosen
-    res.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-    res.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-    if(lightIndicesCount == 0u) return;
-
-    float bestPdf = 0.0f;
-    for(uint i = 0 ; i < lightIndicesCount ; i++){
-        const uint lightIndex = tileLightIndices[lightOffset + i];
-        const lg::LightSource light = lightBuffer[lightIndex];
-
-        float3 toLight = light.position - info.P;
-        const float lightDistance = length(toLight);
-        toLight /= max(lightDistance , 1e-4f);
-
-        float3 candidateDiffuse;
-        float3 candidateSpecular;
-        computeLight(info , toLight , candidateDiffuse , candidateSpecular);
-
-        // a covered lamp gives nothing ( the screen space check )
-        const float visibility = lightVisibility(info.P , info.N , toLight , lightDistance);
-        const float3 radiance = light.diffuse * lightAttenuation(light , lightDistance) * max(dot(info.N , toLight) , 0.0001f) * visibility;
-        candidateDiffuse *= radiance;
-        candidateSpecular *= radiance;
-
-        res.diffuseColor.xyz += candidateDiffuse;
-        res.specularColor.xyz += candidateSpecular;
-
-        const float p_hat = luminance(candidateDiffuse + candidateSpecular);
-        res.weightSum += p_hat;
-        // a light wins only with p_hat > 0
-        if(p_hat > bestPdf){
-            bestPdf = p_hat;
-            res.chosenIndex = lightIndex;
-        }
-    }
-
-    // nothing reaches the pixel : no light is chosen ( M = 0 , W = 0 ) , and finalizeReservoir_DI is not called with an undefined index
-    if(res.chosenIndex == 9999u) return;
-
-    res.M = 1u;
-    finalizeReservoir_DI(res , info);
-}
-
-ReservoirDI combineReservoir_DI(ReservoirDI a , ReservoirDI b , inout uint seed){
-    ReservoirDI result;
-    if(a.chosenIndex == 9999) return b;
-    if(b.chosenIndex == 9999) return a;
-
-    result.M = a.M + b.M;
-    result.weightSum = a.weightSum + b.weightSum;
-    result.chosenIndex = a.chosenIndex;
-    result.W = 0.0f;   // recomputed by finalizeReservoir_DI
-
-    if(result.weightSum > 0.0f && rand(seed) * result.weightSum < b.weightSum){
-        result.chosenIndex = b.chosenIndex;
-    }
-    return result;
-}
-
-void temporalReuse_DI(inout ReservoirDI w , inout uint seed , uint2 prevPixel, GeneralObjectInfo info){
-    const ReservoirDI prev = prevReSTIRDI_buffer[bufferIndex(prevPixel)];
-    if(prev.M == 0u) return;
-
-    const uint M_clamped = min(prev.M , 20u * max(w.M , 1u));
-
-    ReservoirDI pRes;
-    pRes.M = M_clamped;
-    pRes.chosenIndex = prev.chosenIndex;
-    if(prev.chosenIndex == 9999) return;
-    // canonical ReSTIR weight of a reused sample: p_hat_here * W * M
-    pRes.weightSum = prev.W * float(M_clamped) * targetPdf_DI(prev.chosenIndex , info);
-    pRes.W = 0.0f;
-
-    w = combineReservoir_DI(w , pRes , seed);
-    finalizeReservoir_DI(w ,info);
-}
-
-void spatialReuse_DI(inout ReservoirDI r , inout uint seed , uint2 currentPixel, GeneralObjectInfo info){
-    const uint numSpatialSamples = 5u;
-    const float spatialRadius = 30.0f;   // in pixels
-
-    for(uint s = 0u; s < numSpatialSamples; s++){
-        const float rand1 = rand(seed);
-        const float rand2 = rand(seed);
-        const float phi = 2.0f * PI * rand2;
-
-        const float radius = sqrt(rand1) * spatialRadius;
-        const int2 neighborPixel = int2(currentPixel) + int2(cos(phi) * radius , sin(phi) * radius);
-        // signed compare - casting to uint first made the "< 0" test dead
-        if(neighborPixel.x < 0 || neighborPixel.y < 0 ||
-           neighborPixel.x >= (int)generalBuffer.screenWidth || neighborPixel.y >= (int)generalBuffer.screenHeight){
-            continue;
-        }
-
-        const ReservoirDI stored = prevReSTIRDI_buffer[bufferIndex((uint2)neighborPixel)];
-        if(stored.M == 0u || stored.W <= 0.0f) continue;
-        if(stored.chosenIndex == 9999) continue;
-        // Geometric rejection used to read normalOutputImage/depthOutputImage of
-        // the neighbour, which other invocations of this very dispatch are still
-        // writing - a data race. Re-evaluating the target function at THIS pixel
-        // rejects unusable neighbours without touching the shared G-buffer.
-        const float p_hat = targetPdf_DI(stored.chosenIndex , info);
-        if(p_hat <= 0.0f) continue;
-
-        ReservoirDI neighborRes;
-        neighborRes.chosenIndex = stored.chosenIndex;
-        neighborRes.M = stored.M;
-        neighborRes.W = 0.0f;
-        // the stored.W factor was missing here while temporalReuse_DI had it
-        neighborRes.weightSum = stored.W * float(stored.M) * p_hat;
-
-        r = combineReservoir_DI(r , neighborRes , seed);
-        finalizeReservoir_DI(r ,info);
-    }
-}
-
-ReservoirDI ReSTIR_DI_generation(uint2 currentPixel , float2 prevUV , inout uint seed , GeneralObjectInfo info,  uint lightIndicesCount , uint lightOffset){
-    const bool validUV = (prevUV.x >= 0.0f && prevUV.x <= 1.0f && prevUV.y >= 0.0f && prevUV.y <= 1.0f);
-    const uint2 prevCoords = (uint2)clamp(prevUV * float2(generalBuffer.screenWidth , generalBuffer.screenHeight) ,
-                                          float2(0.0f , 0.0f) ,
-                                          float2(generalBuffer.screenWidth - 1u , generalBuffer.screenHeight - 1u));
-
-    // every light is visited in generateReservoir_DI , so there is nothing to collect from the last frame or from the neighbours . ( the reuse picks between
-    // the reservoirs by a random number : it would bring the flashes back )
-    ReservoirDI r;
-    generateReservoir_DI(r , seed , info , lightIndicesCount , lightOffset);
-    const uint M_CAP = 500u;
-    if(r.M > M_CAP){
-        r.weightSum *= float(M_CAP) / float(r.M);
-        r.M = M_CAP;
-    }
-    return r;
-}
-
 
 [shader("compute")]
 [numthreads(8 , 8 , 1)]
@@ -395,16 +233,6 @@ void main(uint3 id : SV_DispatchThreadID){
         const float3 direction = ComputePixelRayDirection(currentPixel , screenSize , generalBuffer.invViewProj, generalBuffer.playerPosition);
         const float3 skyColor = skybox.SampleLevel(typicalSampler , direction , 0).xyz;
         diffuseImage[id.xy] = float4(AddSunDisc(skyColor , direction) , 1.0f);
-
-        // otherwise next frame's reuse would read whatever this slot held two frames ago
-        ReservoirDI empty;
-        empty.M = 0u;
-        empty.chosenIndex = 9999u;
-        empty.W = 0.0f;
-        empty.weightSum = 0.0f;
-        empty.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-        empty.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-        ReSTIRDI_buffer[bufferIndex(currentPixel)] = empty;
     }else{
 
         const float3 P = positionImage[id.xy].xyz;
@@ -439,79 +267,36 @@ void main(uint3 id : SV_DispatchThreadID){
         float3 specular = float3(0.0f , 0.0f , 0.0f);
         float3 ambient;
 
-        ReservoirDI reservoir;
-        reservoir.M = 0u;
-        reservoir.chosenIndex = 9999u;   // undefined : no light is chosen
-        reservoir.W = 0.0f;
-        reservoir.weightSum = 0.0f;
-        reservoir.diffuseColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
-        reservoir.specularColor = float4(0.0f , 0.0f , 0.0f , 0.0f);
+        // the lamps of the tile , the same sum as in generalHit.hlsl ( RT ) and PThit.hlsl ( PT ) : the point of the lamp is a random point of its sphere ( light.sourceRadius ) ,
+        // the light is light.diffuse * attenuation * NdotL times the BRDF . the shadow of a lamp is not traced here ( the screen space check , or PostProcess with the shadow image )
+        uint seed = initSeed(id.xy , generalBuffer.frameIndex);
 
-        float3 L = normalize(info.V + N);
+        [loop]
+        for(uint s = 0u ; s < lightCount ; s++){
+            const lg::LightSource light = lightBuffer[tileLightIndices[lightOffset + s]];
 
-        if(features.ReSTIR != 0u){
+            float3 L = light.position - P;
+            L = normalize(L);
+            const float3 lightPos = randomInLightRadius(seed , light , L);
+            float3 dir = lightPos - P;
+            const float d = length(dir);
+            dir = normalize(dir);
 
-            // frameIndex * x + y gave the same seed to whole diagonals of pixels ( correlated noise ) : a hash of the pixel and the frame
-            uint seed = initSeed(id.xy , generalBuffer.frameIndex);
+            const float NdotL = dot(N , dir);
+            const float reach = lightShadowReach(d , light.radius , features.lightShadowFade);
+            if(reach <= 0.0f || NdotL <= 0.0f) continue;
 
-            reservoir = ReSTIR_DI_generation(currentPixel, prevUV ,  seed , info , lightCount , lightOffset );
+            const float3 lightEmission = light.diffuse * lightAttenuation(light , d) * NdotL;
+            float3 lightDiffuse = 0.0f;
+            float3 lightSpecular = 0.0f;
+            computeLight(info , dir , lightDiffuse , lightSpecular);
 
-            // the light of the lamps is the sum of all the candidates : the reservoir keeps it
-            diffuse = reservoir.diffuseColor.xyz;
-            specular = reservoir.specularColor.xyz;
-
-            if(reservoir.chosenIndex != 9999){
-                L = normalize(lightBuffer[reservoir.chosenIndex].position - P);
-            }
-
-        }else{
-
-            // no random at all : every light of the tile is added up . the result of a pixel does not depend on a chosen light or on the
-            // frame , so nothing can jump from one frame to the next ( the random choice of a light flipped at the edges of the
-            // lights and of the shadows ) . the number of the lights of a tile is small , and it is capped by MAX_LIGHTS
-            float dominantLuminance = 0.0f;
-            uint dominantLight = 0u;
-
-            for(uint s = 0u ; s < lightCount ; s++){
-                const uint lightIndex = tileLightIndices[lightOffset + s];
-                const lg::LightSource light = lightBuffer[lightIndex];
-
-                const float3 toLight = light.position - P;
-                const float lightDistance = length(toLight);
-                const float3 lightDir = toLight / max(lightDistance , 1e-4f);
-
-                float3 lightDiffuse;
-                float3 lightSpecular;
-                computeLight(info , lightDir , lightDiffuse , lightSpecular);
-
-                const float attenuation = lightAttenuation(light , lightDistance);
-                float3 radiance = light.diffuse * attenuation * max(dot(N , lightDir) , 0.0001f);
-
-
-                // the dominant light below is chosen BEFORE the shadow , the sum has the screen space check ( a covered lamp gives nothing )
-                const float visibility = lightVisibility(P , N , lightDir , lightDistance);
-                diffuse += lightDiffuse * radiance * visibility;
-                specular += lightSpecular * radiance * visibility;
-
-                // before the shadow : the light that matters the most for this pixel
-                const float contributionLuminance = luminance((lightDiffuse + lightSpecular) * radiance);
-                if(contributionLuminance > dominantLuminance){
-                    dominantLuminance = contributionLuminance;
-                    dominantLight = lightIndex;
-                }
-            }
-
-            // without ReSTIR nobody chooses a light , but the shadow pass ( RayQueryShadows ) reads the chosen light from the reservoir of the previous frame :
-            // it was always empty ( the light 0 ) , so the shadow was traced to the light 0 only . now it is the dominant light of the pixel
-            if(dominantLuminance > 0.0f){
-                reservoir.chosenIndex = dominantLight;
-                reservoir.M = 1u;
-                reservoir.W = 1.0f;
-                reservoir.weightSum = dominantLuminance;
-            }
+            const float visibility = lightVisibility(P , N , dir , d);
+            diffuse += lightDiffuse * lightEmission * visibility;
+            specular += lightSpecular * lightEmission * visibility;
         }
 
-        // the sun : it does not depend on the choice of a lamp , so it is added after both branches ( it was inside of the ReSTIR branch only )
+        // the sun
         {
             float3 sunDiffuse;
             float3 sunSpecular;
@@ -527,7 +312,7 @@ void main(uint3 id : SV_DispatchThreadID){
         }
 
         // the ao map of the material takes the DIRECT light only ( the lamps and the sun ) : the ambient light and the indirect light are not here , and the SSAO / HBAO of the
-        // post process is a different thing ( it knows nothing about the paint of the object ) . the reservoir keeps the light without it
+        // post process is a different thing ( it knows nothing about the paint of the object )
         {
             // the strength is the same slider as the one of the SSAO / HBAO ( features.AO_intens ) : the same pow as in PostProcess
             const float objectAmbient = pow(objectAmbientImage[id.xy].x , features.AO_intens);
@@ -558,7 +343,6 @@ void main(uint3 id : SV_DispatchThreadID){
         const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f), albedo , metallic);
         const float3 F = F_fresnel(F0 , NdotV);
 
-        ReSTIRDI_buffer[bufferIndex(currentPixel)] = reservoir;
         diffuseImage[id.xy] = float4(diffuse , 1.0f);
         specularImage[id.xy] = float4(specular , 1.0f);
         motionVector[id.xy] = prevUV - uv ;

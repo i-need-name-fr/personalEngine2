@@ -14,8 +14,6 @@
 [[vk::binding(10 , 0)]] RWStructuredBuffer<MeshData> meshBuffer;
 [[vk::binding(11 , 0)]] RWStructuredBuffer<LUT> LUT_Buffer;
 
-[[vk::binding(12 , 0)]] RWStructuredBuffer<ReservoirDI> ReSTIRDIBuffer;
-[[vk::binding(13 , 0)]] RWStructuredBuffer<ReservoirDI> prevReSTIRDIBuffer;
 [[vk::binding(14 , 0)]] RWStructuredBuffer<ReservoirGI> ReSTIRGIBuffer;
 [[vk::binding(15 , 0)]] RWStructuredBuffer<ReservoirGI> prevReSTIRGIBuffer;
 
@@ -255,25 +253,6 @@ float3 AddSunDisc(float3 skyColor , float3 rayDir){
     const float3 disc = min(sunBuffer.diffuse * SUN_DISC_BRIGHTNESS * sunTransmittanceToCamera() , float3(SUN_DISC_MAX , SUN_DISC_MAX , SUN_DISC_MAX));
     return skyColor + disc * coverage;
 }
-
-// ReSTIR DI is switched by features.ReSTIR ( ImGui ) : there is nothing to recompile
-
-float targetPdf_DI(uint lightIndex , GeneralObjectInfo info){
-    const lg::LightSource candidate = lightBuffer[lightIndex];
-    float3 L = candidate.position - info.P;
-    const float d = length(L);
-    L /= max(d , 1e-4f);
-
-    const float attenuation = lightAttenuation(candidate , d);
-    float3 diffuse;
-    float3 specular;
-
-    computeLight(info , L , diffuse ,specular);
-    const float3 brdfValue = (diffuse + specular) * max(dot(info.N , L) , 0.0001f);
-    return luminance(candidate.diffuse * brdfValue * attenuation);
-}
-
-
 
 // shadow calc
 float calculateShadows(float3 position , float3 direction , float maxDistance){

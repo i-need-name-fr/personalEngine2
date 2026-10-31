@@ -151,8 +151,6 @@ namespace mox{
             buffer("forwardInfo");
             buffer("skyBuffer");
             buffer("sunBuffer");
-            buffer("ReSTIRDIBuffer_0");
-            buffer("ReSTIRDIBuffer_1");
             buffer("ReSTIRGIBuffer_0");
             buffer("ReSTIRGIBuffer_1");
             buffer("ReSTIRPTBuffer_0");
@@ -256,7 +254,7 @@ namespace mox{
             imageBar[19] = image("transmissionLUT")->translateImage(read , stage);
             imageBar[20] = image("multiScatter")->translateImage(read , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 22> bufBar;
+            std::array<VkBufferMemoryBarrier2 , 20> bufBar;
 
             bufBar[0] = buffer("generalBuffer")->translateBuffer(uniformRead , stage);
             bufBar[1] = buffer("generalFeatures")->translateBuffer(uniformRead , stage);
@@ -278,20 +276,18 @@ namespace mox{
             bufBar[13] = Mesh2::LUT_buffer->translateBuffer(read , stage);
 
             // the reservoirs : this frame writes its own ( and reads it back ) and reads the ones of the previous frame
-            bufBar[14] = buffer("ReSTIRDIBuffer" , id)->translateBuffer(read | write , stage);
-            bufBar[15] = buffer("ReSTIRDIBuffer" , prev)->translateBuffer(read , stage);
-            bufBar[16] = buffer("ReSTIRGIBuffer" , id)->translateBuffer(read | write , stage);
-            bufBar[17] = buffer("ReSTIRGIBuffer" , prev)->translateBuffer(read , stage);
+            bufBar[14] = buffer("ReSTIRGIBuffer" , id)->translateBuffer(read | write , stage);
+            bufBar[15] = buffer("ReSTIRGIBuffer" , prev)->translateBuffer(read , stage);
 
             // the lists of the lamps of the tiles : written by the ForwardPlus
-            bufBar[18] = buffer("tileLightIndices")->translateBuffer(read , stage);
-            bufBar[19] = buffer("lightCountPerTile")->translateBuffer(read , stage);
+            bufBar[16] = buffer("tileLightIndices")->translateBuffer(read , stage);
+            bufBar[17] = buffer("lightCountPerTile")->translateBuffer(read , stage);
 
             // the reservoirs of ReSTIR PT : this frame writes its own ( and reads it back ) and reads the one of the previous frame
-            bufBar[20] = buffer("ReSTIRPTBuffer" , id)->translateBuffer(read | write , stage);
-            bufBar[21] = buffer("ReSTIRPTBuffer" , prev)->translateBuffer(read , stage);
+            bufBar[18] = buffer("ReSTIRPTBuffer" , id)->translateBuffer(read | write , stage);
+            bufBar[19] = buffer("ReSTIRPTBuffer" , prev)->translateBuffer(read , stage);
 
-            auto dep = TypicalDependency<22 , 21>(imageBar.data() , bufBar.data());
+            auto dep = TypicalDependency<20 , 21>(imageBar.data() , bufBar.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -359,6 +355,9 @@ namespace mox{
                     for(uint32_t i = 1 ; i <= 5 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
 
                     for(uint32_t i = 6 ; i <= 15 ; i++) data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    // 12 and 13 were the reservoirs of ReSTIR DI : reserved ( no descriptors ) , the other bindings keep their numbers
+                    data[12] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0};
+                    data[13] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0};
 
                     data[16] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 1};
                     data[17] = {VK_DESCRIPTOR_TYPE_SAMPLER , 1};
@@ -421,9 +420,7 @@ namespace mox{
                     data[10] = DescriptorData2::createData(Mesh2::MeshBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 10 , 0);
                     data[11] = DescriptorData2::createData(Mesh2::LUT_buffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 11 , 0);
 
-                    // the reservoirs : this frame writes the one with its own parity and reads the other
-                    data[12] = DescriptorData2::createData(buffer("ReSTIRDIBuffer" , id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 12 , 0);
-                    data[13] = DescriptorData2::createData(buffer("ReSTIRDIBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
+                    // the reservoirs of GI : this frame writes the one with its own parity and reads the other
                     data[14] = DescriptorData2::createData(buffer("ReSTIRGIBuffer" , id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 14 , 0);
                     data[15] = DescriptorData2::createData(buffer("ReSTIRGIBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 15 , 0);
 
@@ -459,6 +456,9 @@ namespace mox{
                     // the reservoirs of ReSTIR PT : this frame writes the one with its own parity and reads the other
                     data[40] = DescriptorData2::createData(buffer("ReSTIRPTBuffer" , id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 40 , 0);
                     data[41] = DescriptorData2::createData(buffer("ReSTIRPTBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 41 , 0);
+
+                    // the bindings 12 and 13 were the reservoirs of ReSTIR DI : nothing is written there and the shaders do not declare them any more
+                    data.erase(data.begin() + 12 , data.begin() + 14);
 
                     DescriptorBuffer2::CreateInfo info{};
                     info.context = context;

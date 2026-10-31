@@ -87,8 +87,6 @@ namespace mox{
             buffer("tileLightIndices");
             buffer("lightCountPerTile");
             buffer("lightBuffer");
-            buffer("ReSTIRDIBuffer_0");
-            buffer("ReSTIRDIBuffer_1");
             buffer("sunBuffer");
             buffer("skyBuffer");
 
@@ -183,7 +181,7 @@ namespace mox{
             // the occlusion of the material : the direct light is multiplied by it
             imageBar[15] = image("objectAmbientImage")->translateImage(read , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 10> bufBar;
+            std::array<VkBufferMemoryBarrier2 , 8> bufBar;
 
             bufBar[0] = buffer("generalBuffer")->translateBuffer(uniformRead , stage);
             bufBar[1] = buffer("generalFeatures")->translateBuffer(uniformRead , stage);
@@ -192,12 +190,9 @@ namespace mox{
             bufBar[3] = buffer("tileLightIndices")->translateBuffer(read , stage);
             bufBar[4] = buffer("lightCountPerTile")->translateBuffer(read , stage);
             bufBar[5] = buffer("lightBuffer")->translateBuffer(read , stage);
-            // the reservoirs : this frame writes its own and reads the ones of the previous frame
-            bufBar[6] = buffer("ReSTIRDIBuffer" , id)->translateBuffer(write , stage);
-            bufBar[7] = buffer("ReSTIRDIBuffer" , prev)->translateBuffer(read , stage);
             // the sun disc
-            bufBar[8] = buffer("sunBuffer")->translateBuffer(uniformRead , stage);
-            bufBar[9] = buffer("skyBuffer")->translateBuffer(uniformRead , stage);
+            bufBar[6] = buffer("sunBuffer")->translateBuffer(uniformRead , stage);
+            bufBar[7] = buffer("skyBuffer")->translateBuffer(uniformRead , stage);
 
             VkDependencyInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -276,8 +271,9 @@ namespace mox{
                         data[i] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 1};
                     }
 
-                    data[15] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
-                    data[16] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1};
+                    // 15 and 16 were the reservoirs of ReSTIR DI : reserved ( no descriptors ) , the other bindings keep their numbers
+                    data[15] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0};
+                    data[16] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0};
 
                     data[17] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
                     data[18] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 1};
@@ -335,9 +331,6 @@ namespace mox{
                         data[13] = DescriptorData2::createData(image("specularImage" , id) , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 13 , 0);
                         data[14] = DescriptorData2::createData(image("motionVector") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 14 , 0);
 
-                        data[15] = DescriptorData2::createData(buffer("ReSTIRDIBuffer" , id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 15 , 0);
-                        data[16] = DescriptorData2::createData(buffer("ReSTIRDIBuffer" , !id) , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 16 , 0);
-
                         data[17] = DescriptorData2::createData(buffer("generalBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 17 , 0);
                         data[18] = DescriptorData2::createData(buffer("generalFeatures") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 18 , 0);
                         data[19] = DescriptorData2::createData(buffer("forwardInfo") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 19 , 0);
@@ -350,6 +343,9 @@ namespace mox{
                         data[24] = DescriptorData2::createData(buffer("skyBuffer") , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 24 , 0);
                         data[25] = DescriptorData2::createData(image("transmissionLUT") , VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE , 25 , 0);
                         data[26] = DescriptorData2::createData(image("objectAmbientImage") , VK_DESCRIPTOR_TYPE_STORAGE_IMAGE , 26 , 0);
+
+                        // the bindings 15 and 16 are reserved ( they were ReSTIR DI ) : nothing is written there
+                        data.erase(data.begin() + 15 , data.begin() + 17);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;

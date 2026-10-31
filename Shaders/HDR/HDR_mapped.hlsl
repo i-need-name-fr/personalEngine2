@@ -47,7 +47,7 @@ float3 ACESFilm(float3 x)
     return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
-static float minLogLum = -8.0f;
+static float minLogLum = -10.0f;
 static float logLumRange = 12.0f;
 
 // the average used to be computed by EVERY pixel : 255 reads of the histogram each , ~900 million reads
@@ -84,7 +84,11 @@ float ComputeAverageLuminance(RWStructuredBuffer<uint> histogram , uint localInd
         GroupMemoryBarrierWithGroupSync();
     }
 
-    float avgLogLum = groupWeighted[0] / max(groupCount[0], 1);
+    // nothing to average ( the whole image is darker than bin 1 ) : answer with the darkest brightness the histogram knows ,
+    // so that the exposure goes to its maximum instead of the 1.0 that an empty sum would give
+    if(groupCount[0] == 0) return exp2(minLogLum);
+
+    float avgLogLum = groupWeighted[0] / groupCount[0];
     return exp2(avgLogLum);   // обратно из log-пространства в реальную яркость
 }
 
@@ -139,7 +143,7 @@ void main(uint3 id : SV_DispatchThreadID , uint localIndex : SV_GroupIndex){
 
     const float gamma = 2.2f;
     const float averageExposure =  0.18f / averageLuminance;
-    const float exposure = clamp(averageExposure , 0.05f , 2.0f) * max(generalBuffer.exposure , 0.0f);
+    const float exposure = clamp(averageExposure , 0.05f , 6.0f) * max(generalBuffer.exposure , 0.0f);
     const float3 hdr = HDRImage[id.xy].xyz;
     const float3 finalColor = hdr * exposure;
     const float3 toneMapped = ACESFilm(finalColor);
