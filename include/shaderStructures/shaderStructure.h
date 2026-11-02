@@ -961,6 +961,98 @@ namespace ms
     };
 }
 
+/*
+#ifdef __cplusplus
+
+#else
+
+#endif
+*/
+
+#define MOX_NRC_NON_VALID_SAMPLE 99.0f
+#define MOX_NRC_VALID_SAMPLE 0.0f
+// the labels per path : x0 , x1 , x2 . the 4th vertex ( x3 ) is only a query of the net at the end of the path , the trace pass keeps it in locals
+#define MOX_NRC_MAX_BOUNCE_COUNT 3ul
+#define MOX_NRC_MAX_HASH_GRID_SIZE 4ul
+#define MOX_NRC_HASH_GRID_F 2ul
+namespace NRC
+{   
+
+    struct _TrainingSample
+    {
+#ifdef __cplusplus
+        alignas(16) glm::vec3 radiance;
+        alignas(16) glm::vec3 position;
+        alignas(16) glm::vec3 normal;
+#else
+        float3 radiance;
+        float3 position;
+        float3 normal;
+#endif
+
+        // MOX_NRC_VALID_SAMPLE / MOX_NRC_NON_VALID_SAMPLE . radiance is the label , the net does not see roughness / metallic yet ( diffuse only ) :
+        // 48 bytes , the same in C++ ( alignas ) and in HLSL ( a float3 does not cross a 16 byte border )
+        float valid;
+    };
+
+    // one wheel of the net / one entry of the hash grid : 16 bytes , the apply pass reads and writes it as one float4
+    struct Parameter
+    {
+        float w;
+        // Adam : the average of the gradients of the last steps ( the direction )
+        float m;
+        // Adam : the average of the squares of the gradients ( how much the gradient jumps )
+        float v;
+        // the sum of the gradients of THIS step : the train pass adds into it , the apply pass reads it and sets it back to 0
+        float grad;
+    };
+
+    struct HashGridInfo
+    {
+#ifdef __cplusplus
+        uint32_t T;
+        uint32_t offset;
+#else
+        uint T;
+        uint offset;
+#endif
+        // meters , the finer levels are not whole numbers
+        float cellSize;
+        float padding1;
+    };
+
+    struct HashGridResult
+    {
+        float data[MOX_NRC_HASH_GRID_F * MOX_NRC_MAX_HASH_GRID_SIZE];
+    };
+
+#ifdef __cplusplus
+    // the ADDRESSES of the buffers of the net for the shader ( the uniform buffer NrcPointers of coopVector.hlsl , 4 x 8 bytes ) :
+    // the matrix operations of the cooperative vector take a pointer , not a descriptor
+    struct Pointers
+    {
+        uint64_t hiddenWeights;   // neuronHiddenBuffer : W1 and b1 ( float16 , the layout of the cooperative vector )
+        uint64_t outputWeights;   // neuronPerChannelBuffer : W2 and b2
+        uint64_t hiddenGrads;     // neuronHiddenGradBuffer : the gradients of W1 and b1
+        uint64_t outputGrads;     // neuronPerChannelGradBuffer : the gradients of W2 and b2
+    };
+#endif
+
+    struct GeneralData
+    {
+#ifdef __cplusplus
+        uint32_t width;
+        uint32_t height;
+        uint32_t validCount;
+#else   
+        uint width;
+        uint height;
+        uint validCount;
+#endif
+        float padding;
+    };
+}
+
 #ifdef __cplusplus
     inline static uint32_t TILE_SIZE = 16;
 #endif

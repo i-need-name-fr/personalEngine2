@@ -97,6 +97,10 @@
 [[vk::image_format("rgba16f")]]
 [[vk::binding(3 , 3)]] RWTexture2D<float4> RCImages[];
 
+// set 4 : the NRCManager ( the net : NRC::askNRC( P , N ) gives the light that arrives at the point , without the albedo )
+#define NRC_SET 4
+#include "../NRC/nrcQuery.hlsl"
+
 struct LightData{
     float3 diffuse;
     float3 specular;

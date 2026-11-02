@@ -32,9 +32,28 @@ namespace mox{
             // indexing , timeline semaphores and buffer device address , and the spec
             // forbids mixing it with the individual structs it replaces.
 
+            VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloat{};
+            atomicFloat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+            // NRC : the gradients of the hash grid are summed with InterlockedAddFloat on a storage buffer
+            // ( the plain "Atomics" flag is only load / store / exchange , the "AtomicAdd" one is the += )
+            atomicFloat.shaderBufferFloat32Atomics = VK_TRUE;
+            atomicFloat.shaderBufferFloat32AtomicAdd = VK_TRUE;
+            // the group shared copy of the same sum ( partial sums per group before the global atomic )
+            atomicFloat.shaderSharedFloat32Atomics = VK_TRUE;
+            atomicFloat.shaderSharedFloat32AtomicAdd = VK_TRUE;
+            // the float64 / image / sparse flags are left off on purpose : a flag the GPU does not
+            // have makes vkCreateDevice fail , and nothing in the engine needs them
+
+            VkPhysicalDeviceCooperativeVectorFeaturesNV vector{};
+            vector.cooperativeVector = VK_TRUE;
+            vector.cooperativeVectorTraining = VK_TRUE;
+            vector.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV;
+            vector.pNext = &atomicFloat;
+
             VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT helperIn{};
             helperIn.shaderDemoteToHelperInvocation = VK_TRUE;
             helperIn.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT;
+            helperIn.pNext = &vector;
 
             VkPhysicalDeviceMeshShaderFeaturesEXT meshShading{};
             meshShading.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
@@ -81,6 +100,8 @@ namespace mox{
 
             vulkan12.timelineSemaphore = VK_TRUE;
             vulkan12.bufferDeviceAddress = VK_TRUE;
+            // half in the shader : the NRC weights and activations are fp16 ( tensor cores )
+            vulkan12.shaderFloat16 = VK_TRUE;
 
             // the extension is enabled , so this has to be on as well
             vulkan12.descriptorIndexing = VK_TRUE;

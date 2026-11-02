@@ -97,6 +97,10 @@
 [[vk::image_format("rgba16f")]]
 [[vk::binding(3 , 3)]] RWTexture2D<float4> RCImages[];
 
+// set 4 : the NRCManager ( the net : NRC::askNRC( P , N ) gives the light that arrives at the point , without the albedo )
+#define NRC_SET 4
+#include "../NRC/nrcQuery.hlsl"
+
 struct LightData{
     float3 diffuse;
     float3 specular;
@@ -1618,7 +1622,6 @@ namespace Reflection{
             roughness = allTextures[id].SampleLevel(typicalSampler , uv , 0).y;
         }
 
-        // the packed PBR map ( R occlusion , G roughness , B metallic ) : the occlusion is not used yet
         if(lut.armTextureID != NON_VALID_SLOT){
             const uint id = virtualTextureIndex[lut.armTextureID];
             const float3 arm = allTextures[id].SampleLevel(typicalSampler , uv , 0).xyz;
@@ -1626,14 +1629,12 @@ namespace Reflection{
             metallic = arm.z;
         }
 
-        // the map of the ambient occlusion : not used yet
         if(lut.aoTextureID != NON_VALID_SLOT){
         }
 
         GeneralObjectInfo info = (GeneralObjectInfo)0;
         info.albedo = albedo;
         info.metallic = metallic;
-        // the GGX of a perfect mirror ( roughness 0 ) is degenerate : D is 0 almost everywhere , the surface came out black
         info.roughness = max(roughness , 0.1f);
         info.N = normal;
         info.V = V;
@@ -1641,15 +1642,12 @@ namespace Reflection{
         return info;
     }
 
-    // the light of the hit : the sun , one lamp of the world grid ( by the position of the HIT ) and the ambient of the sky ( kD ) , like the hits of the probes of
-    // Radiance Cascade . the result is the radiance that goes back along the ray , the albedo is in it ( diffuse * albedo + specular )
     float3 computeLightAt(const GeneralObjectInfo data , inout uint seed , const float3 V){
         uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
         findLightIndices(data.P , lightIndices , lightCount);
 
         const float3 saveAlbedo = max(data.albedo , 1e-20f);
 
-        // the diffuse part has no albedo while it is summed ( it is multiplied at the end ) , the specular part has none at all
         float3 diffuseSum = 0.0f;
         float3 specularSum = 0.0f;
 
@@ -1660,7 +1658,6 @@ namespace Reflection{
 
             float3 L = light.position - data.P;
             L = normalize(L);
-            // the centre of the lamp , not a random point of its sphere ( the indirect light : a big sphere reached through the walls )
             const float3 lightPos = light.position;
             float3 realL = lightPos - data.P;
             const float dist = length(realL);

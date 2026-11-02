@@ -210,6 +210,8 @@ namespace mox{
             loadFunction(instance, getFunctionName("PFN_vkCmdBeginConditionalRenderingEXT"), cmdBeginConditionalRenderingEXT);
             loadFunction(instance, getFunctionName("PFN_vkCmdEndConditionalRenderingEXT"), cmdEndConditionalRenderingEXT);
             loadFunction(instance, getFunctionName("PFN_vkCmdDrawMeshTasksEXT"), cmdDrawMeshTasksEXT);
+
+            loadFunction(instance , getFunctionName("PFN_vkCmdConvertCooperativeVectorMatrixNV") , cmdConvertCooperativeVectorMatrixNV);
         }
 
         void processCopy(VulkanContext&& input) noexcept{

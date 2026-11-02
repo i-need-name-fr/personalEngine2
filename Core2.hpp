@@ -36,6 +36,7 @@
 #include "include/generalPipelines2/PathTracing.hpp"
 #include "include/RTCompileObjects/RTCompileObjects.hpp"
 #include "include/LightManager/LightManager.hpp"
+#include "include/NRCManager/NRCManager.hpp"
 #include "include/generalPipelines2/RadianceCascade.hpp"
 
 namespace gui = ImGui;
@@ -136,6 +137,7 @@ namespace mox{
             buffers = nullptr;
             renderImages = nullptr;
             rc = nullptr;
+            nrc = nullptr;
             RCManager = nullptr;
             light_m = nullptr;
             tlas = nullptr;
@@ -385,6 +387,7 @@ namespace mox{
                     info.manager = manager.get();
                     info.lights = light_m.get();
                     info.probes = RCManager.get();
+                    info.nrc = nrc.get();
 
                     rt = std::make_shared<RayTracing>(info);
                 }
@@ -599,6 +602,13 @@ namespace mox{
                     info.context = context.get();
 
                     RCManager = std::make_shared<RCProbeManager>(info);
+                }
+
+                {
+                    NRC::NRCManager::CreateInfo info{};
+                    info.context = context.get();
+
+                    nrc = std::make_shared<NRC::NRCManager>(info);
                 }
 
                 // multiscatter
@@ -1280,6 +1290,7 @@ namespace mox{
         pTextureManager2 manager; // created
         pLightManager light_m;
         pRCProbeManager RCManager;
+        NRC::pNRCManager nrc;
 
         pAtmosphereScattering atmosphere{};
         // true : the G buffer is drawn through the meshlets ( MeshDeferredRender ) , false : the old indirect draw ( DeferredRender )

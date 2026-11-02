@@ -11,6 +11,7 @@
 #include "../Image2/TextureManager2.hpp"
 #include "../LightManager/LightManager.hpp"
 #include "../RCProbeManager/RCProbeManager.hpp"
+#include "../NRCManager/NRCManager.hpp"
 
 namespace mox{
 
@@ -25,6 +26,7 @@ namespace mox{
     //   set 2 : the world grid of the lamps of the LightManager : the lamps , the cells , the info ( its layout and its descriptor buffer )
     //   set 3 : the probes of Radiance Cascade ( RCProbeManager ) : the probes , the cascades , the info , RCImages[] ( the pass RadianceCascade has written them ) ,
     //           the shaders read the cascade 0 ( RC::processRC in generalHit.hlsl )
+    //   set 4 : the net of NRCManager : the hash grid , the addresses of the matrices ( NRC::askNRC in Shaders/NRC/nrcQuery.hlsl , the pass only reads them )
     //
     // the order of the groups = the numbers in shaderStructure.h ( RT_MISS_* and RT_HITGROUP_* ) :
     //   miss : 0 general , 1 hit info ( GI ) , 2 shadow
@@ -49,6 +51,8 @@ namespace mox{
             LightManager* lights{};
             // the layout and the descriptor buffer of the set 3 ( Radiance Cascade ) : the manager has to live longer than the pass
             RCProbeManager* probes{};
+            // the layout and the descriptor buffer of the set 4 ( the net ) : the manager has to live longer than the pass
+            NRC::NRCManager* nrc{};
 
             std::string rayGenerationPath;
 
@@ -93,6 +97,11 @@ namespace mox{
 
             if(!info.probes){
                 engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create RayTracing , since the probe manager is nullptr"});
+                THROW_MESSAGE;
+            }
+
+            if(!info.nrc){
+                engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create RayTracing , since the NRC manager is nullptr"});
                 THROW_MESSAGE;
             }
 
@@ -175,9 +184,9 @@ namespace mox{
 
             vkCmdBindPipeline(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->pipeline);
 
-            // set 0 : the descriptor buffer of this pass , set 1 : the textures , set 2 : the world grid of the lamps , set 3 : the probes of Radiance Cascade
+            // set 0 : the descriptor buffer of this pass , set 1 : the textures , set 2 : the world grid of the lamps , set 3 : the probes of Radiance Cascade , set 4 : the net
             {
-                std::array<VkDescriptorBufferBindingInfoEXT , 4> info{};
+                std::array<VkDescriptorBufferBindingInfoEXT , 5> info{};
 
                 info[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
                 info[0].address = pipe->buffers[currentImage]->pBuffer;
@@ -199,11 +208,16 @@ namespace mox{
                 info[3].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
                 info[3].pNext = nullptr;
 
-                cmdBindDescriptorBuffersEXT(cmd , 4 , info.data());
+                info[4].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                info[4].address = inputData.nrc->dbuffer->pBuffer;
+                info[4].usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                info[4].pNext = nullptr;
 
-                const uint32_t sets[4] = {0 , 1 , 2 , 3};
-                const VkDeviceSize offsets[4] = {0 , 0 , 0 , 0};
-                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->layout->layout , 0 , 4 , sets , offsets);
+                cmdBindDescriptorBuffersEXT(cmd , 5 , info.data());
+
+                const uint32_t sets[5] = {0 , 1 , 2 , 3 , 4};
+                const VkDeviceSize offsets[5] = {0 , 0 , 0 , 0 , 0};
+                cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR , pipe->layout->layout , 0 , 5 , sets , offsets);
             }
 
             // vkCmdTraceRaysKHR takes the GRID of the rays , not the number of the workgroups : there is nothing to divide by 8
@@ -404,11 +418,11 @@ namespace mox{
                     pipe->addDescriptorLayout(info);
                 }
 
-                // ------------------------------------------------------------ the pipeline layout : set 0 , the textures , the world grid of the lamps and the probes
+                // ------------------------------------------------------------ the pipeline layout : set 0 , the textures , the world grid of the lamps , the probes and the net
                 {
                     PipelineLayout::CreateInfo info{};
                     info.context = context;
-                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.manager->layout.get() , inputData.lights->layout.get() , inputData.probes->layout.get()};
+                    info.layouts = {pipe->descriptorLayouts[0].get() , inputData.manager->layout.get() , inputData.lights->layout.get() , inputData.probes->layout.get() , inputData.nrc->layout.get()};
                     info.ranges = {};
 
                     pipe->layout = std::make_shared<PipelineLayout>(info);
