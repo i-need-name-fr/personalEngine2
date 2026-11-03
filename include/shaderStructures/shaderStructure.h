@@ -1044,12 +1044,13 @@ namespace NRC
         uint32_t width;
         uint32_t height;
         uint32_t validCount;
+        uint32_t stepCount;
 #else   
         uint width;
         uint height;
         uint validCount;
+        uint stepCount;
 #endif
-        float padding;
     };
 }
 

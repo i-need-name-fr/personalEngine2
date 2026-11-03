@@ -1,12 +1,5 @@
 #pragma once
 
-// the question to the net : NRC::askNRC( P , N ) gives the light that ARRIVES at the point P ( without the albedo of the point ) .
-// one file for all the shaders that ask the net ( the training shader , the ray tracing ) : the descriptors of the NRCManager and the forward pass of the net
-//
-// the number of the descriptor set is different in every pipeline , so the shader that includes this file says it FIRST :
-//      #define NRC_SET 3
-//      #include "../NRC/nrcQuery.hlsl"
-// ( the layout of the set is the one of NRCManager : 9 bindings , 0 .. 7 the storage buffers , 8 the uniform buffer with the addresses )
 #ifndef NRC_SET
 #error "define NRC_SET ( the number of the descriptor set of the NRCManager ) before the include of nrcQuery.hlsl"
 #endif
@@ -20,14 +13,14 @@
 [[vk::binding(6 , NRC_SET)]] RWStructuredBuffer<float> neuronHiddenBuffer;
 [[vk::binding(7 , NRC_SET)]] RWStructuredBuffer<float> neuronPerChannelBuffer;
 
-// the cooperative vector operations of the net ( the matrices are multiplied on the tensor cores )
 #include "coopVector.hlsl"
 [[vk::binding(8 , NRC_SET)]] ConstantBuffer<NrcPointers> nrcPtr;
-// one NRC::GeneralData : the size of the training grid ( width , height ) and the counter of the valid samples ( InterlockedAdd on validCount in the trace pass )
 [[vk::binding(9 , NRC_SET)]] RWStructuredBuffer<NRC::GeneralData> nrcGeneral;
+[[vk::binding(10 , NRC_SET)]] RWStructuredBuffer<float> gradStagingHidden;
+[[vk::binding(11 , NRC_SET)]] RWStructuredBuffer<float> gradStagingOutput;
+[[vk::binding(12 , NRC_SET)]] RWStructuredBuffer<float> weightStagingHidden;
+[[vk::binding(13 , NRC_SET)]] RWStructuredBuffer<float> weightStagingOutput;
 
-// float += float from many threads at once ( OpAtomicFAddEXT ) : HLSL has no InterlockedAdd for float . scope 1 = Device , semantics 0 = relaxed
-// atomicAddFloat(hashGridParamsBuffer[i].grad , 1 , 0 , value)
 [[vk::ext_capability(6033)]]
 [[vk::ext_extension("SPV_EXT_shader_atomic_float_add")]]
 [[vk::ext_instruction(6035)]]

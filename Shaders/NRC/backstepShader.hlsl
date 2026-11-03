@@ -70,19 +70,19 @@ void processUpdate(const NRC::_TrainingSample input , const bool valid)
     const float3 dL_dout = 2.0f * (NRC_result - input.radiance) * (valid ? 1.0f : 0.0f);
     CoopOut firstLayerInput = constructOut(float16_t(dL_dout.x) * float16_t(derivativeSoftplus(_nrcAnswer.x)), float16_t(dL_dout.y) * float16_t(derivativeSoftplus(_nrcAnswer.y)) , float16_t(dL_dout.z) *float16_t(derivativeSoftplus(_nrcAnswer.z)) , 0.0f , 0.0f , 0.0f , 0.0 , 0.0, 0.0, 0.0 ,0.0 ,0.0 ,0.0 ,0.0 ,0.0 ,0.0);
     outerProductOutHidden(nrcPtr.outputGrads.Get().data , 0 , firstLayerInput , h , NRC_LAYOUT_TRAINING_OPTIMAL , NRC_F16 , NRC_HIDDEN_SIZE * 2);
-    CoopHidden dL_dh = mulTransposeOutHidden(firstLayerInput , NRC_F16 , nrcPtr.outputWeights.Get().data , NRC_W2_OFFSET , NRC_F16 , 
+    CoopHidden dL_dh = mulTransposeOutHidden(firstLayerInput , NRC_F16 , nrcPtr.outputWeights.Get().data , NRC_W2_TRAIN_OFFSET , NRC_F16 ,
                                             NRC_HIDDEN_SIZE , NRC_OUT_SIZE, NRC_LAYOUT_TRAINING_OPTIMAL, // we change the M and K since we matrix is transposed
                                             true , NRC_HIDDEN_SIZE * 2 , 0);
     CoopHidden gate = reluGateHidden(z1);
     CoopHidden dz1 = mulHidden(dL_dh , gate);
 
-    CoopIn inputCoop = mulTransposeHiddenIn(dz1 , NRC_F16 , nrcPtr.hiddenWeights.Get().data , NRC_W1_OFFSET , NRC_F16 , 
+    CoopIn inputCoop = mulTransposeHiddenIn(dz1 , NRC_F16 , nrcPtr.hiddenWeights.Get().data , NRC_W1_TRAIN_OFFSET , NRC_F16 ,
                                             NRC_IN_SIZE , NRC_HIDDEN_SIZE, NRC_LAYOUT_TRAINING_OPTIMAL, // we change the M and K since we matrix is transposed
                                             true , NRC_IN_SIZE * 2 , 0);
 
     outerProductHiddenIn(nrcPtr.hiddenGrads.Get().data , 0 , dz1 , x , NRC_LAYOUT_TRAINING_OPTIMAL , NRC_F16 , NRC_IN_SIZE * 2);
-    reduceSumHidden(nrcPtr.hiddenGrads.Get().data , NRC_B1_OFFSET , dz1);
-    reduceSumOut(nrcPtr.outputGrads.Get().data , NRC_B2_OFFSET , firstLayerInput);
+    reduceSumHidden(nrcPtr.hiddenGrads.Get().data , NRC_B1_GRAD_OFFSET , dz1);
+    reduceSumOut(nrcPtr.outputGrads.Get().data , NRC_B2_GRAD_OFFSET , firstLayerInput);
     // now we update the hash grid
     // the atomics are not cooperative : the invalid threads can skip it
     if(valid) addHashGrid(input.position , inputCoop);

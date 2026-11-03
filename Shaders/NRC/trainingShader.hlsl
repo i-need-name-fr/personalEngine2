@@ -399,8 +399,6 @@ float3 randomInLightRadius(inout uint seed  , lg::LightSource light , const floa
     const float y = sin(phi) * r;
     const float R = light.sourceRadius;
     float3 offset = R * float3(x ,y ,z);
-    // L goes FROM the point TO the lamp , the visible half of the sphere is the one that looks back at the point : the offsets that look the way of L ( dot > 0 )
-    // are on the far side of the lamp , they are turned over ( it was dot < 0 : the far half was chosen )
     const float facing = dot(offset , L);
     if(facing > 0.0f) offset = -offset;
     return light.position + offset;
@@ -415,12 +413,8 @@ float3 randomInSunRadius(inout uint seed  , SunSource light , const float3 L){
     const float y = sin(phi) * r;
     const float R = light.sourceRadius;
     float3 offset = R * float3(x ,y ,z);
-    // L goes FROM the point TO the lamp , the visible half of the sphere is the one that looks back at the point : the offsets that look the way of L ( dot > 0 )
-    // are on the far side of the lamp , they are turned over ( it was dot < 0 : the far half was chosen )
     const float facing = dot(offset , L);
     if(facing > 0.0f) offset = -offset;
-    // the sun is at infinity : its "sphere" is a disc of the angular radius R on the unit sphere of directions , so the result is a DIRECTION ( the centre L plus the offset , normalized ) ,
-    // not the offset alone ( it was a vector of length ~0.005 : dot(N , L) and the light went to 0 )
     return normalize(normalize(L) + offset);
 }
 
@@ -949,5 +943,9 @@ void main(uint3 id : SV_DispatchThreadID)
     trainingBuffer[buff * 3] = samples[0];
     trainingBuffer[buff * 3 + 1] = samples[1];
     trainingBuffer[buff * 3 + 2] = samples[2];
-    nrcGeneral[0].validCount = 0;
+    if(all(id.xy == 0))
+    {
+        nrcGeneral[0].stepCount += 1;
+        nrcGeneral[0].validCount = 0;
+    }
 }   

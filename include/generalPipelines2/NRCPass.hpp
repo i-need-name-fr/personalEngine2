@@ -18,6 +18,11 @@ namespace mox{
     // the shaders of the pass ( the order = the index in pipe->shaders ) :
     //   0 : tracePath    - Shaders/NRC/trainingShader : the paths of the 4 vertices , the labelled samples go to NRCManager::trainingSampleBuffer
     //   1 : backwardPath - Shaders/NRC/backstepShader : the forward + the backward of the net , the gradients go to the grad buffers and to Parameter.grad of the hash grid
+    //   2 : applyPath    - Shaders/NRC/applyShader : Adam , ONE dispatch ( groups x = 4096 of 128 , groups y = 6 : 0 hidden , 1 output , 2..5 the levels of the hash grid ) , see NRC::NRCManager for the commands around it
+    //
+    // the order of one step :
+    //   trace -> backward -> NRCManager::recordConvertGradients -> apply -> NRCManager::recordConvertWeights -> NRCManager::recordZeroGradients
+    //   ( a barrier between every two , the conversion is its own pipeline stage ) . before the very first trace : recordConvertWeights once , the weight buffers start with zeros
     //
     // the sets ( the same numbers in both shaders ) :
     //   set 0 : the list of RayTracing set 0 WITHOUT the images of the light ( diffuse 20 , specular 21 , indirect 23 : the training does not touch them ) , two descriptor
@@ -44,7 +49,7 @@ namespace mox{
 
             std::string tracePath;      // Shaders/NRC/trainingShader ( without the extension , like the other passes )
             std::string backwardPath;   // Shaders/NRC/backstepShader
-            std::string applyPath;      // Shaders/NRC/applyShader ( Adam ) : only stored for now , createPipe does not load it yet
+            std::string applyPath;      // Shaders/NRC/applyShader ( Adam )
         };
 
         explicit NRCPass(const CreateInfo &info){
@@ -74,8 +79,8 @@ namespace mox{
                 THROW_MESSAGE;
             }
 
-            if(info.tracePath.empty() || info.backwardPath.empty()){
-                engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create NRCPass , since one of the shader paths is empty ( trace , backward )"});
+            if(info.tracePath.empty() || info.backwardPath.empty() || info.applyPath.empty()){
+                engineLogger(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create NRCPass , since one of the shader paths is empty ( trace , backward , apply )"});
                 THROW_MESSAGE;
             }
 
@@ -142,7 +147,7 @@ namespace mox{
 
         // ==================================================================================================================================================
         // TODO ( yours ) : the dispatches of the pass .
-        //   what is ready : pipe->shaders[0]->shader ( trace ) , pipe->shaders[1]->shader ( backward ) , pipe->buffers[frameIndex % 2] ( the descriptor buffer of set 0 ) ,
+        //   what is ready : pipe->shaders[0]->shader ( trace ) , pipe->shaders[1]->shader ( backward ) , pipe->shaders[2]->shader ( apply : dispatch 4096 x 6 x 1 ) , pipe->buffers[frameIndex % 2] ( the descriptor buffer of set 0 ) ,
         //   pipe->layout->layout , inputData.manager->dbuffer , inputData.lights->dbuffer , inputData.nrc->dbuffer ( the sets 1 , 2 , 3 ) .
         //   the pipeline layout is { set 0 , textures , lamps , net } , the bind point is VK_PIPELINE_BIND_POINT_COMPUTE ( see RayQueryShadows::executePass ) .
         //   the size of the dispatch is the half of the screen : NRC::GeneralData of NRCManager::generalDataBuffer ( width , height ) , the group is 8 x 8 .
@@ -201,7 +206,7 @@ namespace mox{
 
             imageBar[14] = image("objectAmbientImage")->translateImage(read , stage);
 
-            std::array<VkBufferMemoryBarrier2 , 26> bufBar;
+            std::array<VkBufferMemoryBarrier2 , 32> bufBar;
 
             bufBar[0] = buffer("generalBuffer")->translateBuffer(uniformRead , stage);
             bufBar[1] = buffer("generalFeatures")->translateBuffer(uniformRead , stage);
@@ -225,19 +230,27 @@ namespace mox{
             bufBar[14] = buffer("tileLightIndices")->translateBuffer(read , stage);
             bufBar[15] = buffer("lightCountPerTile")->translateBuffer(read , stage);
 
-            // the net : the trace pass writes the samples , the backward pass reads them and adds into the gradients ( the matrices and the hash grid ) , the weights are only read
+            // the net : the trace pass writes the samples , the backward pass reads them and adds into the gradients ( the matrices and the hash grid ) , apply ( Adam ) rewrites the weights
             bufBar[16] = inputData.nrc->trainingSampleBuffer->translateBuffer(read | write , stage);
             bufBar[17] = inputData.nrc->generalDataBuffer->translateBuffer(read | write , stage);
-            bufBar[18] = inputData.nrc->hashGridBuffer->translateBuffer(read , stage);
+            bufBar[18] = inputData.nrc->hashGridBuffer->translateBuffer(read | write , stage);
             bufBar[19] = inputData.nrc->hashGridParamsBuffer->translateBuffer(read | write , stage);
             bufBar[20] = inputData.nrc->hashGridGeneralBuffer->translateBuffer(read , stage);
-            bufBar[21] = inputData.nrc->neuronHiddenBuffer->translateBuffer(read , stage);
-            bufBar[22] = inputData.nrc->neuronPerChannelBuffer->translateBuffer(read , stage);
+            bufBar[21] = inputData.nrc->neuronHiddenBuffer->translateBuffer(read | write , stage);
+            bufBar[22] = inputData.nrc->neuronPerChannelBuffer->translateBuffer(read | write , stage);
             bufBar[23] = inputData.nrc->neuronHiddenGradBuffer->translateBuffer(read | write , stage);
             bufBar[24] = inputData.nrc->neuronPerChannelGradBuffer->translateBuffer(read | write , stage);
             bufBar[25] = inputData.nrc->pointersBuffer->translateBuffer(uniformRead , stage);
 
-            auto dep = TypicalDependency<26 , 15>(imageBar.data() , bufBar.data());
+            // apply : Adam reads / writes the Parameter arrays ( w , m , v ) and goes through the float32 staging matrices
+            bufBar[26] = inputData.nrc->neuronParamsHiddenBuffer->translateBuffer(read | write , stage);
+            bufBar[27] = inputData.nrc->neuronParamsPerChannelBuffer->translateBuffer(read | write , stage);
+            bufBar[28] = inputData.nrc->gradStagingHiddenBuffer->translateBuffer(read | write , stage);
+            bufBar[29] = inputData.nrc->gradStagingOutputBuffer->translateBuffer(read | write , stage);
+            bufBar[30] = inputData.nrc->weightStagingHiddenBuffer->translateBuffer(read | write , stage);
+            bufBar[31] = inputData.nrc->weightStagingOutputBuffer->translateBuffer(read | write , stage);
+
+            auto dep = TypicalDependency<32 , 15>(imageBar.data() , bufBar.data());
 
             vkCmdPipelineBarrier2(cmd , &dep);
 
@@ -380,7 +393,7 @@ namespace mox{
                 }
 
                 // ------------------------------------------------------------ the shaders : the same four sets in both
-                for(const std::string &path : {inputData.tracePath , inputData.backwardPath}){
+                for(const std::string &path : {inputData.tracePath , inputData.backwardPath , inputData.applyPath}){
                     ShaderObjectType::CreateInfo info{};
                     info.context = context;
                     info.currentStage = VK_SHADER_STAGE_COMPUTE_BIT;

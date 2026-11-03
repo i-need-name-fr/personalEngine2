@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include "../vulkanContext/vulkanBase.hpp"
 #include "../Buffer2/GeneralBuffer.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
@@ -58,11 +59,15 @@ namespace mox
             inline static constexpr uint32_t INPUT_COUNT = GRID_LEVELS * F + 3;   // 8 + 3 = 11 ( roughness / metallic come with the specular )
             inline static constexpr uint32_t HIDDEN_COUNT = 64;
             inline static constexpr uint32_t OUTPUT_COUNT = 3;
-            inline static constexpr uint32_t PARAMS_PER_HIDDEN_NEURON = INPUT_COUNT + 1;
-            inline static constexpr uint32_t PARAMS_PER_CHANNEL = HIDDEN_COUNT + 1;
 
             inline static constexpr uint32_t INPUT_PADDED = 16;
             inline static constexpr uint32_t OUTPUT_PADDED = 16;
+
+            inline static constexpr uint32_t HIDDEN_WEIGHT_COUNT = HIDDEN_COUNT * INPUT_PADDED;
+            inline static constexpr uint32_t HIDDEN_PARAM_COUNT = HIDDEN_WEIGHT_COUNT + HIDDEN_COUNT;
+            inline static constexpr uint32_t OUTPUT_WEIGHT_COUNT = OUTPUT_PADDED * HIDDEN_COUNT;
+            inline static constexpr uint32_t OUTPUT_PARAM_COUNT = OUTPUT_WEIGHT_COUNT + OUTPUT_PADDED;
+            static_assert(INPUT_COUNT <= INPUT_PADDED && OUTPUT_COUNT <= OUTPUT_PADDED , "the real sizes must fit into the padded ones");
 
             inline static constexpr uint64_t W1_OFFSET = 0;
             inline static constexpr uint64_t B1_OFFSET = alignUp64(W1_OFFSET + HIDDEN_COUNT * INPUT_PADDED * 2ull);
@@ -70,9 +75,14 @@ namespace mox
             inline static constexpr uint64_t W2_OFFSET = 0;
             inline static constexpr uint64_t B2_OFFSET = alignUp64(W2_OFFSET + OUTPUT_PADDED * HIDDEN_COUNT * 2ull);
             inline static constexpr uint64_t OUTPUT_BYTES = alignUp64(B2_OFFSET + OUTPUT_PADDED * 2ull);
-            // the matrices in the OPTIMAL layout may take more than rows * columns * 2 bytes : until the real size is asked from vkConvertCooperativeVectorMatrixNV
-            // the buffers have twice the room
-            inline static constexpr uint64_t OPTIMAL_LAYOUT_MARGIN = 2;
+            inline static constexpr uint64_t TRAINING_MATRIX_BYTES = 3584ull;
+            inline static constexpr uint64_t B1_GRAD_OFFSET = TRAINING_MATRIX_BYTES;
+            inline static constexpr uint64_t B2_GRAD_OFFSET = TRAINING_MATRIX_BYTES;
+            inline static constexpr uint64_t W1_TRAIN_OFFSET = HIDDEN_BYTES;
+            inline static constexpr uint64_t W2_TRAIN_OFFSET = OUTPUT_BYTES;
+            inline static constexpr uint64_t HIDDEN_TOTAL_BYTES = alignUp64(W1_TRAIN_OFFSET + TRAINING_MATRIX_BYTES);
+            inline static constexpr uint64_t OUTPUT_TOTAL_BYTES = alignUp64(W2_TRAIN_OFFSET + TRAINING_MATRIX_BYTES);
+            static_assert(HIDDEN_BYTES == 2176 && OUTPUT_BYTES == 2112 , "the offsets are copied to coopVector.hlsl ( NRC_W1_TRAIN_OFFSET = HIDDEN_BYTES ... ) : change both");
 
             pDescriptorLayout layout{};
             pDescriptorBuffer2 dbuffer{};
@@ -89,8 +99,110 @@ namespace mox
             pDeviceStaticBuffer pointersBuffer{}; // the ADDRESSES of the four buffers above ( NRC::Pointers ) : the cooperative vector reads the matrices by the address
             pDeviceStaticBuffer trainingSampleBuffer{};
             pDeviceStaticBuffer generalDataBuffer{}; // one NRC::GeneralData : width , height of the training grid ( half resolution ) and validCount ( zero it before the trace pass )
+            // the plain float32 row-major matrices : the optimal layouts cannot be read / written by a shader , only vkCmdConvertCooperativeVectorMatrixNV goes between them and these ones
+            pDeviceStaticBuffer gradStagingHiddenBuffer{};   // 64 x 16 : the gradients of W1 after the conversion from TRAINING_OPTIMAL ( apply reads )
+            pDeviceStaticBuffer gradStagingOutputBuffer{};   // 16 x 64 : the gradients of W2
+            pDeviceStaticBuffer weightStagingHiddenBuffer{}; // 64 x 16 : the new W1 ( apply writes ) , the source of the conversion into INFERENCING_OPTIMAL and TRAINING_OPTIMAL
+            pDeviceStaticBuffer weightStagingOutputBuffer{}; // 16 x 64 : the new W2
+
+            // BEGIN convert commands
+            // the commands of the step ( the order is in NRCPass ) . the barriers between them are NOT here : every command needs the one before it to be finished
+            //   the barrier before / after a conversion : stage VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV , access SHADER_READ | SHADER_WRITE
+            //   the barrier before / after vkCmdFillBuffer : stage VK_PIPELINE_STAGE_2_CLEAR_BIT ( or ALL_TRANSFER ) , access TRANSFER_WRITE
+
+            // the gradients : hiddenGrads / outputGrads ( TRAINING_OPTIMAL , float16 ) -> gradStaging ( ROW_MAJOR , float32 ) : apply reads them . after backward , before apply
+            void recordConvertGradients(VkCommandBuffer cmd) const noexcept
+            {
+                const std::array<ConvertRecord , 2> records = {{
+                    {neuronHiddenGradBuffer->pBuffer , TRAINING_MATRIX_BYTES , VK_COMPONENT_TYPE_FLOAT16_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_TRAINING_OPTIMAL_NV , 0 ,
+                     gradStagingHiddenBuffer->pBuffer , HIDDEN_WEIGHT_COUNT * sizeof(float) , VK_COMPONENT_TYPE_FLOAT32_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR_NV , INPUT_PADDED * sizeof(float) ,
+                     HIDDEN_COUNT , INPUT_PADDED},
+                    {neuronPerChannelGradBuffer->pBuffer , TRAINING_MATRIX_BYTES , VK_COMPONENT_TYPE_FLOAT16_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_TRAINING_OPTIMAL_NV , 0 ,
+                     gradStagingOutputBuffer->pBuffer , OUTPUT_WEIGHT_COUNT * sizeof(float) , VK_COMPONENT_TYPE_FLOAT32_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR_NV , HIDDEN_COUNT * sizeof(float) ,
+                     OUTPUT_PADDED , HIDDEN_COUNT}
+                }};
+                recordConvert(cmd , records.data() , static_cast<uint32_t>(records.size()));
+            }
+
+            // the new weights : weightStaging ( ROW_MAJOR , float32 ) -> two float16 copies in the weight buffers : INFERENCING_OPTIMAL ( askNRC , forward ) and TRAINING_OPTIMAL ( mulTranspose of the backward ) .
+            // after apply , before the next trace . ALSO once before the very first frame : weightStaging starts with the initial weights , the weight buffers start with zeros
+            void recordConvertWeights(VkCommandBuffer cmd) const noexcept
+            {
+                const std::array<ConvertRecord , 4> records = {{
+                    {weightStagingHiddenBuffer->pBuffer , HIDDEN_WEIGHT_COUNT * sizeof(float) , VK_COMPONENT_TYPE_FLOAT32_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR_NV , INPUT_PADDED * sizeof(float) ,
+                     neuronHiddenBuffer->pBuffer + W1_OFFSET , HIDDEN_WEIGHT_COUNT * sizeof(uint16_t) , VK_COMPONENT_TYPE_FLOAT16_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL_NV , 0 ,
+                     HIDDEN_COUNT , INPUT_PADDED},
+                    {weightStagingHiddenBuffer->pBuffer , HIDDEN_WEIGHT_COUNT * sizeof(float) , VK_COMPONENT_TYPE_FLOAT32_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR_NV , INPUT_PADDED * sizeof(float) ,
+                     neuronHiddenBuffer->pBuffer + W1_TRAIN_OFFSET , TRAINING_MATRIX_BYTES , VK_COMPONENT_TYPE_FLOAT16_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_TRAINING_OPTIMAL_NV , 0 ,
+                     HIDDEN_COUNT , INPUT_PADDED},
+                    {weightStagingOutputBuffer->pBuffer , OUTPUT_WEIGHT_COUNT * sizeof(float) , VK_COMPONENT_TYPE_FLOAT32_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR_NV , HIDDEN_COUNT * sizeof(float) ,
+                     neuronPerChannelBuffer->pBuffer + W2_OFFSET , OUTPUT_WEIGHT_COUNT * sizeof(uint16_t) , VK_COMPONENT_TYPE_FLOAT16_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL_NV , 0 ,
+                     OUTPUT_PADDED , HIDDEN_COUNT},
+                    {weightStagingOutputBuffer->pBuffer , OUTPUT_WEIGHT_COUNT * sizeof(float) , VK_COMPONENT_TYPE_FLOAT32_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR_NV , HIDDEN_COUNT * sizeof(float) ,
+                     neuronPerChannelBuffer->pBuffer + W2_TRAIN_OFFSET , TRAINING_MATRIX_BYTES , VK_COMPONENT_TYPE_FLOAT16_KHR , VK_COOPERATIVE_VECTOR_MATRIX_LAYOUT_TRAINING_OPTIMAL_NV , 0 ,
+                     OUTPUT_PADDED , HIDDEN_COUNT}
+                }};
+                recordConvert(cmd , records.data() , static_cast<uint32_t>(records.size()));
+            }
+
+            // the gradients of the matrices ( the whole buffers : the matrix and the bias gradients ) start the next step from zero . the gradients of the hash grid are zeroed by apply itself ( Parameter.grad )
+            void recordZeroGradients(VkCommandBuffer cmd) const noexcept
+            {
+                vkCmdFillBuffer(cmd , neuronHiddenGradBuffer->buffer , 0 , neuronHiddenGradBuffer->getBufferSize() , 0);
+                vkCmdFillBuffer(cmd , neuronPerChannelGradBuffer->buffer , 0 , neuronPerChannelGradBuffer->getBufferSize() , 0);
+            }
+            // END convert commands
 
         private:
+
+            // one matrix of vkCmdConvertCooperativeVectorMatrixNV : the source and the destination are ADDRESSES ( the sizes are in bytes , the strides too : the optimal layouts take 0 )
+            struct ConvertRecord
+            {
+                VkDeviceAddress src;
+                size_t srcSize;
+                VkComponentTypeKHR srcType;
+                VkCooperativeVectorMatrixLayoutNV srcLayout;
+                size_t srcStride;
+                VkDeviceAddress dst;
+                size_t dstSize;
+                VkComponentTypeKHR dstType;
+                VkCooperativeVectorMatrixLayoutNV dstLayout;
+                size_t dstStride;
+                uint32_t rows;
+                uint32_t columns;
+            };
+
+            // all the records in ONE command ( the command takes an array ) . the matrices of one call do not depend on each other
+            static void recordConvert(VkCommandBuffer cmd , const ConvertRecord* records , const uint32_t count) noexcept
+            {
+                constexpr uint32_t maxCount = 4;
+                std::array<size_t , maxCount> dstSizes{};
+                std::array<VkConvertCooperativeVectorMatrixInfoNV , maxCount> infos{};
+
+                for(uint32_t i = 0 ; i < count && i < maxCount ; i++)
+                {
+                    const ConvertRecord& r = records[i];
+                    dstSizes[i] = r.dstSize;
+
+                    VkConvertCooperativeVectorMatrixInfoNV& info = infos[i];
+                    info.sType = VK_STRUCTURE_TYPE_CONVERT_COOPERATIVE_VECTOR_MATRIX_INFO_NV;
+                    info.srcSize = r.srcSize;
+                    info.srcData.deviceAddress = r.src;
+                    info.pDstSize = &dstSizes[i];
+                    info.dstData.deviceAddress = r.dst;
+                    info.srcComponentType = r.srcType;
+                    info.dstComponentType = r.dstType;
+                    info.numRows = r.rows;
+                    info.numColumns = r.columns;
+                    info.srcLayout = r.srcLayout;
+                    info.srcStride = r.srcStride;
+                    info.dstLayout = r.dstLayout;
+                    info.dstStride = r.dstStride;
+                }
+
+                cmdConvertCooperativeVectorMatrixNV(cmd , count < maxCount ? count : maxCount , infos.data());
+            }
+
             
             [[nodiscard]] ErrorDataOutput<void> _implProcessInit(const CreateInfo &input) noexcept
             {
@@ -136,32 +248,44 @@ namespace mox
 
 
                     {
+                        // hidden layer : the matrix W1 64 x 16 row after row ( the columns over INPUT_COUNT are the padding : zeros , they never get a gradient ) , then the 64 biases
+                        _neuronParamsHidden.reserve(HIDDEN_PARAM_COUNT);
                         for(uint32_t n = 0 ; n < HIDDEN_COUNT ; n++)
                         {
-                            for(uint32_t c = 0 ; c < PARAMS_PER_HIDDEN_NEURON ; c++)
+                            for(uint32_t c = 0 ; c < INPUT_PADDED ; c++)
                             {
                                 ::NRC::Parameter p{};
                                 p.grad = 0.0f;
-                                // the bias is the last one of the neuron and starts at 0
-                                p.w = (c == INPUT_COUNT) ? 0.0f : hiddenInit(engine);
+                                p.w = (c < INPUT_COUNT) ? hiddenInit(engine) : 0.0f;
                                 p.m = 0.0f;
                                 p.v = 0.0f;
                                 _neuronParamsHidden.push_back(p);
                             }
                         }
-
-                        // the output layer : per channel ( R , G , B ) [ w0 .. w63 , bias ]
-                        for(uint32_t ch = 0 ; ch < OUTPUT_COUNT ; ch++)
+                        for(uint32_t n = 0 ; n < HIDDEN_COUNT ; n++)
                         {
-                            for(uint32_t c = 0 ; c < PARAMS_PER_CHANNEL ; c++)
+                            ::NRC::Parameter p{};   // the biases start at 0
+                            _neuronParamsHidden.push_back(p);
+                        }
+
+                        // output layer : the matrix W2 16 x 64 ( the rows over OUTPUT_COUNT are the padding : zeros ) , then the 16 biases
+                        _neuronParamsPerChannel.reserve(OUTPUT_PARAM_COUNT);
+                        for(uint32_t ch = 0 ; ch < OUTPUT_PADDED ; ch++)
+                        {
+                            for(uint32_t c = 0 ; c < HIDDEN_COUNT ; c++)
                             {
                                 ::NRC::Parameter p{};
                                 p.grad = 0.0f;
-                                p.w = (c == HIDDEN_COUNT) ? 0.0f : outputInit(engine);
+                                p.w = (ch < OUTPUT_COUNT) ? outputInit(engine) : 0.0f;
                                 p.m = 0.0f;
                                 p.v = 0.0f;
                                 _neuronParamsPerChannel.push_back(p);
                             }
+                        }
+                        for(uint32_t ch = 0 ; ch < OUTPUT_PADDED ; ch++)
+                        {
+                            ::NRC::Parameter p{};
+                            _neuronParamsPerChannel.push_back(p);
                         }
 
                         {
@@ -251,25 +375,27 @@ namespace mox
 
                     {
 
-                        // W1 and b1 in float16 ( 2176 bytes ) , the conversion command fills it from the float32 matrices
+                        // W1 and b1 in float16 : [ W1 inference ][ b1 ][ W1 training ] , the conversion command fills the matrices from the float32 staging , the biases ( zeros at the start ) are written by apply
                         DeviceStaticBuffer::CreateInfo info{};
                         info.context = context;
                         info.usage = flags;
-                        info.size = HIDDEN_BYTES * OPTIMAL_LAYOUT_MARGIN;
+                        info.size = HIDDEN_TOTAL_BYTES;
+                        std::vector<uint32_t> zeros(info.size / sizeof(uint32_t) , 0u);
 
-                        neuronHiddenBuffer = std::make_shared<DeviceStaticBuffer>(info);
+                        neuronHiddenBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(zeros));
                     }
 
 
                     {
 
-                        // W2 ( 16 rows , 3 of them used ) and b2 in float16 ( 2112 bytes )
+                        // W2 ( 16 rows , 3 of them used ) and b2 in float16 : [ W2 inference ][ b2 ][ W2 training ]
                         DeviceStaticBuffer::CreateInfo info{};
                         info.context = context;
                         info.usage = flags;
-                        info.size = OUTPUT_BYTES * OPTIMAL_LAYOUT_MARGIN;
+                        info.size = OUTPUT_TOTAL_BYTES;
+                        std::vector<uint32_t> zeros(info.size / sizeof(uint32_t) , 0u);
 
-                        neuronPerChannelBuffer = std::make_shared<DeviceStaticBuffer>(info);
+                        neuronPerChannelBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(zeros));
                     }
 
                     {
@@ -277,7 +403,7 @@ namespace mox
                         {
                             DeviceStaticBuffer::CreateInfo info{};
                             info.context = context;
-                            info.usage = flags;
+                            info.usage = flags | VK_BUFFER_USAGE_TRANSFER_DST_BIT; // TRANSFER_DST : vkCmdFillBuffer zeroes the gradients every step
                             info.size = neuronHiddenBuffer->getBufferSize() * 2;
                             std::vector<uint32_t> zeros(info.size / sizeof(uint32_t) , 0u);
                             neuronHiddenGradBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(zeros));
@@ -286,10 +412,36 @@ namespace mox
                         {
                             DeviceStaticBuffer::CreateInfo info{};
                             info.context = context;
-                            info.usage = flags;
+                            info.usage = flags | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
                             info.size = neuronPerChannelBuffer->getBufferSize() * 2;
                             std::vector<uint32_t> zeros(info.size / sizeof(uint32_t) , 0u);
                             neuronPerChannelGradBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(zeros));
+                        }
+
+                        // the float32 row-major staging matrices ( 4096 bytes each ) : the gradients start with zeros , the weights with the starting weights of the Parameter arrays
+                        // ( the first HIDDEN_WEIGHT_COUNT / OUTPUT_WEIGHT_COUNT elements are exactly the matrix , row after row ) : one conversion before the first frame fills the weights of the shaders
+                        {
+                            DeviceStaticBuffer::CreateInfo info{};
+                            info.context = context;
+                            info.usage = flags;
+
+                            std::vector<float> gradsHidden(HIDDEN_WEIGHT_COUNT , 0.0f);
+                            info.size = sizeof(float) * gradsHidden.size();
+                            gradStagingHiddenBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(gradsHidden));
+
+                            std::vector<float> gradsOutput(OUTPUT_WEIGHT_COUNT , 0.0f);
+                            info.size = sizeof(float) * gradsOutput.size();
+                            gradStagingOutputBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(gradsOutput));
+
+                            std::vector<float> weightsHidden(HIDDEN_WEIGHT_COUNT);
+                            for(uint32_t i = 0 ; i < HIDDEN_WEIGHT_COUNT ; i++) weightsHidden[i] = _neuronParamsHidden[i].w;
+                            info.size = sizeof(float) * weightsHidden.size();
+                            weightStagingHiddenBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(weightsHidden));
+
+                            std::vector<float> weightsOutput(OUTPUT_WEIGHT_COUNT);
+                            for(uint32_t i = 0 ; i < OUTPUT_WEIGHT_COUNT ; i++) weightsOutput[i] = _neuronParamsPerChannel[i].w;
+                            info.size = sizeof(float) * weightsOutput.size();
+                            weightStagingOutputBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(weightsOutput));
                         }
 
                         // the addresses ( every buffer was made with SHADER_DEVICE_ADDRESS , the address is in pBuffer )
@@ -316,13 +468,13 @@ namespace mox
                         general.width = context->sc->extent.width / 2;
                         general.height = context->sc->extent.height / 2;
                         general.validCount = 0;
-                        general.padding = 0.0f;
+                        general.stepCount = 0;
                         std::vector<::NRC::GeneralData> generalVector{general};
                         generalDataBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(generalVector));
                     }
 
                     {
-                        std::vector<DescriptorLayoutData> data(10);
+                        std::vector<DescriptorLayoutData> data(14);
                         data[0] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
                         data[1] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
                         data[2] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
@@ -334,6 +486,11 @@ namespace mox
                         // the addresses of the matrices ( NrcPointers in coopVector.hlsl ) : a UNIFORM buffer , the shader reads the four addresses from it
                         data[8] = {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , .count = 1};
                         data[9] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
+                        // the staging matrices : gradients of W1 , W2 , new weights of W1 , W2
+                        data[10] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
+                        data[11] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
+                        data[12] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
+                        data[13] = {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , .count = 1};
 
 
                         DescriptorLayout::CreateInfo info{};
@@ -347,7 +504,7 @@ namespace mox
                     }
 
                     {
-                        std::vector<DescriptorData2> data(10);
+                        std::vector<DescriptorData2> data(14);
                         data[0] = mox::DescriptorData2::createData(trainingSampleBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 0 , 0);
                         data[1] = mox::DescriptorData2::createData(hashGridBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 1 , 0);
                         data[2] = mox::DescriptorData2::createData(hashGridParamsBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 2 , 0);
@@ -358,6 +515,10 @@ namespace mox
                         data[7] = mox::DescriptorData2::createData(neuronPerChannelBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 7 , 0);
                         data[8] = mox::DescriptorData2::createData(pointersBuffer.get() , VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER , 8 , 0);
                         data[9] = mox::DescriptorData2::createData(generalDataBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 9 , 0);
+                        data[10] = mox::DescriptorData2::createData(gradStagingHiddenBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 10 , 0);
+                        data[11] = mox::DescriptorData2::createData(gradStagingOutputBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 11 , 0);
+                        data[12] = mox::DescriptorData2::createData(weightStagingHiddenBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 12 , 0);
+                        data[13] = mox::DescriptorData2::createData(weightStagingOutputBuffer.get() , VK_DESCRIPTOR_TYPE_STORAGE_BUFFER , 13 , 0);
 
                         DescriptorBuffer2::CreateInfo info{};
                         info.context = context;
@@ -390,6 +551,10 @@ namespace mox
                 pointersBuffer = std::move(input.pointersBuffer);
                 trainingSampleBuffer = std::move(input.trainingSampleBuffer);
                 generalDataBuffer = std::move(input.generalDataBuffer);
+                gradStagingHiddenBuffer = std::move(input.gradStagingHiddenBuffer);
+                gradStagingOutputBuffer = std::move(input.gradStagingOutputBuffer);
+                weightStagingHiddenBuffer = std::move(input.weightStagingHiddenBuffer);
+                weightStagingOutputBuffer = std::move(input.weightStagingOutputBuffer);
             }
 
             void processDelete() noexcept
@@ -409,6 +574,10 @@ namespace mox
                 pointersBuffer = nullptr;
                 trainingSampleBuffer = nullptr;
                 generalDataBuffer = nullptr;
+                gradStagingHiddenBuffer = nullptr;
+                gradStagingOutputBuffer = nullptr;
+                weightStagingHiddenBuffer = nullptr;
+                weightStagingOutputBuffer = nullptr;
 
                 layout = nullptr;
             }
