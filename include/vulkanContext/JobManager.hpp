@@ -15,7 +15,7 @@
 #include <vector>
 #include <string>
 #include <memory>
-#include "vulkanBase.hpp"
+#include "Instance.hpp"
 
 namespace mox
 {

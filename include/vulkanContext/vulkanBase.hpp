@@ -27,7 +27,7 @@
 #include "Queue.hpp"
 #include "GPUMultiThread.hpp"
 #include "vmaAllocator.hpp"
-
+#include "JobManager.hpp"
 
 namespace mox{
 
