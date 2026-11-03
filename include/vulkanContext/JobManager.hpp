@@ -9,6 +9,12 @@
 #include <array>
 #include <functional>
 #include <condition_variable>
+#include <mutex>
+#include <shared_mutex>
+#include <deque>
+#include <vector>
+#include <string>
+#include <memory>
 #include "vulkanBase.hpp"
 
 namespace mox
@@ -20,12 +26,13 @@ namespace mox
     };
 
 
-    using moxJobManagerFunctionType = std::function<void(std::atomic<uint32_t>)>;
+    using moxJobManagerFunctionType = std::function<uint32_t()>;
 
     struct FunctionSource
     {
         moxJobManagerFunctionType function;
         std::string name{};
+        std::shared_ptr<FunctionParameter> parameter{};
     };
 
 
@@ -42,51 +49,137 @@ namespace mox
         SetTypicalOperators(JobManager);
         SetTypicalTransferOperators(JobManager);
 
+        struct CreateInfo
+        {
 
+        };
+
+        explicit JobManager(const CreateInfo& info)
+        {
+            state = std::make_shared<State>();
+            for(uint32_t i = 0 ; i < MOX_JOB_MANAGER_THREAD_COUNT ; i++)
+                std::thread(&JobManager::_implProcessThread , state).detach();
+        }
+
+        ~JobManager() noexcept
+        {
+            processDelete();
+        }
     private:
+
+        inline static constexpr uint32_t MOX_JOB_MANAGER_THREAD_COUNT = 10;
+
+        struct State
+        {
+            mutable std::shared_mutex m;
+            std::condition_variable_any var{};
+            std::unordered_map<std::string , std::shared_ptr<FunctionParameter>> functionStatuses;
+            std::deque<FunctionSource> jobs{};
+            std::stop_source stop{};
+        };
 
         void processCopy(JobManager&& input) noexcept
         {
-
+            processDelete();
+            state = std::move(input.state);
         }
 
         void processDelete() noexcept
         {
+            if(state) state->stop.request_stop();
+            state.reset();
+        }
 
+        static void _implProcessThread(std::shared_ptr<State> s) noexcept
+        {
+            const std::stop_token tk = s->stop.get_token();
+            while(true)
+            {
+                FunctionSource job{};
+
+                {
+                    std::unique_lock guard(s->m);
+                    if(!s->var.wait(guard , tk , [&](){return !s->jobs.empty();})) return;
+
+                    job = std::move(s->jobs.front());
+                    s->jobs.pop_front();
+                }
+
+                if(job.function)
+                {
+                    job.parameter->status.store(moxFunctionNotFinished , std::memory_order::release);
+                    uint32_t result = moxFunctionFinishedWithError;
+                    try
+                    {
+                        result = job.function();
+                    }
+                    catch(...)
+                    {
+                        result = moxFunctionFinishedWithError;
+                    }
+                    job.parameter->status.store(result , std::memory_order::release);
+                    job.parameter->status.notify_all();
+                }
+            }
+        }
+
+        void _implWaitForFunc(const std::string& name) const noexcept
+        {
+            std::shared_ptr<FunctionParameter> parameter{};
+            {
+                if(!state) return;
+                std::shared_lock lock(state->m);                   // only to find the element
+                const auto it = state->functionStatuses.find(name);
+                if(it == state->functionStatuses.end()) return;
+                parameter = it->second;                            // the status cannot die while we wait
+            }
+            uint32_t current = parameter->status.load(std::memory_order::acquire);
+            while(current != moxFunctionFinished && current != moxFunctionFinishedWithError)
+            {
+                parameter->status.wait(current);                   // sleeps while the value == current
+                current = parameter->status.load(std::memory_order::acquire);
+            }
         }
 
         [[nodiscard]] uint32_t _implGetFunctionStatus(const std::string& name ) noexcept
         {
-            if(!functionStatuses.contains(name))
+            std::shared_ptr<FunctionParameter> parameter{};
             {
-                return moxFunctionNotExists;
+                if(!state) return moxFunctionNotExists;
+                std::shared_lock lock(state->m);
+                const auto it = state->functionStatuses.find(name);
+                if(it == state->functionStatuses.end()) return moxFunctionNotExists;
+                parameter = it->second;
             }
 
-            const uint32_t status = functionStatuses[name].status.load(std::memory_order::acquire);
-            if(status == moxFunctionFinished)
+            const uint32_t status = parameter->status.load(std::memory_order::acquire);
+            if(status == moxFunctionFinished || status == moxFunctionFinishedWithError)
             {
-                std::lock_guard<std::shared_mutex> guard(m);
-                functionStatuses.erase(name);
+                std::unique_lock lock(state->m);
+                const auto it = state->functionStatuses.find(name);
+                // maybe the same name was added again in the meantime : erase only the one we have read
+                if(it != state->functionStatuses.end() && it->second == parameter) state->functionStatuses.erase(it);
             }
             return status;
         }
 
         void _implAddJob(const moxJobManagerFunctionType function , const std::string name) noexcept
         {
+            auto parameter = std::make_shared<FunctionParameter>();
+            parameter->status.store(moxFunctionNotStarted , std::memory_order::relaxed);
+            if(!state) return;
             {
-                std::lock_guard<std::shared_mutex> guard(m);
-                jobs.push_back({function , name});
-                functionStatuses.try_emplace(name , moxFunctionNotStarted);
-                var.notify_one();
+                std::unique_lock guard(state->m);
+                state->functionStatuses.insert_or_assign(name , parameter);
+                state->jobs.push_back({function , name , parameter});
             }
+            state->var.notify_one();
         }
 
-        
-
-        std::shared_mutex m;
-        std::condition_variable var{};
-        std::unordered_map<std::string , FunctionParameter> functionStatuses;
-        std::vector<FunctionSource> jobs{};
-        std::array<std::jthread , 10> threads{};
+        std::shared_ptr<State> state{};
     };
+
+    using pJobManager = std::shared_ptr<JobManager>;
 }
+
+
