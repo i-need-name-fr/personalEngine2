@@ -151,19 +151,12 @@ namespace mox{
 
             VkPhysicalDeviceFeatures features{};
             features.samplerAnisotropy = VK_TRUE;
-            // gFragment.hlsl writes the G buffer through storage images and storage
-            // buffers , which the fragment stage may not do without this
             features.fragmentStoresAndAtomics = VK_TRUE;
             features.vertexPipelineStoresAndAtomics = VK_TRUE;
-            // the cull shader writes a non zero firstInstance into every indirect
-            // draw , and that is only legal with this feature on. The value lives in
-            // a GPU buffer , so the validation layer never sees it - without this the
-            // draws quietly read instance 0 and the whole grid stacked into one cube
             features.drawIndirectFirstInstance = VK_TRUE;
-            // the cull shader fills one draw per mesh into the indirect buffer ( drawCount > 1 )
             features.multiDrawIndirect = VK_TRUE;
-            // vkCmdSetDepthBias with a clamp that is not 0 ( the G buffer pass ) is legal only with it
             features.depthBiasClamp = VK_TRUE;
+            features.shaderInt64 = VK_TRUE;
 
             VkDeviceCreateInfo info{};
             info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

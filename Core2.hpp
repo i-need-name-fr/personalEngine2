@@ -37,6 +37,7 @@
 #include "include/RTCompileObjects/RTCompileObjects.hpp"
 #include "include/LightManager/LightManager.hpp"
 #include "include/NRCManager/NRCManager.hpp"
+#include "include/generalPipelines2/NRCPass.hpp"
 #include "include/generalPipelines2/RadianceCascade.hpp"
 
 namespace gui = ImGui;
@@ -127,6 +128,7 @@ namespace mox{
             shadows = nullptr;
             pt = nullptr;
             rt = nullptr;
+            nrcPass = nullptr;
             ao = nullptr;
             forward = nullptr;
             render = nullptr;
@@ -393,6 +395,21 @@ namespace mox{
                 }
 
                 {
+                    // the training of the Neural Radiance Cache : the path tracing of the short paths , the backward pass , Adam
+                    NRCPass::CreateInfo info{};
+                    info.context = context.get();
+                    info.as = tlas.get();
+                    info.manager = manager.get();
+                    info.lights = light_m.get();
+                    info.nrc = nrc.get();
+                    info.tracePath = getShaderPath("../Shaders/NRC/trainingShader");
+                    info.backwardPath = getShaderPath("../Shaders/NRC/backstepShader");
+                    info.applyPath = getShaderPath("../Shaders/NRC/applyShader");
+
+                    nrcPass = std::make_shared<NRCPass>(info);
+                }
+
+                {
                     // the path tracer : the primary rays start in its ray generation shader , so it replaces the deferred render and the ray tracing pass
                     PathTracing::CreateInfo info{};
                     info.as = tlas.get();
@@ -443,6 +460,7 @@ namespace mox{
                     gBufferPass ,        // the g buffer
                     forward.get() ,      // the lamps of every tile
                     rc.get() ,           // Radiance Cascade : the probes on the surfaces , their rays , the merge of the cascades
+                    nrcPass.get() ,      // the training of the Neural Radiance Cache ( the ray tracing asks the net )
                     rt.get(),
                     ao.get() ,           // the occlusion
                     bilateral.get() ,    // the filter of the shadows and of the occlusion
@@ -531,6 +549,7 @@ namespace mox{
             featureSettings.skyboxSampleCount = 4u;
             featureSettings.sunShadowFade = 200.0f;
             featureSettings.shadowMinimum = 0.0f;
+            featureSettings.NRC = false;
 
             fogSettings = FogVolume{};
             fogSettings.center = glm::vec3(0.0f);
@@ -1236,6 +1255,7 @@ namespace mox{
                 {
                     if(gui::Button(info.ReSTIRGI ? "ReSTIR GI : ON" : "ReSTIR GI : OFF")){
                         info.ReSTIRGI = !info.ReSTIRGI;
+                        info.NRC = false;
                         info.RadianceCascade = false;
                     }
                 }
@@ -1263,8 +1283,21 @@ namespace mox{
                     if(gui::Button(info.RadianceCascade ? "Radiance Cascade: ON" : "Radiance Cascade: OFF")){
                         info.RadianceCascade = !info.RadianceCascade;
                         info.ReSTIRGI = false;
+                        info.NRC = false;
                     }
                 }
+
+                gui::Separator();
+                gui::BeginDisabled(!info.RT);
+                {
+                    if(gui::Button(info.NRC ? "NRC ON" : "NRC OFF"))
+                    {
+                        info.ReSTIRGI = false;
+                        info.RadianceCascade = false;
+                        info.NRC = !info.NRC;
+                    }
+                }
+                gui::EndDisabled();
             }
             gui::EndDisabled();
             gui::Separator();
@@ -1316,6 +1349,7 @@ namespace mox{
         pRayTracing rt{};
         pPathTracing pt{};
         pRadianceCascade rc{};
+        pNRCPass nrcPass{};
 
         std::vector<pMesh2> meshes{};
         std::vector<pModel3> models{};

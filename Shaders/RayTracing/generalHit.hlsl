@@ -100,6 +100,8 @@
 // set 4 : the NRCManager ( the net : NRC::askNRC( P , N ) gives the light that arrives at the point , without the albedo )
 #define NRC_SET 4
 #include "../NRC/nrcQuery.hlsl"
+// 1 : DEBUG , the indirect light of NRC is not the answer of the net , but the label of the training of the pixel ( look at the picture and compare it with the path tracer )
+#define NRC_SHOW_LABELS 0
 
 struct LightData{
     float3 diffuse;
@@ -1376,6 +1378,26 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 totalIndirect = rcResult;
             }
 
+        }else if(features.NRC)
+        {
+            // the net answers with the light that ARRIVES ( no albedo ) , totalIndirect has the albedo in it like in the other branches : it is divided by the albedo below
+#if NRC_SHOW_LABELS
+            // DEBUG : not the net , but the label it learns from ( one noisy path of the training per pixel of the training grid )
+            const uint2 nrcSize = uint2(nrcGeneral[0].width , nrcGeneral[0].height);
+            const uint2 labelPixel = min(uint2(float2(pixel) * float2(nrcSize) / float2(size)) , nrcSize - 1u);
+            const NRC::_TrainingSample label = trainingBuffer[bufferIndex(labelPixel , nrcSize.x , nrcSize.y) * MOX_NRC_MAX_BOUNCE_COUNT];
+            const float3 raw = (label.valid == MOX_NRC_VALID_SAMPLE) ? label.radiance : float3(0.0f , 0.0f , 0.0f);
+#else
+            const float3 raw =  NRC::askNRC(info.P , info.N);
+#endif
+            if(!all(isfinite(raw)))
+            {
+                totalIndirect = float3(1.0f , 0.0f , 1.0f);
+            }
+            else
+            {
+                totalIndirect =raw  * info.albedo * (1.0f - info.metallic);
+            }
         }
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour

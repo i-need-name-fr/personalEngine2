@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <cmath>
+#include <format>
 #include "../vulkanContext/vulkanBase.hpp"
 #include "../Buffer2/GeneralBuffer.hpp"
 #include "../DescriptorBuffer2/DescriptorBuffer2.hpp"
@@ -311,7 +313,8 @@ namespace mox
                         for(uint32_t id = 0 ; id < GRID_LEVELS ; id++)
                         {
                             ::NRC::HashGridInfo info{};
-                            info.cellSize = 16.0f / static_cast<float>(1u << id);
+                            // the cells of the levels : 8 , 4 , 2 , 1 meters ( T = 8 , 16 , 32 , 64 ) : the grid of every level repeats with the period T * cellSize = 64 meters
+                            info.cellSize = 8.0f / static_cast<float>(1u << id);
                             info.T = 4u * (2u << id);
                             info.offset = _hashGridParamsVector.size();
                             _gridInfo.push_back(info);

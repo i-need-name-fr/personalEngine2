@@ -13,23 +13,18 @@ static const int NRC_LAYOUT_COLUMN_MAJOR = 1;
 static const int NRC_LAYOUT_INFERENCING_OPTIMAL = 2;
 static const int NRC_LAYOUT_TRAINING_OPTIMAL = 3;
 
-// the offsets in BYTES inside the weight buffers : the same numbers as W1_OFFSET , B1_OFFSET , W2_OFFSET , B2_OFFSET of the NRCManager ( keep them equal )
 static const int NRC_W1_OFFSET = 0;
 static const int NRC_B1_OFFSET = 2048;
 static const int NRC_W2_OFFSET = 0;
 static const int NRC_B2_OFFSET = 2048;
-// the backward pass multiplies by the TRANSPOSED matrices and asks for TRAINING_OPTIMAL : the second copy of the weights ( converted into that layout ) lies in the same buffer after the bias
-// ( HIDDEN_BYTES / OUTPUT_BYTES of the NRCManager ; 64x16 and 16x64 halves take 3584 bytes there )
 static const int NRC_W1_TRAIN_OFFSET = 2176;
 static const int NRC_W2_TRAIN_OFFSET = 2112;
-// the gradient matrices are in TRAINING_OPTIMAL : 64x16 / 16x64 half numbers take 3584 bytes there ( the driver answer of vkConvertCooperativeVectorMatrixNV , it is not 2048 ) , so the bias gradients go AFTER them
 static const int NRC_B1_GRAD_OFFSET = 3584;
 static const int NRC_B2_GRAD_OFFSET = 3584;
+static const float NRC_GRAD_SCALE = 1.0f / 16.0f;
 
-// the buffers are given to the shader as ADDRESSES ( a uniform buffer with two numbers ) : the matrix operations take a pointer and an offset in BYTES from it
 struct NrcBlob { uint data[1 << 20]; };
 typedef vk::BufferPointer<NrcBlob , 64> NrcPtr;
-// the same four addresses as NRC::Pointers of shaderStructure.h ( the C++ side fills them from the buffers of the NRCManager )
 struct NrcPointers
 {
     NrcPtr hiddenWeights;   // neuronHiddenBuffer : W1 and b1 ( float16_t ) , trace / backward only READ it , apply WRITES the bias ( the matrices are written by vkCmdConvertCooperativeVectorMatrixNV )

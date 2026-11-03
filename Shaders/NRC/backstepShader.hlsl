@@ -67,7 +67,8 @@ void processUpdate(const NRC::_TrainingSample input , const bool valid)
     const float3 NRC_result = float3(NRC::softplus(_nrcAnswer.x) , NRC::softplus(_nrcAnswer.y) , NRC::softplus(_nrcAnswer.z));
 
     // now we find the dL/dout
-    const float3 dL_dout = 2.0f * (NRC_result - input.radiance) * (valid ? 1.0f : 0.0f);
+    const float3 dL_dprev = 2.0f * (NRC_result - input.radiance) / (NRC_result * NRC_result + 1e-3f);
+    const float3 dL_dout = dL_dprev * (valid ? NRC_GRAD_SCALE : 0.0f);
     CoopOut firstLayerInput = constructOut(float16_t(dL_dout.x) * float16_t(derivativeSoftplus(_nrcAnswer.x)), float16_t(dL_dout.y) * float16_t(derivativeSoftplus(_nrcAnswer.y)) , float16_t(dL_dout.z) *float16_t(derivativeSoftplus(_nrcAnswer.z)) , 0.0f , 0.0f , 0.0f , 0.0 , 0.0, 0.0, 0.0 ,0.0 ,0.0 ,0.0 ,0.0 ,0.0 ,0.0);
     outerProductOutHidden(nrcPtr.outputGrads.Get().data , 0 , firstLayerInput , h , NRC_LAYOUT_TRAINING_OPTIMAL , NRC_F16 , NRC_HIDDEN_SIZE * 2);
     CoopHidden dL_dh = mulTransposeOutHidden(firstLayerInput , NRC_F16 , nrcPtr.outputWeights.Get().data , NRC_W2_TRAIN_OFFSET , NRC_F16 ,
@@ -79,6 +80,7 @@ void processUpdate(const NRC::_TrainingSample input , const bool valid)
     CoopIn inputCoop = mulTransposeHiddenIn(dz1 , NRC_F16 , nrcPtr.hiddenWeights.Get().data , NRC_W1_TRAIN_OFFSET , NRC_F16 ,
                                             NRC_IN_SIZE , NRC_HIDDEN_SIZE, NRC_LAYOUT_TRAINING_OPTIMAL, // we change the M and K since we matrix is transposed
                                             true , NRC_IN_SIZE * 2 , 0);
+
 
     outerProductHiddenIn(nrcPtr.hiddenGrads.Get().data , 0 , dz1 , x , NRC_LAYOUT_TRAINING_OPTIMAL , NRC_F16 , NRC_IN_SIZE * 2);
     reduceSumHidden(nrcPtr.hiddenGrads.Get().data , NRC_B1_GRAD_OFFSET , dz1);

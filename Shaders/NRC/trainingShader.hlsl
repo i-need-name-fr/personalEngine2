@@ -430,8 +430,6 @@ float calculateShadowInSphere(inout uint seed , lg::LightSource light , const fl
     return calculateShadowAtt(offsetRay(P , N , generalBuffer.playerPosition) , dir , sampleDistance);
 }
 
-// the shadow of a lamp for the INDIRECT light ( the lamps that light the hits of the GI , Radiance Cascade , the reflections and the bounces of the path tracer ) : the ray goes to the
-// CENTRE of the lamp , not to a random point of its sphere . with a big sphere the random point is on the other side of a wall , and the light of a lamp under the floor leaked through
 float calculateShadowToCenter(lg::LightSource light , const float3 P , const float3 N){
     const float3 toLight = light.position - P;
     const float distance = length(toLight);
@@ -440,8 +438,6 @@ float calculateShadowToCenter(lg::LightSource light , const float3 P , const flo
     return calculateShadows(offsetRay(P , N , generalBuffer.playerPosition) , dir , distance);
 }
 
-// how much of the sky the point sees : 0 ( covered , a room ) ... 1 ( open ) . the share of the rays of the cone around the up direction that left the scene . it is a WEIGHT , not a yes / no :
-// with a few rays the yes / no flickers at the border of a cover , the weight changes in steps
 float skyVisibilityAt(const float3 P , const float3 N , inout uint seed)
 {
     const uint sampleCount = features.skyboxSampleCount;
@@ -624,11 +620,8 @@ float3 computeDirectAt(GeneralObjectInfo data, inout uint seed, RayQuery<RAY_FLA
         lg::LightSource light = lightBuffer[lightIndices[id]];
         float3 diffuse, specular;
 
-        const float3 V = normalize(rq.WorldRayDirection());
-        data.V = V;
         float3 L = light.position - data.P;
         L = normalize(L);
-        // the centre of the lamp , not a random point of its sphere ( the indirect light : a big sphere reached through the walls )
         float3 lightPos = light.position;
         float3 realL = lightPos - data.P;
         const float dist = length(realL);
@@ -750,7 +743,6 @@ GeneralObjectInfo readHitData(RayQuery<RAY_FLAG_NONE> rq , out float objectAO){
     const float3x3 TBN = float3x3(T , B , N);
 
     const float3 hitPoint = rq.WorldRayOrigin() + rq.WorldRayDirection() * rq.CommittedRayT();
-    // the direction back to the point that the ray comes from
     const float3 V = -rq.WorldRayDirection();
     const float3 V_TBN = mul(TBN , V);
 
@@ -878,7 +870,8 @@ void getTrainingSamples(const RayDesc firstRay , inout uint seed , out NRC::_Tra
         GeneralObjectInfo info = readHitData(rq , objectAO);
         positions[bounce] = info.P;
         normals[bounce] = info.N;
-        direct[bounce] = computeDirectAt(info , seed , rq);
+        // the baked occlusion of the object darkens the light of the lamps and of the sun at the hit , like in the path tracer ( PTSecondaryHit : ... * objectAO )
+        direct[bounce] = computeDirectAt(info , seed , rq) * objectAO;
         albedos[bounce] = info.albedo;
         hitCount++;
 
@@ -925,7 +918,8 @@ void main(uint3 id : SV_DispatchThreadID)
     uint2 size = uint2(nrcGeneral[0].width , nrcGeneral[0].height);
     if(any(id.xy >= size)) return;
     NRC::_TrainingSample samples[MOX_NRC_MAX_BOUNCE_COUNT];
-    uint seed = id.x * 83745u + id.y *384ul + generalBuffer.frameIndex * 4958u;
+    initNoise(id.xy , generalBuffer.frameIndex);
+    uint seed = initSeed(id.xy , generalBuffer.frameIndex);
     const float2 uv = (float2(id.xy) + 0.5f) / float2(size);
     float2 ndc = uv * 2.0f - 1.0f;
     ndc.y = -ndc.y;

@@ -462,6 +462,21 @@ namespace mox{
         return info;
     }
 
+    template<uint32_t barriers>
+    VkDependencyInfo TypicalDependency(VkBufferMemoryBarrier2* buff){
+        VkDependencyInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        info.bufferMemoryBarrierCount = barriers;
+        info.imageMemoryBarrierCount = 0;
+        info.memoryBarrierCount = 0;
+        info.pMemoryBarriers = nullptr;
+        info.pBufferMemoryBarriers = buff;
+        info.pImageMemoryBarriers = nullptr;
+        info.pNext = nullptr;
+        info.dependencyFlags = 0;
+        return info;
+    }
+
     inline uint32_t align(uint32_t size, const uint32_t T) noexcept
     {
         return (size + T - 1) & ~(T - 1);

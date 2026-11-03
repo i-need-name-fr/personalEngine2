@@ -548,6 +548,8 @@ struct GeneralFeatures{
 
     uint32_t RadianceCascade;
 
+    uint32_t NRC;
+
     uint32_t currentMode;
 
     uint32_t randomValues;
@@ -601,6 +603,8 @@ struct GeneralFeatures{
     uint ReSTIRGI_spatial;
 
     uint RadianceCascade;
+
+    uint NRC;
 
     uint currentMode;
 
@@ -1045,7 +1049,7 @@ namespace NRC
         uint32_t height;
         uint32_t validCount;
         uint32_t stepCount;
-#else   
+#else
         uint width;
         uint height;
         uint validCount;

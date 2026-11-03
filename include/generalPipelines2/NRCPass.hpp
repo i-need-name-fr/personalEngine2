@@ -145,21 +145,189 @@ namespace mox{
             return reqs;
         }
 
-        // ==================================================================================================================================================
-        // TODO ( yours ) : the dispatches of the pass .
-        //   what is ready : pipe->shaders[0]->shader ( trace ) , pipe->shaders[1]->shader ( backward ) , pipe->shaders[2]->shader ( apply : dispatch 4096 x 6 x 1 ) , pipe->buffers[frameIndex % 2] ( the descriptor buffer of set 0 ) ,
-        //   pipe->layout->layout , inputData.manager->dbuffer , inputData.lights->dbuffer , inputData.nrc->dbuffer ( the sets 1 , 2 , 3 ) .
-        //   the pipeline layout is { set 0 , textures , lamps , net } , the bind point is VK_PIPELINE_BIND_POINT_COMPUTE ( see RayQueryShadows::executePass ) .
-        //   the size of the dispatch is the half of the screen : NRC::GeneralData of NRCManager::generalDataBuffer ( width , height ) , the group is 8 x 8 .
-        // ==================================================================================================================================================
+        // one step : ( the first one converts the starting weights ) trace -> backward -> convert the gradients -> apply ( Adam ) -> convert the weights + zero the gradients , a barrier between every two
         [[nodiscard]] [[gnu::hot]] ErrorDataOutput<void> executePass(VkCommandBuffer& cmd) noexcept override final{
             [[unlikely]] if(!completedInit) return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to execute the pass ,since the pipeline wasnt created yet [NRCPass]"});
+
+            const uint8_t id = inputData.context->sc->frameIndex % 2;
+            const uint32_t x = (inputData.context->sc->extent.width / 2 + 7) / 8;
+            const uint32_t y = (inputData.context->sc->extent.height / 2 + 7) / 8;
+
+            VkShaderEXT shaders[1] = {pipe->shaders[0]->shader};          // 0 trace, 1 backward, 2 apply
+            VkShaderStageFlagBits stages[1] = {VK_SHADER_STAGE_COMPUTE_BIT};
+            constexpr VkPipelineStageFlags2 computeStage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+            // SHADER_READ / SHADER_WRITE are only legal together with a SHADER stage ( VUID 07454 / 03909 ) : the compute stage is added next to the convert one
+            constexpr VkPipelineStageFlags2 convertStage = VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+            constexpr VkPipelineStageFlags2 clearStage = VK_PIPELINE_STAGE_2_CLEAR_BIT;
+            constexpr VkAccessFlags2 read = VK_ACCESS_2_SHADER_READ_BIT;
+            constexpr VkAccessFlags2 write = VK_ACCESS_2_SHADER_WRITE_BIT;
+            constexpr VkAccessFlags2 transferWrite = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            NRC::NRCManager& nrc = *inputData.nrc;
+
+            // the very first step : the weight buffers are zeros , the starting weights lie in the float32 staging . one conversion fills both layouts of the weights
+            if(!weightsReady){
+                {
+                    std::array<VkBufferMemoryBarrier2 , 4> barriers{};
+                    barriers[0] = nrc.weightStagingHiddenBuffer->translateBuffer(read , convertStage);
+                    barriers[1] = nrc.weightStagingOutputBuffer->translateBuffer(read , convertStage);
+                    barriers[2] = nrc.neuronHiddenBuffer->translateBuffer(write , convertStage);
+                    barriers[3] = nrc.neuronPerChannelBuffer->translateBuffer(write , convertStage);
+                    const auto dep = TypicalDependency<4>(barriers.data());
+                    vkCmdPipelineBarrier2(cmd , &dep);
+                }
+
+                nrc.recordConvertWeights(cmd);
+
+                {
+                    // the trace shader reads the weights
+                    std::array<VkBufferMemoryBarrier2 , 2> barriers{};
+                    barriers[0] = nrc.neuronHiddenBuffer->translateBuffer(read , computeStage);
+                    barriers[1] = nrc.neuronPerChannelBuffer->translateBuffer(read , computeStage);
+                    const auto dep = TypicalDependency<2>(barriers.data());
+                    vkCmdPipelineBarrier2(cmd , &dep);
+                }
+
+                weightsReady = true;
+            }
+
+            // first shader
+            {
+
+                cmdBindShadersEXT(cmd , 1 , stages , shaders);
+
+                {
+                    constexpr VkBufferUsageFlags usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+
+                    std::array<VkDescriptorBufferBindingInfoEXT , 4> info{};
+                    for(auto& i : info) i.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+
+                    info[0].address = pipe->buffers[id]->pBuffer;                 // set 0: общий лист (картинки с учётом id / !id)
+                    info[1].address = inputData.manager->dbuffer->pBuffer;        // set 1: текстуры
+                    info[2].address = inputData.lights->dbuffer->pBuffer;         // set 2: сетка ламп
+                    info[3].address = inputData.nrc->dbuffer->pBuffer;            // set 3: сеть
+                    for(auto& i : info) i.usage = usage;
+
+                    cmdBindDescriptorBuffersEXT(cmd , 4 , info.data());
+
+                    const uint32_t sets[4] = {0 , 1 , 2 , 3};
+                    const VkDeviceSize offsets[4] = {0 , 0 , 0 , 0};
+                    cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 0 , 4 , sets , offsets);
+                }
+
+                vkCmdDispatch(cmd , x , y , 1);
+
+                shaders[0] = nullptr;
+                cmdBindShadersEXT(cmd , 1 , stages , shaders);   
+            }
+
+            // now we bind barriers for the next shader
+            {
+                // writing to hash grid params
+                // nrc general write
+                // reading samples
+                // hidden / output grads write   
+                std::array<VkBufferMemoryBarrier2 , 5> barriers{};
+                barriers[0] = inputData.nrc->hashGridParamsBuffer->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+                barriers[1] = inputData.nrc->generalDataBuffer->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT |VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+                barriers[2] = inputData.nrc->trainingSampleBuffer->translateBuffer(VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+                barriers[3] = inputData.nrc->neuronHiddenGradBuffer->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+                barriers[4] = inputData.nrc->neuronPerChannelGradBuffer->translateBuffer(VK_ACCESS_2_SHADER_WRITE_BIT |VK_ACCESS_2_SHADER_READ_BIT , VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR);
+                const auto dep = TypicalDependency<5>(barriers.data());
+
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+
+            // 2nd shader
+            {
+                shaders[0] = pipe->shaders[1]->shader;
+                cmdBindShadersEXT(cmd , 1 , stages , shaders);   
+
+                {
+                    VkDescriptorBufferBindingInfoEXT info{};
+                    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+                    info.address = inputData.nrc->dbuffer->pBuffer;
+                    info.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT;
+                    info.pNext = nullptr;
+
+                    cmdBindDescriptorBuffersEXT(cmd , 1,  &info);
+
+                    uint32_t sets[1] = {0};
+                    VkDeviceSize offset[] = {0};
+                    cmdSetDescriptorBufferOffsetsEXT(cmd , VK_PIPELINE_BIND_POINT_COMPUTE , pipe->layout->layout , 3 , 1 , sets , offset);
+                }
+
+                vkCmdDispatch(cmd , x , y , 1);
+
+                shaders[0] = nullptr;
+                cmdBindShadersEXT(cmd , 1 , stages , shaders);   
+            }
+
+            {
+                std::array<VkBufferMemoryBarrier2 , 4> barriers{};
+                barriers[0] = nrc.neuronHiddenGradBuffer->translateBuffer(read , convertStage);
+                barriers[1] = nrc.neuronPerChannelGradBuffer->translateBuffer(read , convertStage);
+                barriers[2] = nrc.gradStagingHiddenBuffer->translateBuffer(write , convertStage);
+                barriers[3] = nrc.gradStagingOutputBuffer->translateBuffer(write , convertStage);
+                const auto dep = TypicalDependency<4>(barriers.data());
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+            nrc.recordConvertGradients(cmd);
+
+            // B : the conversion -> apply ( Adam )
+            {
+                std::array<VkBufferMemoryBarrier2 , 12> barriers{};
+                barriers[0] = nrc.gradStagingHiddenBuffer->translateBuffer(read , computeStage);
+                barriers[1] = nrc.gradStagingOutputBuffer->translateBuffer(read , computeStage);
+                barriers[2] = nrc.neuronHiddenGradBuffer->translateBuffer(read , computeStage);          // the bias gradients are read from here
+                barriers[3] = nrc.neuronPerChannelGradBuffer->translateBuffer(read , computeStage);
+                barriers[4] = nrc.neuronParamsHiddenBuffer->translateBuffer(read | write , computeStage);
+                barriers[5] = nrc.neuronParamsPerChannelBuffer->translateBuffer(read | write , computeStage);
+                barriers[6] = nrc.hashGridParamsBuffer->translateBuffer(read | write , computeStage);
+                barriers[7] = nrc.hashGridBuffer->translateBuffer(read | write , computeStage);
+                barriers[8] = nrc.neuronHiddenBuffer->translateBuffer(read | write , computeStage);      // apply writes the bias
+                barriers[9] = nrc.neuronPerChannelBuffer->translateBuffer(read | write , computeStage);
+                barriers[10] = nrc.weightStagingHiddenBuffer->translateBuffer(write , computeStage);
+                barriers[11] = nrc.weightStagingOutputBuffer->translateBuffer(write , computeStage);
+                const auto dep = TypicalDependency<12>(barriers.data());
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+
+            // 3rd shader : apply . the sets of the backward ( only the set 3 ) stay bound
+            {
+                shaders[0] = pipe->shaders[2]->shader;
+                cmdBindShadersEXT(cmd , 1 , stages , shaders);
+
+                // x : the biggest level of the hash grid ( T = 64 , two numbers per cell ) in the groups of 128 threads . y : hidden , output and the levels of the hash grid
+                constexpr uint32_t biggestLevel = 2u * 64u * 64u * 64u;
+                constexpr uint32_t applyX = (biggestLevel + 127u) / 128u;
+                constexpr uint32_t applyY = 2u + NRC::NRCManager::GRID_LEVELS;
+                vkCmdDispatch(cmd , applyX , applyY , 1);
+
+                shaders[0] = nullptr;
+                cmdBindShadersEXT(cmd , 1 , stages , shaders);
+            }
+
+            // C : apply -> the conversion of the new weights + the zero gradients
+            {
+                std::array<VkBufferMemoryBarrier2 , 6> barriers{};
+                barriers[0] = nrc.weightStagingHiddenBuffer->translateBuffer(read , convertStage);
+                barriers[1] = nrc.weightStagingOutputBuffer->translateBuffer(read , convertStage);
+                barriers[2] = nrc.neuronHiddenBuffer->translateBuffer(write , convertStage);
+                barriers[3] = nrc.neuronPerChannelBuffer->translateBuffer(write , convertStage);
+                barriers[4] = nrc.neuronHiddenGradBuffer->translateBuffer(transferWrite , clearStage);
+                barriers[5] = nrc.neuronPerChannelGradBuffer->translateBuffer(transferWrite , clearStage);
+                const auto dep = TypicalDependency<6>(barriers.data());
+                vkCmdPipelineBarrier2(cmd , &dep);
+            }
+            nrc.recordConvertWeights(cmd);
+            nrc.recordZeroGradients(cmd);
 
             return {};
         }
 
         [[nodiscard]] [[gnu::hot]] const bool requestExecution() const noexcept override final{
-            return true;
+            auto data = features->getBuffetDataSingular<GeneralFeatures>();
+            return data.NRC != 0;
         }
 
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{
@@ -167,6 +335,12 @@ namespace mox{
 
             const auto bound = bindAttributes(sources);
             if(!bound.has_value()) return bound;
+
+            // the features are read by the CPU ( requestExecution ) : the buffer has to be a DeviceReadableBuffer ( the same check as in RayQueryShadows )
+            if(!dynamic_cast<DeviceReadableBuffer*>(buffer("generalFeatures"))){
+                return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_CRITICAL , "failed to create NRCPass , since the generalFeatures buffer is not a DeviceReadableBuffer ( the CPU has to read it )"});
+            }
+            features = std::bit_cast<DeviceReadableBuffer*>(buffer("generalFeatures"));
 
             return createPipe();
         }
@@ -261,6 +435,9 @@ namespace mox{
 
         pShaderPipeType pipe{nullptr};
         pSampler sampler{nullptr};
+
+        DeviceReadableBuffer* features{nullptr}; // read by the CPU in requestExecution ( GeneralFeatures::NRC )
+        bool weightsReady{false};                // false : the weight buffers still have zeros , the first step converts the starting weights into them
 
         CreateInfo inputData{};
 
@@ -421,6 +598,8 @@ namespace mox{
 
             pipe = std::move(input.pipe);
             sampler = std::move(input.sampler);
+            features = std::exchange(input.features , nullptr);
+            weightsReady = std::exchange(input.weightsReady , false);
             // the acceleration structure and the managers are not owned by the pass
             inputData = input.inputData;
 
@@ -434,6 +613,8 @@ namespace mox{
             // the images and the buffers belong to the graph , they are only forgotten
             pipe = nullptr;
             sampler = nullptr;
+            features = nullptr;
+            weightsReady = false;
 
             inputData = {};
             completedInit = false;
