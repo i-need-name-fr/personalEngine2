@@ -65,6 +65,43 @@ namespace mox
         {
             processDelete();
         }
+
+        void waitFor(const std::string name) noexcept
+        {
+            _implWaitForFunc(name);
+        }
+
+        uint32_t getStatus(const std::string name) noexcept
+        {
+            return _implGetFunctionStatus(name);
+        }
+
+        void addJob(const std::string name ,const moxJobManagerFunctionType job) noexcept
+        {
+            _implAddJob(job , name);
+        }
+
+        void waitForAll() noexcept
+        {
+            if(!state) return;
+            std::vector<std::shared_ptr<FunctionParameter>> parameters{};
+            {
+                std::shared_lock lock(state->m);
+                parameters.reserve(state->functionStatuses.size());
+                for(const auto& [name , data] : state->functionStatuses)
+                    parameters.push_back(data);
+            }
+            for(const auto& parameter : parameters)
+            {
+                uint32_t current = parameter->status.load(std::memory_order::acquire);
+                while(current != moxFunctionFinished && current != moxFunctionFinishedWithError)
+                {
+                    parameter->status.wait(current);
+                    current = parameter->status.load(std::memory_order::acquire);
+                }
+            }
+        }
+
     private:
 
         inline static constexpr uint32_t MOX_JOB_MANAGER_THREAD_COUNT = 10;
