@@ -575,7 +575,7 @@ namespace ReSTIRGI{
     // indirect GI
     // ReSTIR GI
 
-    bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f || roughness < 0.4f); }
+    bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f && roughness < 0.4f); }
 
     float3 evalFcos(const GeneralObjectInfo info , const bool specularMode , const float3 L){
         if(specularMode){
@@ -1260,10 +1260,9 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     float3 totalIndirect = 0.0f;
     float sunShadow = 1.0f;
     float lightShadow = 1.0f;
-    float3 nextDir = 0.0f;
     float sunLuminance = 0.0f;
 
-    const bool needSpecular = (info.roughness < 0.5f || info.metallic >= 0.7f);
+    const bool needSpecular = ReSTIRGI::isSpecularMode(info.roughness , info.metallic);
     const bool needDiffuse  = ((1.0f - info.metallic) > 0.3f);
 
     const float3 F0 = lerp(float3(0.04f , 0.04f , 0.04f) , info.albedo , info.metallic);
@@ -1285,12 +1284,15 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         ReSTIRGI::sampleSpecularDirection(float2(randNoise() , randNoise()) , info.N , info.V , info.roughness , L , pdf);
         if(pdf > 0.0f){
             const float3 fcos = ReSTIRGI::evalBRDF(info.N , info.V , L , info.roughness , F0);
+            const float NdotV = saturate(dot(info.V , info.N));
             float distance;
             const float3 radiance = traceRayReflection(L , rayOrigin , distance);
-            float3 reflectedColor =  radiance * fcos / pdf;
+            const float3 weight = F_fresnel(F0 , NdotV);
+            // float3 reflectedColor =  radiance * fcos / pdf;
+            float3 reflectedColor =  radiance * weight;
+
             // the lobe of a metal is narrow : fcos and pdf are both huge there , and one NaN / Inf goes through the denoiser into the history and lives there ( the whole specular goes black )
             if(any(isnan(reflectedColor)) || any(isinf(reflectedColor))) reflectedColor = 0.0f;
-            nextDir = L;
             reflectedSpecular += reflectedColor;
             specularHitDistance = distance;
         }          
@@ -1382,11 +1384,12 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         {
             // the net answers with the light that ARRIVES ( no albedo ) , totalIndirect has the albedo in it like in the other branches : it is divided by the albedo below
 #if NRC_SHOW_LABELS
-            // DEBUG : not the net , but the label it learns from ( one noisy path of the training per pixel of the training grid )
-            const uint2 nrcSize = uint2(nrcGeneral[0].width , nrcGeneral[0].height);
-            const uint2 labelPixel = min(uint2(float2(pixel) * float2(nrcSize) / float2(size)) , nrcSize - 1u);
-            const NRC::_TrainingSample label = trainingBuffer[bufferIndex(labelPixel , nrcSize.x , nrcSize.y) * MOX_NRC_MAX_BOUNCE_COUNT];
-            const float3 raw = (label.valid == MOX_NRC_VALID_SAMPLE) ? label.radiance : float3(0.0f , 0.0f , 0.0f);
+            // DEBUG : not the answer of the net but the LABEL of the training of this pixel ( the first vertex x0 of the path of the half resolution pixel that covers it , no albedo ) .
+            // compare it with the picture of the net and with the path tracer : if the corners are wrong HERE , the mistake is in the labels ( the paths ) , not in the net
+            const uint2 trainSize = uint2(nrcGeneral[0].width , nrcGeneral[0].height);
+            const uint2 trainPixel = min(pixel / 2u , trainSize - 1u);
+            const NRC::_TrainingSample labelSample = trainingBuffer[bufferIndex(trainPixel , trainSize.x , trainSize.y) * MOX_NRC_MAX_BOUNCE_COUNT];
+            const float3 raw = (labelSample.valid == MOX_NRC_VALID_SAMPLE) ? labelSample.radiance : float3(0.0f , 0.0f , 0.0f);
 #else
             const float3 raw =  NRC::askNRC(info.P , info.N);
 #endif
@@ -1398,6 +1401,28 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             {
                 totalIndirect =raw  * info.albedo * (1.0f - info.metallic);
             }
+
+            // now we add temporal ( not for the labels : it mixes in the ANSWER of the net , and the picture of the labels would be the net again )
+#if !NRC_SHOW_LABELS
+            if(validUV)
+#else
+            if(false)
+#endif
+            {
+                const float3 prevP = positionImage[prevPixel].xyz;
+                const float3 prevN = normalImage[prevPixel].xyz;
+                float3 prev = NRC::askNRC(prevP , prevN);
+                if(!all(isfinite(prev))) prev = 1.0f;
+                else prev = prev * info.albedo * (1.0f - info.metallic);
+
+                const float maxFrameCount = 32.0f;
+                const float baseAlpha = 1.0f / maxFrameCount;
+                const float curLum = luminance(totalIndirect);
+                const float prevLum = luminance(prev);
+                // const float diff = abs(prevLum - curLum) / max(max(curLum , prevLum) , 1e-4f) + motionW;
+                totalIndirect = lerp(prev , totalIndirect , motionW * 0.8f);
+            }
+            diffuseHitDistance = 10.0f;
         }
     }
     // no weights ( directWeight , indirectWeight ) for now : the clean colour
@@ -1431,13 +1456,14 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
             }
 
             sunShadow /= float(features.RayQuerySunSampleCount);
+            // if(needSpecular) sunShadow = 1.0f;
         }
 
         specular = lerp(0.0f, specular , sunShadow);
         diffuse = lerp(0.0f , diffuse , sunShadow);
         totalDiffuse += diffuse * diff * sunNdotL;
         totalSpecular += specular * diff * sunNdotL;
-    }
+    }else sunShadow = 1.0f;
 
     float lightLuminance = 0.0f;
     // light here should be chosen by the forward + , not world grid light poses
@@ -1503,10 +1529,11 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
                 totalLightSpecular += specular;
             }
             if(weightSum > 0.0f) lightShadow = visibleSum / weightSum;
+            // if(needSpecular) lightShadow = 1.0f;
 
             totalDiffuse += totalLightDiffuse;
             totalSpecular += totalLightSpecular;
-        }
+        }else lightShadow = 1.0f;
     }
 
 
@@ -1529,6 +1556,8 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
         shadowFrames = count;
     }
 
+    
+
     const float3 albedoSafe = max(info.albedo , 0.02f);
     const float3 diffuseOut = (totalDiffuse * objectAmbient) / albedoSafe;
     load.pixelInfo.albedo = info.albedo;
@@ -1539,9 +1568,11 @@ void processPixel(inout RayPayLoad load , const GeneralObjectInfo info , const u
     load.pixelInfo.viewDir = info.V;
     load.lightInfo.shadow = totalShadow;
     load.lightInfo.shadowFrames = float(shadowFrames);
-    load.lightInfo.diffuse = diffuseOut;
+    load.lightInfo.diffuse = (diffuseOut);
     load.lightInfo.indirect = totalIndirect / albedoSafe;
-    load.lightInfo.specular = totalSpecular * objectAmbient + reflectedSpecular;
+    // load.lightInfo.specular = totalSpecular * objectAmbient + reflectedSpecular;
+    load.lightInfo.specular = (totalSpecular * objectAmbient + reflectedSpecular);
+
     load.pixelInfo.motionVector = motion;
     if(!load.fromReflection) ReSTIRGIBuffer[bufferIndex(pixel)] = gi;
 }
@@ -1724,45 +1755,100 @@ namespace Reflection{
     }
 }
 
-// the payload that traceRayReflection expects : lightInfo.diffuse * max( albedo , 0.02 ) is the light , the others are 0 , the shadow is 1 ( the shadow is in the light already )
-void processReflectionHit(inout RayPayLoad load , const GeneralObjectInfo info){
-    const float3 light = Reflection::computeLightAt(info , load.seed , info.V);
+
+void processPixelReflected(inout RayPayLoad load , const GeneralObjectInfo info , const uint2 pixel){
+    const float3 rayOrigin = offsetRay(info.P , info.N , generalBuffer.playerPosition);
     const float3 albedoSafe = max(info.albedo , 0.02f);
-    const float hitDistance = RayTCurrent();
 
-    load.lightInfo.diffuse = light;
-    load.lightInfo.specular = float3(0.0f , 0.0f , 0.0f);
-    load.lightInfo.indirect = float3(0.0f , 0.0f , 0.0f);
-    load.lightInfo.shadow = 1.0f;
-    load.lightInfo.shadowFrames = 0.0f;
-    load.lightInfo.diffuseHitDistance = min(hitDistance , 10000.0f);
-    load.lightInfo.specularHitDistance = min(hitDistance , 10000.0f);
+    float3 totalDiffuse = 0.0f;
+    float3 totalSpecular = 0.0f;
+    float3 totalIndirect = 0.0f;
 
-    // every field of the payload is written : the caller reads all of them
-    load.pixelInfo.position = info.P;
-    load.pixelInfo.normal = info.N;
+    uint lightCount , lightIndices[lg::MAX_LIGHT_PER_CELL];
+    findLightIndices(info.P , lightIndices , lightCount);
+    if(lightCount > 0u){
+        const uint lampSlot = min(uint(rand(load.seed) * float(lightCount)) , lightCount - 1u);
+        const lg::LightSource light = lightBuffer[lightIndices[lampSlot]];
+        float3 L = light.position - info.P;
+        const float d = length(L);
+        L /= max(d , 1e-4f);
+        const float NdotL = saturate(dot(info.N , L));
+        const float att = lightAttenuation(light , d);
+        if(NdotL > 0.0f && att > 0.0f){
+            const float shadow = calculateShadowToCenter(light , info.P , info.N);
+            if(shadow > 0.0f){
+                float3 diffuse = 0.0f , specular = 0.0f;
+                computeLight(info , L , diffuse , specular);
+                const float3 energy = light.diffuse * att * NdotL * shadow * float(lightCount);
+                totalDiffuse += diffuse * energy;
+                totalSpecular += specular * energy;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- the sun
+    const float skyVisibility = skyVisibilityAt(info.P , info.N , load.seed);
+    if(sunBuffer.intensity > 0.0f && skyVisibility > 0.0f){
+        const float3 L = randomInSunRadius(load.seed , sunBuffer , -sunBuffer.direction);
+        const float sunNdotL = saturate(dot(info.N , L));
+        if(sunNdotL > 0.0f){
+            const float sunShadow = calculateSunShadow(rayOrigin , L , 1000.0f , 200.0f);
+            float3 sunDiffuse = 0.0f , sunSpecular = 0.0f;
+            computeLight(info , L , sunDiffuse , sunSpecular);
+            totalDiffuse += sunDiffuse * sunBuffer.diffuse * sunNdotL * sunShadow;
+            totalSpecular += sunSpecular * sunBuffer.diffuse * sunNdotL * sunShadow;
+        }
+    }
+
+    if((1.0f - info.metallic) > 0.3f){
+        if(features.ReSTIRGI){
+            const ReservoirGI gi = ReSTIRGI::generateReservoirGI(info , pixel , load.seed);
+            if(gi.M > 0u){
+                const float3 L = normalize(gi.samplePos - info.P);
+                totalIndirect = gi.radiance * ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic) * gi.W;
+            }
+        }
+        else if(features.RadianceCascade){
+            float pdf = 0.0f;
+            float3 L = 0.0f;
+            ReSTIRGI::sampleDiffuseDirection(float2(randNoise() , randNoise()) , info.N , L , pdf);
+            if(pdf > 0.0f){
+                float rcHitDistance = 0.0f;
+                const float3 brdf = ReSTIRGI::evalDiffuse(info.albedo , info.N , L , info.metallic);
+                totalIndirect = brdf * RC::processRC(L , info.P , info.N , rcHitDistance , true) / pdf;
+            }
+        }
+        else if(features.NRC){
+            const float3 raw = NRC::askNRC(info.P , info.N);
+            if(all(isfinite(raw))) totalIndirect = raw * info.albedo * (1.0f - info.metallic);
+        }
+    }
+    // NaN / Inf would go through the denoiser into the history and live there
+    if(!all(isfinite(totalIndirect))) totalIndirect = 0.0f;
+    if(!all(isfinite(totalDiffuse))) totalDiffuse = 0.0f;
+    if(!all(isfinite(totalSpecular))) totalSpecular = 0.0f;
+
     load.pixelInfo.albedo = info.albedo;
     load.pixelInfo.viewDir = info.V;
-    load.pixelInfo.motionVector = float2(0.0f , 0.0f);
-    load.pixelInfo.depth = hitDistance;
-    load.pixelInfo.metallic = info.metallic;
-    load.pixelInfo.roughness = info.roughness;
-    load.pixelInfo.pixelType = COLOR_PIXEL;
+    load.lightInfo.specularHitDistance = RayTCurrent();
+    load.lightInfo.diffuse = totalDiffuse / albedoSafe;
+    load.lightInfo.specular = totalSpecular;
+    load.lightInfo.indirect = totalIndirect;
+    load.lightInfo.shadow = 1.0f;
 }
 
 [shader("closesthit")]
 void main(inout RayPayLoad load , in BuiltInTriangleIntersectionAttributes attr){
-    // the state of randNoise is private to the entry point : without this every pixel and every frame got the same numbers
     initNoise(DispatchRaysIndex().xy , generalBuffer.frameIndex);
     load.depth++;
     if(load.depth >= MAX_RT_RAY_CAST) return;
-    // the ray of a reflection hits another surface than the one of the G buffer of this pixel : it reads the hit itself
-    if(load.fromReflection){
-        processReflectionHit(load , Reflection::readHitData(attr.barycentrics));
-        return;
-    }
 
     uint2 pixel = DispatchRaysIndex().xy;
+    if(load.fromReflection){
+        const GeneralObjectInfo hit = Reflection::readHitData(attr.barycentrics);
+        processPixelReflected(load , hit , pixel);
+        return;
+    }
     GeneralObjectInfo info = infoFromGBuffer(pixel);
     processPixel(load , info , pixel);
 }

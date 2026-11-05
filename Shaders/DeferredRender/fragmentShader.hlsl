@@ -34,6 +34,9 @@ float2 calculateParallax(float2 currentUV , float3 V , int depthID){
     return currentUV - float2(p.x , -p.y);
 }
 
+bool isSpecularMode(const float roughness , const float metallic){ return (metallic >= 0.7f && roughness < 0.4f); }
+
+
 // no [earlydepthstencil] : the alpha test discards pixels , and the depth of a discarded pixel must not be written ( an early test writes it before the shader runs )
 [shader("pixel")]
 PsOutput main(VsOutput input){
@@ -118,7 +121,11 @@ PsOutput main(VsOutput input){
     output.objectAmbient = ambientOcclusion;
 
     // a perfect mirror ( roughness 0 ) makes the GGX degenerate : the lower limit is for every path above ( the value , the maps , the ARM )
-    output.roughness = max(output.roughness , 0.1f);
+    output.roughness = max(output.roughness , 0.01f);
+    if(isSpecularMode(output.roughness , output.metallic))
+    {
+        output.albedo = lerp(0.04 , output.albedo , output.metallic);
+    }
 
     output.pixelCheck = COLOR_PIXEL;
     return output;

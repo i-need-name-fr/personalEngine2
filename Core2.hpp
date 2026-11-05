@@ -724,6 +724,22 @@ namespace mox{
                     model = glm::translate(model , glm::vec3(100.0f ,10.0f, 0.0f));
                     models[1]->setMatrix(model , 0);
                 }
+
+                {
+                    // a test mirror for the reflections : a cube , the metallic 1 and the roughness 0 ( the color of a metal is its F0 , so it is almost white )
+                    Mesh2::CreateInfo info{};
+                    info.inputVertices = cube::vertices;
+                    info.inputIndices = cube::indices;
+                    info.color = glm::vec3(0.95f);
+                    info.metallic = 1.0f;
+                    info.roughness = 0.1f;
+                    meshes.push_back(std::make_shared<Mesh2>(info));
+                    // the place that was on the screen : X 66.0 , Y 16.2 , Z -31.7 ( the cube is 2 x 2 x 2 , the scale 2 makes it 4 meters )
+                    glm::mat4 model(1.0f);
+                    model = glm::translate(model , glm::vec3(66.0f , 16.2f , -31.7f));
+                    model = glm::scale(model , glm::vec3(1.0f));
+                    meshes.back()->updateMatrix(model , 0);
+                }
             }
             catch(std::exception &e){
                 return std::unexpected(ErrorDataType{MOX_ERROR_TYPE_FAILED_CREATION , "failed to create models"});

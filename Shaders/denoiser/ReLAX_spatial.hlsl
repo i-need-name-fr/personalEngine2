@@ -41,8 +41,6 @@
 
 
 float NormalizeHitDistance(float hitDistance, float viewZ, float roughness) {
-    // упрощённая версия формулы NRD — есть более точная с параметрами,
-    // но идея та же: делим на масштаб сцены в этой точке
     float scale = lerp(viewZ, viewZ * roughness, roughness); // roughness=0 для ReBLUR можно опустить
     return hitDistance / max(scale, 1e-4);
 }
@@ -54,18 +52,19 @@ static const float NORMAL_POWER = 128.0f;
 
 #include "../../include/ShaderStructures/ShaderStructure.h"
 
-// same struct/offsets as ReLAX_temporal.hlsl's push constant , even though this shader never
-// touches `buffer` - both shaders share one pipeline layout on the C++ side (one ReLAX ShaderPipe,
-// shaders[0]=temporal/shaders[1]=spatial), so keeping the layout identical avoids a second,
-// differently-shaped push range for the same binding slot.
 [[vk::binding(15 , 0)]] ConstantBuffer<GeneralFeatures> features;
 [[vk::binding(16 , 0)]] ConstantBuffer<GeneralInfo> generalBuffer;
 
-float ComputeBlurRadius(float normalizedHitDist, float historyCount) {
-    float baseRadius = normalizedHitDist * MAX_RADIUS_PIXELS;
-    // чем длиннее история — тем меньше нужен spatial-радиус (твой предыдущий вопрос)
-    float historyFactor = saturate(1.0 - historyCount / MAX_ACCUM_FRAMES);
-    return baseRadius * lerp(0.25, 1.0, historyFactor); // не даём радиусу упасть в 0 совсем
+static const float LOBE_VOLUME = 0.5f;
+
+float ComputeBlurRadius(float roughness , float hitDistance , float viewDistance , float historyCount) {
+    const float alpha = roughness * roughness;
+    const float tanHalfAngle = alpha * LOBE_VOLUME / max(1.0f - LOBE_VOLUME , 1e-4f);
+    const float pixelAngle = 2.0f / (max(generalBuffer.projOnly[1][1] , 1e-3f) * float(max(generalBuffer.screenHeight , 1u)));
+    const float spotShare = hitDistance / max(viewDistance + hitDistance , 1e-4f);
+    const float baseRadius = tanHalfAngle * spotShare / max(pixelAngle , 1e-6f);
+    const float historyFactor = saturate(1.0 - historyCount / MAX_ACCUM_FRAMES);
+    return min(baseRadius * lerp(0.25, 1.0, historyFactor) , MAX_RADIUS_PIXELS);
 }
 
 float normalPowerForRoughness(float roughness){
@@ -108,10 +107,9 @@ void main(uint3 id : SV_DispatchThreadID){
     float centerDepth = depthImage[id.xy].x;
     float roughness = roughnessImage[id.xy].x;
 
-    // the radius had no limit : hitDistance / viewZ of a far wall seen in a mirror is ~30 , so the radius was ~1000 pixels and the 32 samples spread over the screen ( the copies of
-    // the wall ) . it is limited to MAX_RADIUS_PIXELS , and a sharp surface ( a mirror ) gets a small one : the lobe of the reflection is narrow
-    float radius = ComputeBlurRadius(NormalizeHitDistance(hitDistance , centerDepth , 0) ,historyCount );
-    radius = min(radius , MAX_RADIUS_PIXELS) * saturate(roughness / 0.3f);
+    // the distance from the camera to the surface along the ray ( not the depth along the axis ) : the mirror is this far from the virtual camera
+    const float viewDistance = length(positionImage[id.xy].xyz - generalBuffer.playerPosition);
+    const float radius = ComputeBlurRadius(roughness , hitDistance , viewDistance , historyCount);
 
     float3 sum = center;
     float weight= 1.0f;
@@ -131,8 +129,6 @@ void main(uint3 id : SV_DispatchThreadID){
         float normalW = pow(saturate(dot(sNormal , centerNormal)) , normalPowerForRoughness(roughness));
 
         float w = depthW * normalW;
-        // neighbours come from temporal's output (outputSpecular) , never from inputSpecular -
-        // other invocations of this dispatch are writing inputSpecular right now
         sum += outputSpecular[samplePos].xyz * w;
         weight += w;
     }

@@ -107,12 +107,6 @@ namespace mox
             pDeviceStaticBuffer weightStagingHiddenBuffer{}; // 64 x 16 : the new W1 ( apply writes ) , the source of the conversion into INFERENCING_OPTIMAL and TRAINING_OPTIMAL
             pDeviceStaticBuffer weightStagingOutputBuffer{}; // 16 x 64 : the new W2
 
-            // BEGIN convert commands
-            // the commands of the step ( the order is in NRCPass ) . the barriers between them are NOT here : every command needs the one before it to be finished
-            //   the barrier before / after a conversion : stage VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV , access SHADER_READ | SHADER_WRITE
-            //   the barrier before / after vkCmdFillBuffer : stage VK_PIPELINE_STAGE_2_CLEAR_BIT ( or ALL_TRANSFER ) , access TRANSFER_WRITE
-
-            // the gradients : hiddenGrads / outputGrads ( TRAINING_OPTIMAL , float16 ) -> gradStaging ( ROW_MAJOR , float32 ) : apply reads them . after backward , before apply
             void recordConvertGradients(VkCommandBuffer cmd) const noexcept
             {
                 const std::array<ConvertRecord , 2> records = {{
@@ -126,8 +120,6 @@ namespace mox
                 recordConvert(cmd , records.data() , static_cast<uint32_t>(records.size()));
             }
 
-            // the new weights : weightStaging ( ROW_MAJOR , float32 ) -> two float16 copies in the weight buffers : INFERENCING_OPTIMAL ( askNRC , forward ) and TRAINING_OPTIMAL ( mulTranspose of the backward ) .
-            // after apply , before the next trace . ALSO once before the very first frame : weightStaging starts with the initial weights , the weight buffers start with zeros
             void recordConvertWeights(VkCommandBuffer cmd) const noexcept
             {
                 const std::array<ConvertRecord , 4> records = {{
@@ -157,7 +149,6 @@ namespace mox
 
         private:
 
-            // one matrix of vkCmdConvertCooperativeVectorMatrixNV : the source and the destination are ADDRESSES ( the sizes are in bytes , the strides too : the optimal layouts take 0 )
             struct ConvertRecord
             {
                 VkDeviceAddress src;
@@ -315,7 +306,7 @@ namespace mox
                             ::NRC::HashGridInfo info{};
                             // the cells of the levels : 8 , 4 , 2 , 1 meters ( T = 8 , 16 , 32 , 64 ) : the grid of every level repeats with the period T * cellSize = 64 meters
                             info.cellSize = 8.0f / static_cast<float>(1u << id);
-                            info.T = 4u * (2u << id);
+                            info.T = 8u * (2u << id);
                             info.offset = _hashGridParamsVector.size();
                             _gridInfo.push_back(info);
 
@@ -357,7 +348,6 @@ namespace mox
                     }
 
                     {
-                        // grid param buffer
                         DeviceStaticBuffer::CreateInfo info{};
                         info.context = context;
                         info.usage = flags;
@@ -367,7 +357,6 @@ namespace mox
                     }
 
                     {
-                        // grid param buffer
                         DeviceStaticBuffer::CreateInfo info{};
                         info.context = context;
                         info.usage = flags;
@@ -378,7 +367,6 @@ namespace mox
 
                     {
 
-                        // W1 and b1 in float16 : [ W1 inference ][ b1 ][ W1 training ] , the conversion command fills the matrices from the float32 staging , the biases ( zeros at the start ) are written by apply
                         DeviceStaticBuffer::CreateInfo info{};
                         info.context = context;
                         info.usage = flags;
@@ -391,7 +379,6 @@ namespace mox
 
                     {
 
-                        // W2 ( 16 rows , 3 of them used ) and b2 in float16 : [ W2 inference ][ b2 ][ W2 training ]
                         DeviceStaticBuffer::CreateInfo info{};
                         info.context = context;
                         info.usage = flags;
@@ -402,7 +389,6 @@ namespace mox
                     }
 
                     {
-                        // the gradients : the same matrices , but float32 ( twice the bytes ) and they MUST start with zeros ( a device buffer is not zeroed by itself )
                         {
                             DeviceStaticBuffer::CreateInfo info{};
                             info.context = context;
@@ -421,8 +407,6 @@ namespace mox
                             neuronPerChannelGradBuffer = std::make_shared<DeviceStaticBuffer>(info , translateToSpan(zeros));
                         }
 
-                        // the float32 row-major staging matrices ( 4096 bytes each ) : the gradients start with zeros , the weights with the starting weights of the Parameter arrays
-                        // ( the first HIDDEN_WEIGHT_COUNT / OUTPUT_WEIGHT_COUNT elements are exactly the matrix , row after row ) : one conversion before the first frame fills the weights of the shaders
                         {
                             DeviceStaticBuffer::CreateInfo info{};
                             info.context = context;

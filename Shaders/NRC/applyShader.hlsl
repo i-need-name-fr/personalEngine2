@@ -24,7 +24,13 @@ void writeHalf(const NrcPtr buffer , const uint halfIndex , const float value)
     InterlockedOr(buffer.Get().data[halfIndex >> 1] , f32tof16(value) << shift);
 }
 
-void adamStep(inout NRC::Parameter p , const float g)
+// the step of Adam of the matrices of the net
+static const float NRC_LR_MLP = 1e-3f;
+// the step of Adam of every LEVEL of the hash grid ( the cells 8 , 4 , 2 , 1 meters ) : the fine levels get few samples per cell , the noise of the labels
+// moves their cells by the full step ( Adam makes the step the same size whatever the gradient is ) , so they get a smaller one
+static const float NRC_LR_GRID[4] = { 1e-3f , 1e-3f , 5e-4f , 2.5e-4f };
+
+void adamStep(inout NRC::Parameter p , const float g , const float lr)
 {
     static const float b1 = 0.9f;
     static const float b2 = 0.999f;
@@ -33,8 +39,8 @@ void adamStep(inout NRC::Parameter p , const float g)
     const float m = p.m / (1.0f - pow(b1 , float(nrcGeneral[0].stepCount)));
     const float v = p.v / (1.0f - pow(b2 , float(nrcGeneral[0].stepCount)));
     const float epsilon = 1e-8f;
-    p.w -= 1e-3f * m / (sqrt(v) + epsilon);
-    
+    p.w -= lr * m / (sqrt(v) + epsilon);
+
 }
 
 void recordAdam_hidden(const uint3 id) 
@@ -61,7 +67,7 @@ void recordAdam_hidden(const uint3 id)
 
     NRC::Parameter p = neuronParamsHiddenBuffer[pos];
     if(!isfinite(g)) return;
-    adamStep(p , g);
+    adamStep(p , g , NRC_LR_MLP);
 
     neuronParamsHiddenBuffer[pos] = p;
     if(pos < NRC_HIDDEN_SIZE * NRC_IN_SIZE)
@@ -98,7 +104,7 @@ void recordAdam_output(const uint3 id)
     NRC::Parameter p = neuronParamsPerChannelBuffer[pos];
     if(!isfinite(g)) return;
 
-    adamStep(p , g);
+    adamStep(p , g , NRC_LR_MLP);
 
     neuronParamsPerChannelBuffer[pos] = p;
     if(pos < NRC_HIDDEN_SIZE * NRC_OUT_SIZE)
@@ -107,7 +113,6 @@ void recordAdam_output(const uint3 id)
     }
     else
     {
-        // the bias has no layout , it goes straight into the weight buffer
         writeHalf(nrcPtr.outputWeights , NRC_B2_OFFSET / 2 + (pos - NRC_HIDDEN_SIZE * NRC_OUT_SIZE) , p.w);
     }
 }
@@ -116,7 +121,7 @@ void recordAdam_hash(const uint3 id)
 {
     if(id.y < NRC_HASH_GRID_START)  return;
     const uint validCount = nrcGeneral[0].validCount;
-    const uint layer = id.y - NRC_HASH_GRID_START;
+    const uint layer = id.y - NRC_HASH_GRID_START;  
     const NRC::HashGridInfo levelData = hashGridGeneralBuffer[layer];
     const int T = int(levelData.T);
     const int offset = int(levelData.offset);
@@ -126,17 +131,16 @@ void recordAdam_hash(const uint3 id)
     if(pos >= totalSize) return;
     pos += offset;
     NRC::Parameter p = hashGridParamsBuffer[pos];
+    if(p.grad == 0.0f) return;
     const float g = p.grad / (float(validCount) * NRC_GRAD_SCALE);
     if(!isfinite(g))
     {
-        // the sum is in the memory for the next step too : a NaN would stay there for ever
         hashGridParamsBuffer[pos].grad = 0.0f;
         return;
     }
 
-    adamStep(p , g);
+    adamStep(p , g , NRC_LR_GRID[min(layer , 3u)]);
     p.grad = 0;
-    // we dont care about float16_t style here , since its our personal hash grid
     hashGridParamsBuffer[pos] = p;
     hashGridBuffer[pos] = p.w;
 }
