@@ -408,6 +408,8 @@ struct ReservoirGI{
 #define MOX_RESTIR_PT_HIT_COMMITTED 1.0f
 #define MOX_RESTIR_PT_NON_HIT_COMMITTED 0.0f
 #define MOX_RESTIR_PT_HISTORY_K 0.9f
+#define MOX_MIS_INCLUDED 1
+
 
 struct ReservoirPT
 {
@@ -435,9 +437,10 @@ struct ReservoirPT
         // same guarded form as ReservoirDI::update - no division by a possibly zero weightSum
         if(weightSum > 0.0f && randValue * weightSum < weight){
             position = can.position;
+
             const float nW = saturate(dot(can.nextDir , nextDir));
-            nextDir = can.nextDir;
             radiance = lerp(radiance , can.radiance * nW , 1.0f / float(M));
+            nextDir = can.nextDir;
             hD = can.hD;
             normal = can.normal;
             // the roughness of the sample point travels with the sample : it tells if the sample can be moved to another pixel

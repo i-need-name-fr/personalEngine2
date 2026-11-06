@@ -820,6 +820,14 @@ namespace ReSTIRPT
         return targetFunction(r , info , shiftedDirection(r , info.P));
     }
 
+    GeneralObjectInfo readPrevBuffer(const GeneralObjectInfo current , const uint2 prevCoord)
+    {
+        GeneralObjectInfo infoB = current;
+        infoB.P = prevPositionImage[prevCoord].xyz;
+        infoB.N = prevNormalImage[prevCoord].xyz;
+        return infoB;
+    }
+
     ReservoirPT generateCandidate(GeneralObjectInfo info , inout uint seed)
     {
         ReservoirPT r = (ReservoirPT)0;
@@ -895,12 +903,12 @@ namespace ReSTIRPT
         return r;
     }
 
-    static const uint PT_COMBINE_M_CAP = 60u;
+    static const uint PT_COMBINE_M_CAP = 20u;
     static const float PT_P_HAT_MIN = 1e-3f;
     static const float PT_W_CAP_FACTOR = 10.0f;
     static const float PT_SHIFT_RATIO_MAX = 4.0f;
 
-    ReservoirPT combineWithJacobian(ReservoirPT a , ReservoirPT b , GeneralObjectInfo main , const float3 nP , inout uint seed)
+    ReservoirPT combineWithJacobian(ReservoirPT a , ReservoirPT b , GeneralObjectInfo main , const float3 nP , inout uint seed , const int2 prevCoord)
     {
         ReservoirPT output = b;
         const float candidateW = a.W;
@@ -926,15 +934,49 @@ namespace ReSTIRPT
         const float p_hat_old = targetFunction(b , main , b.nextDir);
         output.nextDir = shiftedDirection(output , main.P);
 
-        const float p_hat = targetFunction(output , main);
-        if(PT_SHIFT_RATIO_MAX > 0.0f && p_hat > PT_P_HAT_MIN && p_hat > PT_SHIFT_RATIO_MAX * p_hat_old) return a;
-        const float weight = clamp(p_hat * output.W * float(output.M), 0.0f , a.W * 2.0f);;
+        const float p_hat_old_T = targetFunction(output , main);
+
+        const float p_hat_new = targetFunction(a , main);
+        const float3 newDir = shiftedDirection(a , main.P);
+        const float3 old_new_direction = a.nextDir;
+        a.nextDir = newDir;
+        const float p_hat_new_T = targetFunction(a , main);
+        a.nextDir = old_new_direction;
+
+#ifdef MOX_MIS_INCLUDED
+
+        GeneralObjectInfo info2 = readPrevBuffer(main , prevCoord);
+
+        const float p_hat_A_x_a = p_hat_new;
+        const float p_hat_B_x_a = targetFunction(a , info2);
+        const float p_hat_B_x_b = targetFunction(output , info2);
+        const float p_hat_A_x_b = p_hat_old_T;
+
+        // the denominator is 0 when no technique could give the sample ( both p_hat are 0 ) : without the guard it is 0 / 0 = NaN
+        const float m_a = float(a.M) * p_hat_A_x_a / max(float(a.M) * p_hat_A_x_a + float(output.M) * p_hat_B_x_a , 1e-20f);
+        const float m_b = float(output.M) * p_hat_B_x_b / max(float(output.M) * p_hat_B_x_b + float(a.M) * p_hat_A_x_b , 1e-20f);
+
+        const float w_c = m_a * p_hat_new_T * a.W;
+        const float w_p = m_b * p_hat_old_T * output.W;
+        ReservoirPT r = (ReservoirPT)0;
+
+        r.update(a , w_c , a.M , rand(seed));
+        r.update(output , w_p , output.M , rand(seed));
+
+        const float p_hat = targetFunction(r , main);
+        r.W = (p_hat > PT_P_HAT_MIN && a.M > 0u) ? r.weightSum / (float(r.M) * p_hat) :    0.0f;
+        if(!isfinite(r.W)) r.W = 0.0f;
+        return r;
+#else
+        if(PT_SHIFT_RATIO_MAX > 0.0f && p_hat_old_T > PT_P_HAT_MIN && p_hat_old_T > PT_SHIFT_RATIO_MAX * p_hat_old) return a;
+        const float weight = clamp(p_hat_old_T * output.W * float(output.M), 0.0f , a.W * 2.0f);;
 
         a.update(output , weight , output.M , rand(seed));
 
         const float p_hat_chosen = targetFunction(a , main);
         a.W = (p_hat_chosen > PT_P_HAT_MIN && a.M > 0u) ? a.weightSum / (float(a.M) * p_hat_chosen) :    0.0f;
         if(PT_W_CAP_FACTOR > 0.0f && candidateW > 0.0f) a.W = min(a.W , PT_W_CAP_FACTOR * candidateW);
+#endif
         return a;
     }
 
@@ -998,7 +1040,7 @@ namespace ReSTIRPT
         
         if(shadow != 1.0f) return c; // since we dont want to check reservoir that is not suitable for us 
         const float3 pP = prevPositionImage[prevCoord].xyz;
-        return combineWithJacobian(c , p ,info , pP , seed);
+        return combineWithJacobian(c , p ,info , pP , seed, prevCoord);
     }
 }
 
@@ -1043,7 +1085,7 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
 
     if(validUV && checkDisocclusion(pixel , prevPixel))
     {
-        pt = ReSTIRPT::temporalReuse(pt , info , prevPixel , load.seed);
+        pt = ReSTIRPT::temporalReuseJacobian(pt , info , prevPixel , load.seed);
     }
 
     float3 totalIndirect = pt.radiance * pt.W *  evalDiffuse(info.albedo, info.N, pt.nextDir, info.metallic);
