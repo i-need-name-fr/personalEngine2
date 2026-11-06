@@ -58,7 +58,7 @@ namespace mox
             inline static constexpr uint32_t GRID_LEVELS = 4;
             inline static constexpr uint32_t F = 2;
 
-            inline static constexpr uint32_t INPUT_COUNT = GRID_LEVELS * F + 3;   // 8 + 3 = 11 ( roughness / metallic come with the specular )
+            inline static constexpr uint32_t INPUT_COUNT = GRID_LEVELS * F + 3 + 5;   // 8 + 3 = 11 ( roughness / metallic come with the specular )
             inline static constexpr uint32_t HIDDEN_COUNT = 64;
             inline static constexpr uint32_t OUTPUT_COUNT = 3;
 

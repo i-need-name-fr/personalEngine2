@@ -191,11 +191,14 @@ bool inFrustum(const float3 P , const float r)
 }
 
 groupshared Payload sPayload;
+groupshared uint totalCount;
 
 [shader("amplification")]
 [numthreads(TASK_GROUP_SIZE , 1 , 1)]
 void main(uint3 groupID : SV_GroupID , uint threadIndex : SV_GroupIndex)
 {
+    if(threadIndex == 0) totalCount = 0;
+    GroupMemoryBarrierWithGroupSync();
     const uint layoutIndex = groupID.y;
     const InstanceData layout = instanceLayoutBuffer[layoutIndex];
 
@@ -235,14 +238,20 @@ void main(uint3 groupID : SV_GroupID , uint threadIndex : SV_GroupIndex)
         }
     }
 
+    GroupMemoryBarrierWithGroupSync();
+
     if(visible)
     {
-        sPayload.meshletID[WavePrefixCountBits(visible)] = meshletID;
+        uint slot;
+        InterlockedAdd(totalCount , 1 , slot);
+        sPayload.meshletID[slot] = meshletID;
     }
     if(threadIndex == 0)
     {
         sPayload.layoutIndex = layoutIndex;
     }
 
-    DispatchMesh(WaveActiveCountBits(visible) , 1 , 1 , sPayload);
+    GroupMemoryBarrierWithGroupSync();
+
+    DispatchMesh(totalCount , 1 , 1 , sPayload);
 }

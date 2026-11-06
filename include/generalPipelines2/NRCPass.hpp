@@ -328,6 +328,7 @@ namespace mox{
         [[nodiscard]] [[gnu::hot]] const bool requestExecution() const noexcept override final{
             auto data = features->getBuffetDataSingular<GeneralFeatures>();
             return data.NRC != 0;
+            // return true;
         }
 
         [[nodiscard]] const ErrorDataOutput<void> postProcessGraphRenderLocations(std::vector<GraphParameterSource> sources) noexcept override final{

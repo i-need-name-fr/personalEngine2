@@ -33,6 +33,15 @@ namespace NRC
         return log(1.0f + exp(x));
     }
 
+    void harmonicN(const float3 N ,inout float h[5])
+    {
+        h[0] = N.x * N.y;
+        h[1] = N.z * N.y;
+        h[2] = N.z * N.z * 3  - 1.0f;
+        h[3] = N.x * N.z;
+        h[4] = N.x * N.x - N.y * N.y;
+
+    }
 
     float3 forwardNRC(const float3 P , const float3 N , out CoopIn x , out CoopHidden h, out CoopHidden z1)
     {
@@ -101,11 +110,13 @@ namespace NRC
         }
 
         const float3 inputN = N * 0.5 + 0.5;
+        float harmonic[5];
+        harmonicN(N , harmonic);
 
         CoopIn input = constructIn(float16_t(hresult.data[0]) , float16_t(hresult.data[1]) , float16_t(hresult.data[2]),
                                     float16_t(hresult.data[3]) , float16_t(hresult.data[4]) , float16_t(hresult.data[5])
                                     ,float16_t(hresult.data[6]) ,float16_t(hresult.data[7]) , float16_t(inputN.x) ,
-                                    float16_t(inputN.y) , float16_t(inputN.z), 0.0f , 0.0f , 0.0f ,0.0f , 0.0f);
+                                    float16_t(inputN.y) , float16_t(inputN.z), float16_t(harmonic[0]) , float16_t(harmonic[1]) , float16_t(harmonic[2]) ,float16_t(harmonic[3]) , float16_t(harmonic[4]));
         // CoopHidden mulAddInHidden(CoopIn input , int inputInterp , [[vk::ext_reference]] uint matrix[1 << 20] , int matrixOffset , int matrixInterp , [[vk::ext_reference]] uint bias[1 << 20] ,
         //  int biasOffset , int biasInterp , int M , int K , int layout , bool transpose , uint stride , [[vk::ext_literal]] int memoryOperand);
         x = input;
