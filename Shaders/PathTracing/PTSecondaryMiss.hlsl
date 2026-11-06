@@ -106,11 +106,14 @@ struct [raypayload] RayPayLoad_secondary_
     float3 throughput : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 accumulatedColor : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 hitPoint : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    float3 normal : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float hitDistance : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint depth : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint seed : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     bool firstBounce : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    bool didHit  : write(caller , closesthit , miss) : read(caller , closesthit , miss);
 };
+
 typedef RayPayLoad_primary_ RayPayLoad;
 typedef RayPayLoad_secondary_ RayPayLoadSecondary;
 
@@ -120,4 +123,11 @@ void main(inout RayPayLoadSecondary load)
     const float3 dir = WorldRayDirection();
     const float3 color = skybox.SampleLevel(samp , dir , 0).xyz;
     load.accumulatedColor += color * load.throughput;
+    if(load.firstBounce)
+    {
+        load.hitPoint = 9990.0f;
+        load.hitDistance = 900.0f;
+        load.normal = -WorldRayDirection();
+        load.didHit = false;
+    }
 }

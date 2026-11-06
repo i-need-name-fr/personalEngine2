@@ -110,11 +110,13 @@ struct [raypayload] RayPayLoad_secondary_
     float3 throughput : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 accumulatedColor : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 hitPoint : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    float3 normal : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float hitDistance : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint depth : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint seed : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     bool firstBounce : write(caller , closesthit , miss) : read(caller , closesthit , miss);
-};  
+    bool didHit  : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+}; 
 
 typedef RayPayLoad_primary_ RayPayLoad;
 typedef RayPayLoad_secondary_ RayPayLoadSecondary;
@@ -781,8 +783,43 @@ RayPayLoadSecondary makeBounce(const uint seed)
 // the sharpness of the weight of the temporal sample by its direction : 0 - no check , the bigger - the closer the two directions must be
 static const float PT_TEMPORAL_DIRECTION_POWER = 8.0f;
 
+float powerHeuristic(const float pdfLight , const float pdfBRDF)
+{
+    const float a = pdfLight * pdfLight;
+    const float b = pdfBRDF * pdfBRDF;
+    return a / (a + b);
+}
+
 namespace ReSTIRPT
 {
+    float3 shiftedDirection(const ReservoirPT r , const float3 P)
+    {
+        return (r.normal.w == MOX_RESTIR_PT_HIT_COMMITTED) ? normalize(r.position - P) : r.nextDir;
+    }
+
+    float targetFunction(const ReservoirPT r , GeneralObjectInfo info , const float3 L)
+    {
+        float3 fcos;
+        if(isSpecularMode(info.roughness , info.metallic))
+        {
+            const float3 F0 = lerp(0.04 , info.albedo , info.metallic);
+            fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
+        }
+        else
+        {
+            fcos = evalDiffuse(info.albedo , info.N , L , info.metallic);
+        }
+        static const float PT_TARGET_MAX_CHANNEL = 1.0f;
+        const float3 v = r.radiance * fcos;
+        return (PT_TARGET_MAX_CHANNEL > 0.5f) ? max(v.x , max(v.y , v.z)) : luminance(v);
+    }
+
+    // the same , the direction is the one from x1 of info to x2 of the sample ( the shift )
+    float targetFunction(const ReservoirPT r , GeneralObjectInfo info)
+    {
+        return targetFunction(r , info , shiftedDirection(r , info.P));
+    }
+
     ReservoirPT generateCandidate(GeneralObjectInfo info , inout uint seed)
     {
         ReservoirPT r = (ReservoirPT)0;
@@ -790,7 +827,9 @@ namespace ReSTIRPT
         float pdf = 0.0f;
         float3 L = 0.0f;
         float3 fcos = 0.0f;
-        
+
+        r.normal.w = MOX_RESTIR_PT_NON_HIT_COMMITTED;
+
         const bool spec = isSpecularMode(info.roughness , info.metallic);
         if(!spec)
         {
@@ -807,13 +846,16 @@ namespace ReSTIRPT
                 fcos = evalDiffuse(info.albedo, info.N , L , info.metallic);
                 r.radiance = bounce.accumulatedColor;
                 r.hD = min(990ul , bounce.hitDistance);
+                r.normal.w = (bounce.didHit ? MOX_RESTIR_PT_HIT_COMMITTED : MOX_RESTIR_PT_NON_HIT_COMMITTED);
+                r.normal.xyz = bounce.normal.xyz;
+                r.position = bounce.hitPoint;
             }
             else
             {
                 r.radiance = 0.0f;
                 r.hD = 990ul;
             }
-        if(pdf <= 0.0f) return r;
+            if(pdf <= 0.0f) return r;
         }
         else
         {
@@ -831,59 +873,132 @@ namespace ReSTIRPT
                 fcos = evalBRDF(info.N , info.V , L , info.roughness , F0);
                 r.radiance = bounce.accumulatedColor;
                 r.hD = min(990ul , bounce.hitDistance);
+                r.normal.w = (bounce.didHit ? MOX_RESTIR_PT_HIT_COMMITTED : MOX_RESTIR_PT_NON_HIT_COMMITTED);
+                r.normal.xyz = bounce.normal.xyz;
+                r.position = bounce.hitPoint;
             }
             else
             {
                 r.radiance = 0.0f;
                 r.hD = 990ul;
             }
-        if(pdf <= 0.0f) return r;
+            if(pdf <= 0.0f) return r;
 
         }
 
         r.nextDir = L;
         r.M = 1ul;
-        const float  p_hat = luminance(r.radiance * fcos);
+        float  p_hat = targetFunction(r , info);
         r.weightSum = p_hat / pdf;
         r.W = 1.0f / pdf;    
 
         return r;
     }
 
-    ReservoirPT temporalReuse(ReservoirPT c , GeneralObjectInfo info, uint2 prevCoord , inout uint seed)
+    static const uint PT_COMBINE_M_CAP = 60u;
+    static const float PT_P_HAT_MIN = 1e-3f;
+    static const float PT_W_CAP_FACTOR = 10.0f;
+    static const float PT_SHIFT_RATIO_MAX = 4.0f;
+
+    ReservoirPT combineWithJacobian(ReservoirPT a , ReservoirPT b , GeneralObjectInfo main , const float3 nP , inout uint seed)
     {
+        ReservoirPT output = b;
+        const float candidateW = a.W;
+
+        float jacobian = 1.0f;
+        // a miss is only a direction : the distance is infinite , nothing changes in the jacobian
+        if(b.normal.w == MOX_RESTIR_PT_HIT_COMMITTED)
+        {
+            const float3 Q = b.position;
+            const float3 Q_normal = b.normal.xyz;
+
+            const float3 dirFromQ = Q - nP;
+            const float distN = length(dirFromQ);
+            const float cosN = abs(dot(normalize(-dirFromQ) , Q_normal));
+            const float3 dirFromMine = Q - main.P;
+            const float distMine = length(dirFromMine);
+            const float cosMine = abs(dot(normalize(-dirFromMine) , Q_normal));
+            jacobian = (cosMine * distN * distN) / max(cosN * distMine * distMine , 1e-20);
+            jacobian = clamp(jacobian , 0.0f , 10.0f);
+        }
+        output.M = min(b.M , PT_COMBINE_M_CAP);
+        output.W *= clamp(jacobian , 0.0f , 10.0f);
+        const float p_hat_old = targetFunction(b , main , b.nextDir);
+        output.nextDir = shiftedDirection(output , main.P);
+
+        const float p_hat = targetFunction(output , main);
+        if(PT_SHIFT_RATIO_MAX > 0.0f && p_hat > PT_P_HAT_MIN && p_hat > PT_SHIFT_RATIO_MAX * p_hat_old) return a;
+        const float weight = clamp(p_hat * output.W * float(output.M), 0.0f , a.W * 2.0f);;
+
+        a.update(output , weight , output.M , rand(seed));
+
+        const float p_hat_chosen = targetFunction(a , main);
+        a.W = (p_hat_chosen > PT_P_HAT_MIN && a.M > 0u) ? a.weightSum / (float(a.M) * p_hat_chosen) :    0.0f;
+        if(PT_W_CAP_FACTOR > 0.0f && candidateW > 0.0f) a.W = min(a.W , PT_W_CAP_FACTOR * candidateW);
+        return a;
+    }
+
+    // the jacobian of moving x2 ( Q ) from the x1 of the neighbour ( nP ) to ours ( P ) : the same formula as in combineWithJacobian
+    float shiftJacobian(const float3 Q , const float3 Q_normal , const float3 nP , const float3 P)
+    {
+        const float3 dirFromQ = Q - nP;
+        const float distN = length(dirFromQ);
+        const float cosN = abs(dot(normalize(-dirFromQ) , Q_normal));
+        const float3 dirFromMine = Q - P;
+        const float distMine = length(dirFromMine);
+        const float cosMine = abs(dot(normalize(-dirFromMine) , Q_normal));
+        const float jacobian = (cosMine * distN * distN) / max(cosN * distMine * distMine , 1e-20);
+        return clamp(jacobian , 0.0f , 10.0f);
+    }
+
+    ReservoirPT temporalReuse(ReservoirPT c , GeneralObjectInfo info , uint2 prevCoord , inout uint seed)
+    {
+        ReservoirPT p = prevReSTIRPTBuffer[bufferIndex(prevCoord)];
+
+        if(p.M == 0u || p.normal.w == MOX_RESTIR_PT_NON_HIT_COMMITTED) return c;
+        if(!(p.W > 0.0f) || isinf(p.W) || any(isnan(p.radiance)) || any(isinf(p.radiance))) return c;
+
+        p.M = min(p.M , PT_COMBINE_M_CAP * max(c.M , 1u));
+
+
         ReservoirPT r = (ReservoirPT)0;
+        {
+            const float p_hat = targetFunction(c , info);
+            r.update(c , p_hat * c.W * float(c.M) , c.M , rand(seed));
+        }
+        {
+            // x2 stays , it is seen from our x1 now : W of the old sample gets the jacobian of this move ( x1 of the old pixel is the position of the last frame )
+            p.W *= shiftJacobian(p.position , p.normal.xyz , prevPositionImage[prevCoord].xyz , info.P);
+            p.nextDir = shiftedDirection(p , info.P);
+            const float p_hat = targetFunction(p , info);
+            r.update(p , p_hat * p.W * float(p.M) , p.M , rand(seed));
+        }
+
+        const float p_hat_chosen = targetFunction(r , info);
+        r.W = (p_hat_chosen > 1e-30f && r.M > 0u) ? r.weightSum / (float(r.M) * p_hat_chosen) : 0.0f;
+        return r;
+    }
+    // the version with the ray of visibility and the jacobian ( combineWithJacobian ) : kept , not called
+    ReservoirPT temporalReuseJacobian(ReservoirPT c , GeneralObjectInfo info, uint2 prevCoord , inout uint seed)
+    {
 
         ReservoirPT p = prevReSTIRPTBuffer[bufferIndex(prevCoord)];
 
-        // an empty or a broken reservoir of the last frame ( M = 0 , W = 0 , NaN ) has nothing to give : the candidate stays as it is
-        if(p.M == 0u || !(p.W > 0.0f) || isinf(p.W) || any(isnan(p.radiance)) || any(isinf(p.radiance))) return c;
-
-        const uint M_CAP = 30u;
-        p.M = min(p.M , M_CAP * max(c.M , 1u));
-
-        {
-            const float3 L = c.nextDir;
-            const float p_hat = luminance(c.radiance * evalDiffuse(info.albedo , info.N , L , info.metallic)) ;
-            const float w = p_hat * c.W * float(c.M);
-            r.update(c , w , c.M , rand(seed));
-        }
-
-        {
-            const float3 L = p.nextDir;
-            const float p_hat = luminance(p.radiance * evalDiffuse(info.albedo , info.N , L , info.metallic)) ;
-            // the direction of the old sample must look where the direction of the new one looks , like the texels of the probes of RC
-            const float directionWeight = pow(max(dot(c.nextDir , p.nextDir) , 0.0f) , PT_TEMPORAL_DIRECTION_POWER);
-            // the history counts as much as its direction fits : the same factor is in the weight and in M ( the sample that looks elsewhere does not give its M to the sum )
-            const uint scaledM = uint(float(p.M) * directionWeight);
-            const float w = p_hat * p.W * float(scaledM);
-            r.update(p , w , scaledM , rand(seed));
-        }        
-
-        const float3 L = r.nextDir;
-        const float p_hat = luminance(r.radiance * evalDiffuse(info.albedo , info.N , L , info.metallic)) ;
-        r.W = (p_hat > 1e-6f && r.M > 0u ) ? r.weightSum / (float(r.M) * p_hat) : 0.0f;
-        return r;
+        // now we want to find out if the prev reservoir is even suitable
+        // we will check it simply to throwing our ray to it
+        if(p.normal.w == MOX_RESTIR_PT_NON_HIT_COMMITTED) return c; // if the prev reservoir doesnt have a radiance , we wont check it 
+        // now we get the direction we will check
+        if(p.M == 0) return c;
+        float3 direction = p.position - info.P;
+        const float epsilon = 0.02f;
+        const float d = length(direction) - epsilon;
+        direction = normalize(direction);
+        
+        const float shadow = calculateShadows(offsetRay(info.P, info.N, generalBuffer.playerPosition) , direction , d);
+        
+        if(shadow != 1.0f) return c; // since we dont want to check reservoir that is not suitable for us 
+        const float3 pP = prevPositionImage[prevCoord].xyz;
+        return combineWithJacobian(c , p ,info , pP , seed);
     }
 }
 
@@ -1085,6 +1200,18 @@ void processPrimaryBounce(inout RayPayLoad load , in float2 barycentrics)
     diffuseImage[pixel] = float4(diffuseOut , diffuseHitDistance);
     specularImage[pixel] = float4(totalSpecular * objectAmbient , specularHitDistance);
     indirectImage[pixel] = float4(totalIndirect , diffuseHitDistance);
+#define PT_DEBUG_W 0
+#if PT_DEBUG_W == 1
+    indirectImage[pixel] = float4(pt.W * 0.05f , pt.W * 0.05f , pt.W * 0.05f , diffuseHitDistance);
+#elif PT_DEBUG_W == 2
+    {
+        const float lum = luminance(totalIndirect);
+        const float shown = lum / (1.0f + lum);
+        indirectImage[pixel] = float4(shown , shown , shown , diffuseHitDistance);
+    }
+#elif PT_DEBUG_W == 3
+    indirectImage[pixel] = float4(float3(float(pt.M) / 12.0f , float(pt.M) / 12.0f , float(pt.M) / 12.0f) , diffuseHitDistance);
+#endif
 
     ReSTIRPTBuffer[bufferIndex(pixel)] = pt;
     ReSTIRGIBuffer[bufferIndex(pixel)] = gi;

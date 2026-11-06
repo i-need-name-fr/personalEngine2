@@ -106,10 +106,12 @@ struct [raypayload] RayPayLoad_secondary_
     float3 throughput : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 accumulatedColor : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 hitPoint : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    float3 normal : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float hitDistance : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint depth : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint seed : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     bool firstBounce : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    bool didHit  : write(caller , closesthit , miss) : read(caller , closesthit , miss);
 };
 
 typedef RayPayLoad_primary_ RayPayLoad;
@@ -799,6 +801,8 @@ void processSecondaryBounce(inout RayPayLoadSecondary load , in float2 barycentr
             load.firstBounce = false;
             load.hitDistance = RayTCurrent();
             load.hitPoint = info.P;
+            load.didHit = true;
+            load.normal = info.N;
         }
 
         // now the chances ( the roulette by the weight of the path ) : the floor keeps the division away from 0

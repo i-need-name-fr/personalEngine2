@@ -405,9 +405,15 @@ struct ReservoirGI{
     float roughness;
 };
 
+#define MOX_RESTIR_PT_HIT_COMMITTED 1.0f
+#define MOX_RESTIR_PT_NON_HIT_COMMITTED 0.0f
+#define MOX_RESTIR_PT_HISTORY_K 0.9f
+
 struct ReservoirPT
 {
 #ifdef __cplusplus
+
+    alignas(16) glm::vec4 normal;
     alignas(16) glm::vec3 position;
     alignas(16) glm::vec3 nextDir;
     alignas(16) glm::vec3 radiance;
@@ -415,6 +421,7 @@ struct ReservoirPT
     uint32_t M;
 #else
 
+    float4 normal;
     float3 position;
     float3 nextDir;
     float3 radiance;
@@ -428,9 +435,11 @@ struct ReservoirPT
         // same guarded form as ReservoirDI::update - no division by a possibly zero weightSum
         if(weightSum > 0.0f && randValue * weightSum < weight){
             position = can.position;
+            const float nW = saturate(dot(can.nextDir , nextDir));
             nextDir = can.nextDir;
-            radiance = can.radiance;
+            radiance = lerp(radiance , can.radiance * nW , 1.0f / float(M));
             hD = can.hD;
+            normal = can.normal;
             // the roughness of the sample point travels with the sample : it tells if the sample can be moved to another pixel
         }
     }
@@ -439,6 +448,7 @@ struct ReservoirPT
     float weightSum;
     float W;
     float hD;
+
 };
 
 

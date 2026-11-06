@@ -901,7 +901,7 @@ namespace ReSTIRGI{
 
         if(features.ReSTIRGI_spatial){
             // the result has to be taken : spatialReuse works on a copy ( it returns the new reservoir ) , without this the call changed nothing
-            res = spatialReuse(res , info , seed);
+            // res = spatialReuse(res , info , seed); LEGACY
         }
         if(features.ReSTIRGI_temporal){
             uint2 size = DispatchRaysDimensions().xy;

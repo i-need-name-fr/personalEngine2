@@ -79,10 +79,12 @@ struct [raypayload] RayPayLoad_secondary_
     float3 throughput : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 accumulatedColor : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float3 hitPoint : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    float3 normal : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     float hitDistance : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint depth : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     uint seed : write(caller , closesthit , miss) : read(caller , closesthit , miss);
     bool firstBounce : write(caller , closesthit , miss) : read(caller , closesthit , miss);
+    bool didHit  : write(caller , closesthit , miss) : read(caller , closesthit , miss);
 };
 
 // the any hit of a hit group of the geometry : the pixels of a leaf under the cutoff of the alpha test do not exist for the ray ( the hit is ignored ) , everything else is
